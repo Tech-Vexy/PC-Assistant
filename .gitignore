@@ -1,0 +1,40 @@
+# Environment variables
+.env
+tokens.json
+manifest-private.pem
+
+# DuckDB store (credentials, tokens, sessions, audit logs)
+data/
+
+# Session / runtime state (legacy files — superseded by the DuckDB store)
+.session-state.json
+screenshot-*.png
+
+# Node modules
+node_modules/
+
+# Logs
+*.log
+tool-audit.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temporary files
+*.tmp
+temp/
+
+# Test outputs
+test_output.txt
+test_new_tools.mjs
+
+# Security audit logs (sensitive data)
+security-audit.log
+tool-audit.log
