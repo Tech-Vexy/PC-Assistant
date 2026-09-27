@@ -12,6 +12,10 @@ import {
 } from './lib/security-extras.js';
 
 import { appendToolAudit, cfg } from './lib/store.js';
+import { getPerformanceMonitor, createLogger } from './lib/monitor.js';
+
+const logger = createLogger('tool-dispatcher');
+const perfMonitor = getPerformanceMonitor();
 
 // Import tool handlers
 import { webSearch } from './tools/search-mcp.js';
@@ -756,21 +760,49 @@ const allHandlers = {
 };
 
 // Main dispatcher function with security checks
+/**
+ * Dispatch tool calls with comprehensive security checks and error handling
+ * Handles unknown tools, rate limiting, argument validation, confirmation gates,
+ * screen verification, and audit logging. All errors are caught and returned safely.
+ * Includes performance monitoring and structured logging.
+ * 
+ * @param {string} name - Tool name to execute
+ * @param {Object} args - Tool arguments
+ * @returns {Promise<Object>} Tool result or error object
+ */
 export async function dispatchTool(name, args) {
+  // No args in metadata: metrics are served over /api/metrics and must not
+  // duplicate sensitive tool arguments (the audit log is the proper record).
+  const timerId = perfMonitor.startTiming(name);
   const entry = {
     timestamp: new Date().toISOString(),
     tool: name,
     arguments: args
   };
 
+  // Validate tool name
+  if (!name || typeof name !== 'string') {
+    const error = 'Invalid tool name: must be a non-empty string';
+    entry.error = error;
+    await writeAuditLog(entry);
+    await logSecurityEvent('INVALID_TOOL_NAME', { tool: name });
+    perfMonitor.stopTiming(timerId, false, new Error(error));
+    logger.error('Invalid tool name', { tool: name });
+    return { error };
+  }
+
   const handler = allHandlers[name];
   if (!handler) {
-    const error = `Unknown tool: ${name}`;
+    const error = `Unknown tool: ${name}. Available tools: ${Object.keys(allHandlers).join(', ')}`;
     entry.error = error;
     await writeAuditLog(entry);
     await logSecurityEvent('UNKNOWN_TOOL_ACCESS', { tool: name, args });
+    perfMonitor.stopTiming(timerId, false, new Error(error));
+    logger.error('Unknown tool accessed', { tool: name, availableTools: Object.keys(allHandlers) });
     return { error };
   }
+
+  logger.debug('Tool dispatch started', { tool: name, args });
 
   // Security checks
   try {
@@ -778,10 +810,12 @@ export async function dispatchTool(name, args) {
     // confirmation gates inside the task, so it is rate-limited but not
     // double-gated by the coarse approval queue).
     if ((requiresConfirmation(name) || name === 'computer_use') && !checkRateLimit(name)) {
-      const error = `Rate limit exceeded for tool: ${name}`;
+      const error = `Rate limit exceeded for tool: ${name}. Please wait before retrying.`;
       entry.error = error;
       await writeAuditLog(entry);
       await logSecurityEvent('RATE_LIMIT_EXCEEDED', { tool: name });
+      perfMonitor.stopTiming(timerId, false, new Error(error));
+      logger.warn('Rate limit exceeded', { tool: name });
       return { error };
     }
 
@@ -792,6 +826,8 @@ export async function dispatchTool(name, args) {
       entry.error = error;
       await writeAuditLog(entry);
       await logSecurityEvent('ARGUMENT_VALIDATION_FAILED', { tool: name, errors: validationErrors });
+      perfMonitor.stopTiming(timerId, false, new Error(error));
+      logger.warn('Argument validation failed', { tool: name, errors: validationErrors });
       return { error };
     }
 
@@ -809,6 +845,8 @@ export async function dispatchTool(name, args) {
           entry.error = error;
           await writeAuditLog(entry);
           await logSecurityEvent('SCREEN_VERIFY_FAILED', { tool: name, reason: screen.reason });
+          perfMonitor.stopTiming(timerId, false, new Error(error));
+          logger.warn('Screen verification failed', { tool: name, reason: screen.reason });
           return { error };
         }
         if (screen.screenshot) entry.screenshot = screen.screenshot;
@@ -825,6 +863,8 @@ export async function dispatchTool(name, args) {
         entry.error = error;
         await writeAuditLog(entry);
         await logSecurityEvent('CONFIRMATION_DENIED', { tool: name });
+        perfMonitor.stopTiming(timerId, false, new Error(error));
+        logger.warn('Tool execution denied', { tool: name, reason: decision.reason });
         return { error };
       }
     }
@@ -832,12 +872,31 @@ export async function dispatchTool(name, args) {
     const result = await handler(args);
     entry.result = result;
     await writeAuditLog(entry);
+    const perf = perfMonitor.stopTiming(timerId, true);
+    logger.info('Tool executed successfully', { tool: name, duration: perf?.duration });
     return result;
   } catch (err) {
-    entry.error = err.message;
+    // Enhanced error handling with stack traces for debugging
+    const errorMessage = err.message || 'Unknown error occurred';
+    const errorDetails = {
+      message: errorMessage,
+      tool: name,
+      timestamp: new Date().toISOString(),
+      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    };
+    
+    entry.error = errorMessage;
+    entry.errorDetails = errorDetails;
     await writeAuditLog(entry);
-    await logSecurityEvent('TOOL_EXECUTION_ERROR', { tool: name, error: err.message });
-    return { error: err.message };
+    await logSecurityEvent('TOOL_EXECUTION_ERROR', { tool: name, error: errorMessage, details: errorDetails });
+    perfMonitor.stopTiming(timerId, false, err);
+    logger.error('Tool execution error', { tool: name, error: errorMessage, stack: errorDetails.stack });
+    
+    return { 
+      error: errorMessage,
+      tool: name,
+      timestamp: errorDetails.timestamp
+    };
   }
 }
 

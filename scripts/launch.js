@@ -18,6 +18,7 @@ import path from 'path';
 import readline from 'readline';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+import { validateConfiguration } from '../lib/config-validator.js';
 
 const execFileAsync = promisify(execFile);
 const __filename = fileURLToPath(import.meta.url);
@@ -210,7 +211,40 @@ async function main() {
   }
   reloadEnv();
 
-  // 2) ffmpeg preflight (warn only — the app still boots for setup)
+  // 2) configuration validation (malformed values only — missing keys are
+  // handled later by the guided /setup loop, which can save them to the store)
+  try {
+    const { initStore, allConfig, closeStore, storeMode } = await import('../lib/store.js');
+    await initStore();
+    let storedConfig = {};
+    if (storeMode() === 'local') {
+      storedConfig = await allConfig();
+      await closeStore();
+    } else {
+      console.warn('⚠️  Store busy — validating .env values only.');
+    }
+    const mergedConfig = { ...storedConfig, ...process.env };
+    const configValidation = validateConfiguration(mergedConfig);
+    for (const w of configValidation.warnings) console.log(`⚠️  ${w}`);
+    for (const { key, defaultValue } of configValidation.defaultsUsed) {
+      console.log(`ℹ️  ${key} not set — using default (${defaultValue}).`);
+    }
+    if (configValidation.invalid.length > 0) {
+      console.error('❌ Configuration values are invalid:');
+      for (const error of configValidation.invalid) {
+        console.error(`   - ${error}`);
+      }
+      console.error('\nPlease fix these at http://localhost:3000/setup or in your .env file.');
+      shutdown(1);
+      return;
+    }
+  } catch (err) {
+    // Validation is a convenience gate, not a hard dependency: if the store
+    // cannot be opened at all, let the normal startup flow report it.
+    console.warn(`⚠️  Skipped configuration validation (${err.message}).`);
+  }
+
+  // 3) ffmpeg preflight (warn only — the app still boots for setup)
   for (const bin of ['ffmpeg', 'ffplay']) {
     try {
       await execFileAsync(bin, ['-version'], { timeout: 10000 });
@@ -219,7 +253,7 @@ async function main() {
     }
   }
 
-  // 3) tool manifest baseline
+  // 4) tool manifest baseline
   try {
     const { buildAllTools } = await import('../tools.js');
     const { signToolManifest } = await import('../lib/security-extras.js');
@@ -229,7 +263,7 @@ async function main() {
     console.warn(`⚠️  Could not sign tool manifest: ${err.message}`);
   }
 
-  // 4) auth server (PORT resolved store-first so /setup changes apply)
+  // 5) auth server (PORT resolved store-first so /setup changes apply)
   let runtimeEnv = await readRuntimeEnv();
   const PORT = Number(runtimeEnv.PORT || 3000) || 3000;
   spawnChild('auth server', 'server.js');
@@ -241,7 +275,7 @@ async function main() {
   }
   console.log(`Auth server up at http://localhost:${PORT}`);
 
-  // 5) guided configuration: loop until keys exist (browser UI does the work)
+  // 6) guided configuration: loop until keys exist (browser UI does the work)
   let status = configStatus(runtimeEnv);
   let browserOpened = false;
   while (status.missing.length > 0) {
@@ -274,7 +308,7 @@ async function main() {
   for (const w of status.warnings || []) console.log(`⚠️  ${w}`);
   console.log(`If Google isn't connected yet: http://localhost:${PORT}/auth`);
 
-  // 6) publish the stored agent if needed
+  // 7) publish the stored agent if needed
   if (!status.hasAgent) {
     await autoPublish(PORT);
     runtimeEnv = await readRuntimeEnv();
@@ -284,7 +318,7 @@ async function main() {
     console.warn('⚠️  Continuing without AGENT_ID — the voice agent needs a stored agent. Run `npm run publish` in another terminal.');
   }
 
-  // 7) voice agent (or wake-word supervisor)
+  // 8) voice agent (or wake-word supervisor)
   if (useWakeword) {
     console.log('Starting wake-word supervisor (say the wake word to talk)…');
     spawnChild('wake word', 'wakeword.js');

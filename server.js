@@ -16,6 +16,10 @@ import {
   appendToolAudit,
   appendSecurityAudit,
 } from './lib/store.js';
+import { getHealthChecker, getMonitoringMetrics, createLogger } from './lib/monitor.js';
+
+const logger = createLogger('server');
+const healthChecker = getHealthChecker();
 
 dotenv.config();
 
@@ -56,9 +60,43 @@ app.get('/api/voice-token', async (req, res) => {
   }
 });
 
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+// Enhanced health check with monitoring
+app.get('/health', async (req, res) => {
+  try {
+    const healthResult = await healthChecker.runChecks();
+    const systemResources = healthChecker.getSystemResources();
+    const monitoringMetrics = getMonitoringMetrics();
+    
+    res.json({
+      status: healthResult.healthy ? 'ok' : 'degraded',
+      timestamp: new Date().toISOString(),
+      health: healthResult,
+      system: systemResources,
+      metrics: {
+        toolExecutions: Object.keys(monitoringMetrics.performance).length,
+        recentErrors: monitoringMetrics.errors.total,
+        uptime: process.uptime()
+      }
+    });
+  } catch (error) {
+    logger.error('Health check failed', { error: error.message });
+    res.status(500).json({ 
+      status: 'error', 
+      timestamp: new Date().toISOString(),
+      error: error.message 
+    });
+  }
+});
+
+// Detailed monitoring metrics endpoint
+app.get('/api/metrics', (req, res) => {
+  try {
+    const metrics = getMonitoringMetrics();
+    res.json(metrics);
+  } catch (error) {
+    logger.error('Metrics collection failed', { error: error.message });
+    res.status(500).json({ error: 'Failed to collect metrics' });
+  }
 });
 
 // Human-in-the-loop confirmation UI for dangerous tools.
@@ -583,23 +621,44 @@ export default app;
 // nothing listens on the network, and API keys never leave this machine.
 const isMain = process.argv[1] && process.argv[1].endsWith('server.js');
 if (isMain) {
-  await initStore(); // opens DuckDB (this process is the single writer), seeds from legacy files
-  const PORT = Number(cfg('PORT', '3000')) || 3000;
-  app.listen(PORT, '127.0.0.1', () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-    console.log(`Configure settings and keys at http://localhost:${PORT}/setup`);
-    console.log(`Approve dangerous tools at http://localhost:${PORT}/api/confirm`);
-    verifyManifestAtStartup();
-  });
-
-  // Shut down pooled MCP stdio servers (spawned child processes) on exit.
-  const shutdown = async () => {
+  (async () => {
     try {
-      const { closeAllMCPClients } = await import('./lib/mcp-client.js');
-      await closeAllMCPClients();
-    } catch { /* noop */ }
-    process.exit(0);
-  };
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+      logger.info('Server starting');
+      await initStore(); // opens DuckDB (this process is the single writer), seeds from legacy files
+      const PORT = Number(cfg('PORT', '3000')) || 3000;
+      
+      app.listen(PORT, '127.0.0.1', () => {
+        logger.info('Server started successfully', { 
+          port: PORT, 
+          endpoints: {
+            health: `http://localhost:${PORT}/health`,
+            setup: `http://localhost:${PORT}/setup`,
+            confirm: `http://localhost:${PORT}/api/confirm`,
+            metrics: `http://localhost:${PORT}/api/metrics`
+          }
+        });
+        console.log(`Server running on http://localhost:${PORT}`);
+        console.log(`Configure settings and keys at http://localhost:${PORT}/setup`);
+        console.log(`Approve dangerous tools at http://localhost:${PORT}/api/confirm`);
+        console.log(`View metrics at http://localhost:${PORT}/api/metrics`);
+        verifyManifestAtStartup();
+      });
+
+      // Shut down pooled MCP stdio servers (spawned child processes) on exit.
+      const shutdown = async () => {
+        logger.info('Server shutting down');
+        try {
+          const { closeAllMCPClients } = await import('./lib/mcp-client.js');
+          await closeAllMCPClients();
+        } catch { /* noop */ }
+        process.exit(0);
+      };
+      process.on('SIGINT', shutdown);
+      process.on('SIGTERM', shutdown);
+    } catch (error) {
+      logger.fatal('Server startup failed', { error: error.message, stack: error.stack });
+      console.error('Failed to start server:', error);
+      process.exit(1);
+    }
+  })();
 }

@@ -6,8 +6,10 @@ import path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { resolveSafePath } from '../lib/fs-safety.js';
+import { createLogger } from '../lib/monitor.js';
 
 const execFileAsync = promisify(execFile);
+const logger = createLogger('file-manager');
 
 const EXT_CATEGORIES = {
   Images: ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg', '.heic', '.tiff'],
@@ -32,82 +34,135 @@ function categoryFor(ext) {
 export async function organizeFolder(args) {
   const { folderPath, dryRun = false } = args;
   const dir = resolveSafePath(folderPath);
-  const entries = await fs.readdir(dir, { withFileTypes: true });
-  const moves = [];
+  const startTime = Date.now();
+  
+  try {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    const moves = [];
 
-  for (const entry of entries) {
-    if (entry.isDirectory()) continue;
-    const ext = path.extname(entry.name);
-    const category = categoryFor(ext);
-    const destDir = path.join(dir, category);
-    const src = path.join(dir, entry.name);
-    const dest = path.join(destDir, entry.name);
-    moves.push({ from: src, to: dest, category });
-  }
-
-  if (!dryRun) {
-    const categories = [...new Set(moves.map((m) => m.category))];
-    for (const cat of categories) {
-      await fs.mkdir(path.join(dir, cat), { recursive: true });
+    // Categorize files in a single pass
+    for (const entry of entries) {
+      if (entry.isDirectory()) continue;
+      const ext = path.extname(entry.name);
+      const category = categoryFor(ext);
+      const destDir = path.join(dir, category);
+      const src = path.join(dir, entry.name);
+      const dest = path.join(destDir, entry.name);
+      moves.push({ from: src, to: dest, category });
     }
-    for (const m of moves) {
-      try {
-        await fs.rename(m.from, m.to);
-      } catch (err) {
-        m.error = err.message;
+
+    if (!dryRun) {
+      // Create all category directories upfront (parallel for better performance)
+      const categories = [...new Set(moves.map((m) => m.category))];
+      await Promise.all(categories.map(cat => 
+        fs.mkdir(path.join(dir, cat), { recursive: true }).catch(err => {
+          logger.warn('Failed to create category directory', { category: cat, error: err.message });
+        })
+      ));
+
+      // Process file moves in batches for better performance without overwhelming the system
+      const BATCH_SIZE = 10;
+      for (let i = 0; i < moves.length; i += BATCH_SIZE) {
+        const batch = moves.slice(i, i + BATCH_SIZE);
+        await Promise.all(batch.map(m => 
+          fs.rename(m.from, m.to).catch(err => {
+            m.error = err.message;
+            logger.warn('Failed to move file', { from: m.from, to: m.to, error: err.message });
+          })
+        ));
       }
     }
-  }
 
-  return {
-    success: true,
-    dryRun,
-    folder: dir,
-    moved: moves.filter((m) => !m.error).length,
-    failed: moves.filter((m) => m.error).length,
-    details: moves,
-  };
+    const duration = Date.now() - startTime;
+    logger.info('Folder organization completed', { 
+      folder: dir, 
+      totalFiles: moves.length, 
+      moved: moves.filter(m => !m.error).length,
+      failed: moves.filter(m => m.error).length,
+      duration 
+    });
+
+    return {
+      success: true,
+      dryRun,
+      folder: dir,
+      moved: moves.filter((m) => !m.error).length,
+      failed: moves.filter((m) => m.error).length,
+      details: moves,
+      duration: `${duration}ms`
+    };
+  } catch (error) {
+    logger.error('Folder organization failed', { folder: dir, error: error.message });
+    throw error;
+  }
 }
 // 2. Rename files in a folder using a template (supports {name}, {ext}, {index}, {date}).
 export async function renameFiles(args) {
   const { folderPath, pattern, template, dryRun = false } = args;
   const dir = resolveSafePath(folderPath);
-  const entries = (await fs.readdir(dir, { withFileTypes: true })).filter((e) => e.isFile());
-  const re = pattern ? new RegExp(pattern, 'i') : null;
-  const matched = re ? entries.filter((e) => re.test(e.name)) : entries;
+  const startTime = Date.now();
+  
+  try {
+    const entries = (await fs.readdir(dir, { withFileTypes: true })).filter((e) => e.isFile());
+    const re = pattern ? new RegExp(pattern, 'i') : null;
+    const matched = re ? entries.filter((e) => re.test(e.name)) : entries;
 
-  const results = [];
-  let index = 1;
-  const dateStr = new Date().toISOString().slice(0, 10);
-  for (const entry of matched) {
-    const ext = path.extname(entry.name);
-    const base = path.basename(entry.name, ext);
-    const newName = (template || '{name}')
-      .replace('{name}', base)
-      .replace('{ext}', ext.replace('.', ''))
-      .replace('{index}', String(index).padStart(3, '0'))
-      .replace('{date}', dateStr) + (template && template.includes('{ext}') ? '' : ext);
-    const from = path.join(dir, entry.name);
-    const to = path.join(dir, newName);
-    results.push({ from, to });
-    if (!dryRun && from !== to) {
-      try {
-        await fs.rename(from, to);
-      } catch (err) {
-        results[results.length - 1].error = err.message;
+    const results = [];
+    let index = 1;
+    const dateStr = new Date().toISOString().slice(0, 10);
+    
+    // Calculate all new names first (validation pass)
+    for (const entry of matched) {
+      const ext = path.extname(entry.name);
+      const base = path.basename(entry.name, ext);
+      const newName = (template || '{name}')
+        .replace('{name}', base)
+        .replace('{ext}', ext.replace('.', ''))
+        .replace('{index}', String(index).padStart(3, '0'))
+        .replace('{date}', dateStr) + (template && template.includes('{ext}') ? '' : ext);
+      const from = path.join(dir, entry.name);
+      const to = path.join(dir, newName);
+      results.push({ from, to });
+      index++;
+    }
+
+    if (!dryRun) {
+      // Process renames in batches for better performance
+      const BATCH_SIZE = 20;
+      for (let i = 0; i < results.length; i += BATCH_SIZE) {
+        const batch = results.slice(i, i + BATCH_SIZE);
+        await Promise.all(batch.map(r => {
+          if (r.from === r.to) return Promise.resolve(); // Skip no-op renames
+          return fs.rename(r.from, r.to).catch(err => {
+            r.error = err.message;
+            logger.warn('Failed to rename file', { from: r.from, to: r.to, error: err.message });
+          });
+        }));
       }
     }
-    index++;
-  }
 
-  return {
-    success: true,
-    dryRun,
-    folder: dir,
-    renamed: results.filter((r) => !r.error).length,
-    failed: results.filter((r) => r.error).length,
-    details: results,
-  };
+    const duration = Date.now() - startTime;
+    logger.info('File renaming completed', { 
+      folder: dir, 
+      totalFiles: results.length, 
+      renamed: results.filter(r => !r.error && r.from !== r.to).length,
+      failed: results.filter(r => r.error).length,
+      duration 
+    });
+
+    return {
+      success: true,
+      dryRun,
+      folder: dir,
+      renamed: results.filter((r) => !r.error && r.from !== r.to).length,
+      failed: results.filter((r) => r.error).length,
+      details: results,
+      duration: `${duration}ms`
+    };
+  } catch (error) {
+    logger.error('File renaming failed', { folder: dir, error: error.message });
+    throw error;
+  }
 }
 // 3. Find files by name pattern and/or text content under a folder (recursive, depth-limited).
 export async function findFiles(args) {
