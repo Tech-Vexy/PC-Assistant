@@ -299,7 +299,7 @@ class VoiceAgent {
       try {
         const token = await this._fetchToken();
         const wsUrl = `wss://agents.assemblyai.com/v1/ws?token=${token}`;
-        console.log('Connecting to AssemblyAI…');
+        logEvent('··', colors.gray('connecting to AssemblyAI…'), undefined, {});
         this.ws = new WebSocket(wsUrl);
       } catch (err) {
         fail(err);
@@ -307,7 +307,7 @@ class VoiceAgent {
       }
 
       this.ws.on('open', () => {
-        console.log('WebSocket connected to AssemblyAI');
+        logEvent('··', colors.gray('connected'), undefined, {});
         eventEmitter.emitState('connected', { sessionId: this.sessionId });
         // NOTE: reconnectAttempts is NOT reset here — a socket can open and
         // then be immediately rejected (session.error → close), and resetting
@@ -382,7 +382,7 @@ class VoiceAgent {
         type: 'session.update',
         session: { agent_id: agentId },
       });
-      console.log(`Session bound to stored agent ${agentId}`);
+      logEvent('··', colors.gray(`agent ${agentId.slice(0, 12)}…`), undefined, {});
       return;
     }
 
@@ -485,7 +485,10 @@ class VoiceAgent {
           break;
 
         case 'session.updated':
-          console.log('Session updated');
+          // Routine confirmation — invisible unless debugging.
+          if (process.env.DEBUG_WS) {
+            logEvent('·', colors.gray('session updated'), undefined, {});
+          }
           break;
 
         case 'reply.started':
@@ -504,8 +507,12 @@ class VoiceAgent {
         case 'transcript.agent.delta': {
           const delta = message.text_delta || message.delta || message.text || '';
           if (delta) {
-            process.stdout.write(delta);
+            // The full transcript arrives in 'transcript.agent' moments later —
+            // echoing deltas to stdout duplicates it. Stream them to monitors only.
             eventEmitter.emitTranscript('agent', delta, true);
+            if (process.env.DEBUG_WS) {
+              process.stdout.write(delta);
+            }
           }
           break;
         }
@@ -659,7 +666,7 @@ class VoiceAgent {
     const isWindows = process.platform === 'win32';
     let device = process.env.AUDIO_DEVICE || (isWindows ? await resolveWindowsAudioDevice() : ':default');
     if (!device) device = 'default'; // last resort: will fail loudly in ffmpeg stderr
-    console.log(`Starting audio capture (device: ${device})`);
+    logEvent('🎤', colors.gray(`listening (${device})`), undefined, {});
     const ffmpegArgs = isWindows
       ? ['-f', 'dshow', '-i', `audio=${device}`, '-ar', String(AUDIO_SAMPLE_RATE), '-ac', '1', '-f', 's16le', '-']
       : process.platform === 'darwin'

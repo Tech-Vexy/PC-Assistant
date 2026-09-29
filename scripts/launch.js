@@ -19,6 +19,7 @@ import readline from 'readline';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { validateConfiguration } from '../lib/config-validator.js';
+import { colors } from '../lib/pretty.js';
 
 const execFileAsync = promisify(execFile);
 const __filename = fileURLToPath(import.meta.url);
@@ -227,9 +228,11 @@ async function main() {
     }
     const mergedConfig = { ...storedConfig, ...process.env };
     const configValidation = validateConfiguration(mergedConfig);
-    for (const w of configValidation.warnings) console.log(`⚠️  ${w}`);
-    for (const { key, defaultValue } of configValidation.defaultsUsed) {
-      console.log(`ℹ️  ${key} not set — using default (${defaultValue}).`);
+    for (const w of new Set(configValidation.warnings)) console.log(`⚠️  ${w}`);
+    // One compact line instead of a wall of per-key default notices.
+    const defaultedKeys = configValidation.defaultsUsed.map((d) => d.key);
+    if (defaultedKeys.length > 0) {
+      console.log(colors.gray(`ℹ️  ${defaultedKeys.length} optional keys using defaults (${defaultedKeys.join(', ')})`));
     }
     if (configValidation.invalid.length > 0) {
       console.error('❌ Configuration values are invalid:');
