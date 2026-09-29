@@ -15,6 +15,7 @@ const APP_ALIASES = {
   notepad: 'notepad',
   calc: 'calc',
   calculator: 'calc',
+  camera: 'microsoft.windows.camera:',
   terminal: 'wt',
   powershell: 'powershell',
   explorer: 'explorer',
@@ -24,7 +25,11 @@ const APP_ALIASES = {
   firefox: 'firefox',
   settings: 'ms-settings:',
   taskmgr: 'taskmgr',
-  'task manager': 'taskmgr'
+  'task manager': 'taskmgr',
+  paint: 'mspaint',
+  photos: 'ms-photos:',
+  store: 'ms-windows-store:',
+  'microsoft store': 'ms-windows-store:'
 };
 
 // 1. Application Launcher
@@ -34,8 +39,9 @@ export async function openApplication(args) {
     throw new Error('appName must be a non-empty string');
   }
 
-  const cleanName = appName.trim().toLowerCase();
-  const target = APP_ALIASES[cleanName] || appName.trim();
+  const rawLower = appName.trim().toLowerCase();
+  const cleanName = rawLower.replace(/^the\s+/, '').replace(/\s+app$/, '').trim();
+  const target = APP_ALIASES[cleanName] || APP_ALIASES[rawLower] || appName.trim();
 
   // Validate to prevent injection
   if (!/^[a-zA-Z0-9_.:\- ]+$/.test(target)) {
@@ -86,8 +92,18 @@ export async function manageWindows(args) {
           $proc = Get-Process | Where-Object { $_.MainWindowTitle -like "*$t*" -or $_.ProcessName -like "*$t*" } | Select-Object -First 1;
           if ($proc) {
             $wscript = New-Object -ComObject Wscript.Shell;
-            $wscript.AppActivate($proc.Id);
-            Write-Output "OK"
+            $activated = $wscript.AppActivate($proc.Id);
+            if (-not $activated -and $proc.MainWindowTitle) {
+              $activated = $wscript.AppActivate($proc.MainWindowTitle);
+            }
+            if (-not $activated) {
+              $activated = $wscript.AppActivate($t);
+            }
+            if ($activated) {
+              Write-Output "OK"
+            } else {
+              Write-Output "ACTIVATE_FAILED"
+            }
           } else {
             Write-Output "NOT_FOUND"
           }
@@ -96,7 +112,60 @@ export async function manageWindows(args) {
         if (stdout.includes('NOT_FOUND')) {
           return { success: false, message: `Could not find an active window matching "${target}"` };
         }
+        if (stdout.includes('ACTIVATE_FAILED')) {
+          return { success: false, message: `Found window or process matching "${target}", but could not bring it to the foreground` };
+        }
         return { success: true, message: `Switched to "${target}" window` };
+      }
+
+      if (act === 'close' && target) {
+        const tLower = target.toLowerCase();
+        const PROTECTED = ['antigravity', 'code', 'node', 'powershell', 'pwsh', 'cmd', 'explorer', 'dwm', 'csrss', 'lsass', 'services'];
+        if (PROTECTED.some((p) => tLower.includes(p))) {
+          return { success: false, message: `Cannot close protected application or system process matching "${target}"` };
+        }
+        const ps = `
+          $t = '${target.replace(/'/g, "''")}';
+          $procs = Get-Process | Where-Object { $_.MainWindowTitle -like "*$t*" -or $_.ProcessName -like "*$t*" };
+          if ($procs) {
+            $closedCount = 0;
+            foreach ($p in $procs) {
+              $closed = $p.CloseMainWindow();
+              if (-not $closed) {
+                Stop-Process -Id $p.Id -Force;
+              }
+              $closedCount++;
+            }
+            Write-Output "OK:$closedCount"
+          } else {
+            Write-Output "NOT_FOUND"
+          }
+        `;
+        const { stdout } = await execFileAsync('powershell', ['-NoProfile', '-Command', ps], { timeout: 10000 });
+        if (stdout.includes('NOT_FOUND')) {
+          return { success: false, message: `Could not find an active window or process matching "${target}" to close` };
+        }
+        return { success: true, message: `Closed application window matching "${target}"` };
+      }
+    }
+
+    if (act === 'close' && target) {
+      const tLower = target.toLowerCase();
+      const PROTECTED = ['antigravity', 'code', 'node', 'bash', 'zsh', 'terminal'];
+      if (PROTECTED.some((p) => tLower.includes(p))) {
+        return { success: false, message: `Cannot close protected application matching "${target}"` };
+      }
+      if (process.platform === 'darwin') {
+        const script = `tell application "${target.replace(/"/g, '\\"')}" to quit`;
+        await execFileAsync('osascript', ['-e', script], { timeout: 10000 });
+        return { success: true, message: `Closed application "${target}"` };
+      }
+      try {
+        await execFileAsync('wmctrl', ['-c', target], { timeout: 5000 });
+        return { success: true, message: `Closed window matching "${target}"` };
+      } catch {
+        await execFileAsync('pkill', ['-f', target], { timeout: 5000 });
+        return { success: true, message: `Closed process matching "${target}"` };
       }
     }
 
@@ -107,6 +176,12 @@ export async function manageWindows(args) {
       return { success: true, message: 'Toggled desktop / minimized windows' };
     }
 
+    if (act === 'restore_all') {
+      await keyboard.pressKey(Key.LeftWin, Key.D);
+      await keyboard.releaseKey(Key.LeftWin, Key.D);
+      return { success: true, message: 'Toggled desktop / restored windows' };
+    }
+
     throw new Error(`Unsupported window action: ${action}`);
   } catch (error) {
     throw new Error(`Window management failed: ${error.message}`);
@@ -114,6 +189,89 @@ export async function manageWindows(args) {
 }
 
 // 3. Media & Volume Control
+
+// Absolute mute control via Windows Core Audio (IAudioEndpointVolume).
+// The AudioMute media key is a blind TOGGLE: sending it for "unmute" without
+// knowing current state mutes the machine half the time. Reading and SETTING
+// state over COM makes each action do exactly what it says. The script is
+// dependency-free PowerShell (Add-Type inline C#), so no extra npm dep.
+const PS_MUTE_SCRIPT = [
+  "$ErrorActionPreference = 'Stop'",
+  'Add-Type -TypeDefinition @"',
+  'using System;',
+  'using System.Runtime.InteropServices;',
+  '[Guid("5CDF2C82-841E-4546-9722-0CF74078229A"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]',
+  'interface IAudioEndpointVolume {',
+  '  int RegisterControlChangeNotify(IntPtr n);',
+  '  int UnregisterControlChangeNotify(IntPtr n);',
+  '  int GetChannelCount(out uint c);',
+  '  int SetMasterVolumeLevel(float l, Guid e);',
+  '  int SetMasterVolumeLevelScalar(float l, Guid e);',
+  '  int GetMasterVolumeLevel(out float l);',
+  '  int GetMasterVolumeLevelScalar(out float l);',
+  '  int SetChannelVolumeLevel(uint ch, float l, Guid e);',
+  '  int SetChannelVolumeLevelScalar(uint ch, float l, Guid e);',
+  '  int GetChannelVolumeLevel(uint ch, out float l);',
+  '  int GetChannelVolumeLevelScalar(uint ch, out float l);',
+  '  int SetMute(bool m, Guid e);',
+  '  int GetMute(out bool m);',
+  '}',
+  '[Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]',
+  'interface IMMDevice { int Activate(ref Guid iid, int ctx, IntPtr p, [MarshalAs(UnmanagedType.IUnknown)] out object o); }',
+  '[Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]',
+  'interface IMMDeviceEnumerator {',
+  '  int EnumAudioEndpoints(int f, int m, IntPtr d);',
+  '  int GetDefaultAudioEndpoint(int f, int r, out IMMDevice d);',
+  '}',
+  '[ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]',
+  'class MMDeviceEnumeratorCom { }',
+  'public static class AudioMute {',
+  '  static IAudioEndpointVolume Endpoint() {',
+  '    var en = (IMMDeviceEnumerator)(object)new MMDeviceEnumeratorCom();',
+  '    IMMDevice dev; en.GetDefaultAudioEndpoint(0, 1, out dev);',
+  '    var iid = typeof(IAudioEndpointVolume).GUID;',
+  '    object o; dev.Activate(ref iid, 1, IntPtr.Zero, out o);',
+  '    return (IAudioEndpointVolume)o;',
+  '  }',
+  '  public static void Set(bool mute) { Endpoint().SetMute(mute, Guid.Empty); }',
+  '  public static bool Get() { bool m; Endpoint().GetMute(out m); return m; }',
+  '}',
+  '"@',
+].join('\n');
+
+async function readMuteState() {
+  const { stdout } = await execFileAsync(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-Command', `${PS_MUTE_SCRIPT}\n[AudioMute]::Get()`],
+    { timeout: 10000 }
+  );
+  return String(stdout).trim().toLowerCase() === 'true';
+}
+
+async function writeMuteState(target) {
+  await execFileAsync(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-Command', `${PS_MUTE_SCRIPT}\n[AudioMute]::Set($${target ? 'true' : 'false'})`],
+    { timeout: 10000 }
+  );
+}
+
+/**
+ * Set (or flip) the system mute state. Returns a result object on success,
+ * or null when absolute control is unavailable (caller falls back to the
+ * toggle media key).
+ */
+async function setMuteState(target /* true | false | null = flip */) {
+  try {
+    let state = target;
+    if (state === null) state = !(await readMuteState());
+    await writeMuteState(state);
+    return { success: true, message: state ? 'Audio muted' : 'Audio unmuted' };
+  } catch {
+    return null;
+  }
+}
+
 export async function mediaControl(args) {
   const { action, count = 1 } = args;
   const act = String(action).toLowerCase();
@@ -137,10 +295,18 @@ export async function mediaControl(args) {
 
       case 'mute':
       case 'unmute':
-      case 'toggle_mute':
+      case 'toggle_mute': {
+        // Prefer absolute state over the toggle key so "unmute" can never mute.
+        const target = act === 'mute' ? true : act === 'unmute' ? false : null;
+        if (process.platform === 'win32') {
+          const abs = await setMuteState(target);
+          if (abs) return abs;
+        }
+        // Fallback: toggle key (state unknown — reported honestly).
         await keyboard.pressKey(Key.AudioMute);
         await keyboard.releaseKey(Key.AudioMute);
-        return { success: true, message: 'Toggled audio mute' };
+        return { success: true, message: 'Toggled audio mute (toggle key — absolute state unavailable)' };
+      }
 
       case 'play_pause':
       case 'play':

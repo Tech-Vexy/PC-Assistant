@@ -11,11 +11,20 @@ import {
   requestApproval,
 } from './lib/security-extras.js';
 
-import { appendToolAudit, cfg } from './lib/store.js';
+import { appendToolAudit, cfg, undoRecord, undoList, undoMarkDone } from './lib/store.js';
 import { getPerformanceMonitor, createLogger } from './lib/monitor.js';
+import { captureBefore, captureAfter, applyRecord } from './lib/undo.js';
 
 const logger = createLogger('tool-dispatcher');
 const perfMonitor = getPerformanceMonitor();
+
+// Undo/transaction journaling (vision item #2). Workflow/plan runners wrap
+// their nested dispatches with setNestedUndoContext so journal rows carry the
+// owning plan/workflow identity and "undo the whole plan" can find them.
+let nestedUndoContext = null;
+export function setNestedUndoContext(ctx) {
+  nestedUndoContext = ctx;
+}
 
 // Import tool handlers
 import { webSearch } from './tools/search-mcp.js';
@@ -161,10 +170,14 @@ export const toolDefinitions = [
   },
   {
     name: 'list_processes',
-    description: sanitizeToolDescription('List running processes'),
+    description: sanitizeToolDescription('List running processes (optionally filtered by name)'),
     parameters: {
       type: 'object',
       properties: {
+        name: {
+          type: 'string',
+          description: 'Filter processes by name or substring (e.g. "calculator", "chrome")'
+        },
         sortBy: {
           type: 'string',
           description: 'Sort by field (cpu, mem, pid, name)',
@@ -292,18 +305,18 @@ export const toolDefinitions = [
   },
   {
     name: 'manage_windows',
-    description: sanitizeToolDescription('Manage desktop windows: minimize all windows, restore windows, or switch to an open window by name'),
+    description: sanitizeToolDescription('Manage desktop windows: minimize all windows, restore windows, switch to an open window by name, or close an application window by name'),
     parameters: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
-          description: 'Window action to perform: "minimize_all", "restore_all", or "switch_to"',
-          enum: ['minimize_all', 'restore_all', 'switch_to']
+          description: 'Window action to perform: "minimize_all", "restore_all", "switch_to", or "close"',
+          enum: ['minimize_all', 'restore_all', 'switch_to', 'close']
         },
         target: {
           type: 'string',
-          description: 'Application title or process name to switch to (required if action is "switch_to")'
+          description: 'Application title or process name to switch to or close (required if action is "switch_to" or "close")'
         }
       },
       required: ['action']
@@ -694,11 +707,48 @@ export const toolDefinitions = [
       },
       required: ['agentId', 'text']
     }
+  },
+  {
+    name: 'undo_last',
+    description: sanitizeToolDescription('Reverse the most recent undoable action the agent took (file moves/renames, created files, memory/workflow changes). Shell commands and computer-use actions are journaled but only reversible by a human.'),
+    parameters: { type: 'object', properties: {}, required: [] }
+  },
+  {
+    name: 'undo_session',
+    description: sanitizeToolDescription('Reverse every automatically-reversible action from a voice-agent session, newest first. Non-reversible actions are skipped and listed.'),
+    parameters: {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string', description: 'Session ID (defaults to the current agent session)' },
+        limit: { type: 'number', description: 'Max actions to reverse (default 50, cap 200)', default: 50 }
+      },
+      required: []
+    }
+  },
+  {
+    name: 'list_undo',
+    description: sanitizeToolDescription('List journaled actions with their undo status and reversibility (read-only).'),
+    parameters: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Max records (default 20, cap 100)', default: 20 },
+        pendingOnly: { type: 'boolean', description: 'Only not-yet-undone actions (default true)', default: true },
+        sessionId: { type: 'string', description: 'Filter by session ID' }
+      },
+      required: []
+    }
   }
 ];
 
 // Tool handler mapping
 const SCREEN_VERIFY_TOOLS = ['move_mouse', 'click_mouse', 'type_text', 'press_keys'];
+// Mutating tools journaled for undo. Manual-reversibility tools (run_command,
+// terminal_*, computer_use, kill_process) get before-state records only.
+const UNDO_JOURNAL_TOOLS = new Set([
+  'file_organize', 'file_rename', 'file_convert',
+  'remember', 'forget', 'save_workflow', 'delete_workflow',
+  'run_command', 'terminal_execute', 'computer_use', 'kill_process',
+]);
 const allHandlers = {
   web_search: webSearch,
   search_emails: async () => ({
@@ -738,7 +788,14 @@ const allHandlers = {
   list_workflows: async (args) => listWorkflows(args),
   delete_workflow: deleteWorkflow,
   // Injected dispatcher avoids a tools.js <-> memory.js import cycle.
-  run_workflow: (args) => runWorkflow(args, dispatchTool),
+  run_workflow: async (args) => {
+    setNestedUndoContext({ workflow: args?.name });
+    try {
+      return await runWorkflow(args, dispatchTool);
+    } finally {
+      setNestedUndoContext(null);
+    }
+  },
   terminal_execute: terminalExecute,
   terminal_start: terminalStart,
   terminal_read: terminalRead,
@@ -749,7 +806,18 @@ const allHandlers = {
   list_plans: async (args) => listPlans(args),
   cancel_plan: cancelPlan,
   // Injected dispatcher avoids a tools.js <-> plan.js import cycle.
-  execute_plan: (args) => executePlan(args, dispatchTool),
+  execute_plan: async (args) => {
+    setNestedUndoContext({ planId: args?.planId });
+    try {
+      return await executePlan(args, dispatchTool);
+    } finally {
+      setNestedUndoContext(null);
+    }
+  },
+
+  undo_last: undoLast,
+  undo_session: undoSession,
+  list_undo: listUndo,
   // Injected dispatcher avoids a tools.js <-> agents.js import cycle.
   // Sub-agent depth: voice-dispatch roots at -1 so first spawn is depth 0.
   spawn_agent: (args) => spawnAgent(args, dispatchTool, { parentDepth: -1 }),
@@ -824,8 +892,10 @@ export async function dispatchTool(name, args) {
     if (validationErrors.length > 0) {
       const error = `Argument validation failed: ${validationErrors.join(', ')}`;
       entry.error = error;
-      await writeAuditLog(entry);
-      await logSecurityEvent('ARGUMENT_VALIDATION_FAILED', { tool: name, errors: validationErrors });
+      Promise.allSettled([
+        writeAuditLog(entry),
+        logSecurityEvent('ARGUMENT_VALIDATION_FAILED', { tool: name, errors: validationErrors })
+      ]);
       perfMonitor.stopTiming(timerId, false, new Error(error));
       logger.warn('Argument validation failed', { tool: name, errors: validationErrors });
       return { error };
@@ -843,8 +913,10 @@ export async function dispatchTool(name, args) {
         if (!screen.ok) {
           const error = `Screen verification failed: ${screen.reason}`;
           entry.error = error;
-          await writeAuditLog(entry);
-          await logSecurityEvent('SCREEN_VERIFY_FAILED', { tool: name, reason: screen.reason });
+          Promise.allSettled([
+            writeAuditLog(entry),
+            logSecurityEvent('SCREEN_VERIFY_FAILED', { tool: name, reason: screen.reason })
+          ]);
           perfMonitor.stopTiming(timerId, false, new Error(error));
           logger.warn('Screen verification failed', { tool: name, reason: screen.reason });
           return { error };
@@ -853,25 +925,57 @@ export async function dispatchTool(name, args) {
       }
 
       // 2) Human approval (auto-approves iff AUTO_APPROVE=true)
-      console.log(`⚠️  Dangerous tool requested: ${name} ${JSON.stringify(args)}`);
-      console.log(`   Approve at http://localhost:${cfg('PORT', '3000')}/api/confirm (or set AUTO_APPROVE=true for dev)`);
-      playEarcon('attention');
+      const isAuto = cfg('AUTO_APPROVE', 'false').toLowerCase() === 'true';
+      if (!isAuto) {
+        console.log(`⚠️  Dangerous tool requested: ${name} ${JSON.stringify(args)}`);
+        console.log(`   Approve at http://localhost:${cfg('PORT', '3000')}/api/confirm (or set AUTO_APPROVE=true for dev)`);
+        playEarcon('attention');
+      }
       const decision = await requestApproval(name, args);
+      if (decision.auto || isAuto) {
+        console.log(`⚡ Auto-approved dangerous tool: ${name}`);
+      }
       entry.approval = decision;
       if (!decision.approved) {
         const error = `Execution denied: ${decision.reason || 'not approved'}`;
         entry.error = error;
-        await writeAuditLog(entry);
-        await logSecurityEvent('CONFIRMATION_DENIED', { tool: name });
+        Promise.allSettled([
+          writeAuditLog(entry),
+          logSecurityEvent('CONFIRMATION_DENIED', { tool: name })
+        ]);
         perfMonitor.stopTiming(timerId, false, new Error(error));
         logger.warn('Tool execution denied', { tool: name, reason: decision.reason });
         return { error };
       }
     }
 
+    // Undo journaling: capture pre-state, execute, journal the reversal.
+    // Journaling must never break tool execution or change the result.
+    let before = null;
+    const journalable = UNDO_JOURNAL_TOOLS.has(name);
+    if (journalable) {
+      try { before = await captureBefore(name, args); } catch { before = null; }
+    }
     const result = await handler(args);
+    if (journalable) {
+      try {
+        const cap = await captureAfter(name, args, result, before);
+        if (cap) {
+          await undoRecord({
+            tool: name,
+            args,
+            sessionId: process.env.AGENT_SESSION_ID || nestedUndoContext?.sessionId || null,
+            planId: nestedUndoContext?.planId || null,
+            agentId: nestedUndoContext?.agentId || null,
+            ...cap,
+          });
+        }
+      } catch (err) {
+        logger.warn('undo journal capture failed', { tool: name, error: err.message });
+      }
+    }
     entry.result = result;
-    await writeAuditLog(entry);
+    writeAuditLog(entry).catch(() => {});
     const perf = perfMonitor.stopTiming(timerId, true);
     logger.info('Tool executed successfully', { tool: name, duration: perf?.duration });
     return result;
@@ -887,8 +991,10 @@ export async function dispatchTool(name, args) {
     
     entry.error = errorMessage;
     entry.errorDetails = errorDetails;
-    await writeAuditLog(entry);
-    await logSecurityEvent('TOOL_EXECUTION_ERROR', { tool: name, error: errorMessage, details: errorDetails });
+    Promise.allSettled([
+      writeAuditLog(entry),
+      logSecurityEvent('TOOL_EXECUTION_ERROR', { tool: name, error: errorMessage, details: errorDetails })
+    ]);
     perfMonitor.stopTiming(timerId, false, err);
     logger.error('Tool execution error', { tool: name, error: errorMessage, stack: errorDetails.stack });
     
@@ -903,6 +1009,80 @@ export async function dispatchTool(name, args) {
 // Write to audit log (DuckDB tool_audit table; best-effort, never throws)
 async function writeAuditLog(entry) {
   await appendToolAudit(entry);
+}
+
+// ---------- undo tools (vision item #2) ----------
+
+// The most recent pending undoable action, newest first. Manual-reversibility
+// records (commands, computer use) are surfaced but never auto-applied.
+async function undoLast() {
+  const rows = await undoList({ limit: 50, pendingOnly: true });
+  if (!rows.length) return { success: false, message: 'Nothing to undo — no journaled actions found.' };
+  const row = rows[0];
+  if (!row.undo) {
+    return {
+      success: false,
+      message: `The latest action (#${row.id}, ${row.tool}) has no automatic reversal — it is ${row.reversibility}-reversible. See list_undo for what changed; you decide how to revert it.`,
+      record: { id: row.id, tool: row.tool, args: safeJsonParse(row.args), ts: row.ts },
+    };
+  }
+  try {
+    const applied = await applyRecord(row, 'undo');
+    await undoMarkDone(row.id, null);
+    return { success: true, message: `Undone: ${row.tool} — ${applied.join('; ')}`, undone: [{ id: row.id, tool: row.tool, applied }] };
+  } catch (err) {
+    return { success: false, message: `Undo of #${row.id} (${row.tool}) failed: ${err.message}`, record: { id: row.id, tool: row.tool } };
+  }
+}
+
+// Reverse every automatically-reversible action from a session, newest first.
+// Manual-only records are skipped and listed for the human.
+async function undoSession(args = {}) {
+  const sessionId = args?.sessionId || process.env.AGENT_SESSION_ID || null;
+  if (!sessionId) {
+  return { success: false, message: 'No session context available — pass sessionId or run from an active voice session.' };
+}
+  const limit = Math.min(Math.max(Number(args?.limit) || 50, 1), 200);
+  const rows = await undoList({ limit: 500, sessionId, pendingOnly: true });
+  if (!rows.length) return { success: false, message: 'Nothing to undo for this session.' };
+  const undone = [];
+  const skipped = [];
+  const failed = [];
+  for (const row of rows) {
+    if (undone.length >= limit) { skipped.push({ id: row.id, tool: row.tool, reason: 'limit reached' }); continue; }
+    if (!row.undo) { skipped.push({ id: row.id, tool: row.tool, reason: row.reversibility === 'manual' ? 'manual reversibility — human decides' : 'no reversal stored' }); continue; }
+    try {
+      const applied = await applyRecord(row, 'undo');
+      await undoMarkDone(row.id, null);
+      undone.push({ id: row.id, tool: row.tool, applied });
+    } catch (err) {
+      failed.push({ id: row.id, tool: row.tool, error: err.message });
+    }
+  }
+  return { success: failed.length === 0, undoneCount: undone.length, skippedCount: skipped.length, undone, skipped, failed };
+}
+
+async function listUndo(args = {}) {
+  const rows = await undoList({
+    limit: Math.min(Math.max(Number(args?.limit) || 20, 1), 100),
+    sessionId: args?.sessionId || undefined,
+    pendingOnly: args?.pendingOnly !== false,
+  });
+  return {
+    count: rows.length,
+    actions: rows.map((r) => ({
+      id: r.id,
+      ts: r.ts,
+      tool: r.tool,
+      reversibility: r.reversibility,
+      undone: !!r.undone_at,
+      args: safeJsonParse(r.args),
+    })),
+  };
+}
+
+function safeJsonParse(s) {
+  try { return s ? JSON.parse(s) : null; } catch { return s; }
 }
 
 // Helper function to build tools for AssemblyAI agent configuration

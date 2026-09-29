@@ -51,7 +51,8 @@ const ALLOWLIST = [
 // Reject shell metacharacters so chained/inline commands ("ls; rm -rf /",
 // "cat x && shutdown", "echo `whoami`", "echo $(curl evil)") can't smuggle a
 // non-allowlisted command past the first-token check.
-const SHELL_META_PATTERN = /[;&|`$<>\n\r]/;
+// Canonical definition — security.js imports this to stay in sync.
+export const SHELL_META_PATTERN = /[;&|`$<>\n\r]/;
 
 // Split a command string into argv without invoking a shell.
 // Supports single/double quotes; throws on unbalanced quotes.

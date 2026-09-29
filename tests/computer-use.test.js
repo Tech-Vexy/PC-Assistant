@@ -5,6 +5,10 @@
 import os from 'node:os';
 import path from 'node:path';
 process.env.STORE_PATH = path.join(os.tmpdir(), `test-cu-store-${process.pid}.db`);
+// Point the first-run .env seed at a nonexistent file — otherwise initStore()
+// migrates the REAL .env (GEMINI_API_KEY, LLM_API_KEY…) into the test store,
+// where cfg() finds keys the tests deliberately deleted from process.env.
+process.env.DOTENV_PATH = path.join(os.tmpdir(), `test-cu-env-${process.pid}.env`);
 process.env.MCP_ENABLED = 'false';
 
 import { describe, it } from 'node:test';
@@ -16,11 +20,13 @@ const PNG_1PX =
 
 // Snapshot/restore helper: sets the given env vars for the duration of fn,
 // then restores every key it touched (added keys removed again).
+// When overriding a key to undefined, we set process.env[k] = '' so cfg()
+// (which checks process.env[key] !== undefined) does not fall back to DB cache.
 async function withEnv(overrides, fn) {
   const snapshot = { ...process.env };
   try {
     for (const [k, v] of Object.entries(overrides)) {
-      if (v === undefined) delete process.env[k];
+      if (v === undefined) process.env[k] = '';
       else process.env[k] = v;
     }
     await fn();

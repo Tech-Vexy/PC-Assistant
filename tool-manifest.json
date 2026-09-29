@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "createdAt": "2026-09-27T15:48:18.285Z",
-  "sha256": "aa1f9ee3972150bd8f7118123615136d4d5a3905c631b03ba95e029ceb5f33b9",
-  "signature": "jc657/3zpYkUcgweho4KrL5ffSHitSD9E5aFZocCRJxCDiJvXvdOJSGvl9PWwP14CGLYEh93LvwweJmGOmXexsJlSRt3vL9lMvg2e9lCcGe6zcAbHvYf2qNWDJd2Rf6mx/Zc90Sjh6VMP6bg/EpqWYYssdK1KKWi3TwAI7tldFWFgoD+9f/b5XnF0bso0s98SrlQSenvpWYttphSIfU9HslOnOggUI8Wy3iYN/VCzWj4fUSAmxzN0CAhdEXKdAx8Y0e2dGFPm7/WTm27B5VQ+BB8g3H8X+LS/DBEkyT3PC6kylgrdwlSHZjFFwiXppz6eLr8bzDSiky5GJQ/RTB5DQ==",
+  "createdAt": "2026-09-28T16:37:09.108Z",
+  "sha256": "4bf40b91887759b4d052f1f28c85f24550050ff9bd3f8e97ac954437c7736512",
+  "signature": "xlKqxQecKrG8WsRcYi+L6/j+ufWIRyl2huBpuQWdPC/MX5e9smIK4Ee1P7e/FF+16vP73jqblNpjCc/bFd9IzRbQ72fyWmWk79YmNyMad3MqHKI/CUCikLk1MgEPTZ4w5rRlMZiehTkssLwZSah0B/GlS8jZIKHeg1ZcXKn0OtlaESOhsBHZPhUVJIAyIJm48Nx4+sQv9L8wW4IP1c4jxHqGE8Zck41Z4Xb40JxFsl3nP9LhPJYlKqLQ+Yg0ZNI3CtR+MiMrbMdkjdNRhgk14HUc5h/A0d7kEySWGs1sGb8sAF5uzgxqjScLnjdDE9W3HRo4XbxPLEWLdN8pXX+5rg==",
   "tools": [
     "web_search",
     "move_mouse",
@@ -44,6 +44,9 @@
     "list_agents",
     "agent_status",
     "cancel_agent",
-    "send_to_agent"
+    "send_to_agent",
+    "undo_last",
+    "undo_session",
+    "list_undo"
   ]
 }

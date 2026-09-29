@@ -23,25 +23,29 @@
 
 import WebSocket from 'ws';
 import { spawn } from 'child_process';
-import { dispatchTool } from './tools.js';
+import { dispatchTool, buildAllTools } from './tools.js';
 import { playEarcon } from './lib/sound-effects.js';
 import { buildLlmRoutes, resolveLlmConfig } from './lib/model-router.js';
 import { initStore, loadSession, saveSession, cfg } from './lib/store.js';
+import { VoiceActivityDetector } from './lib/vad.js';
 import dotenv from 'dotenv';
 
-dotenv.config();
+dotenv.config(process.env.DOTENV_PATH ? { path: process.env.DOTENV_PATH } : undefined);
 
 // AssemblyAI grace window allows session resume within 30s of disconnect
 const GRACE_WINDOW_MS = 30_000;
 const MAX_RECONNECT_ATTEMPTS = 10;
 const BASE_BACKOFF_MS = 1000;
-// Audio frame size: 160ms @ 16kHz 16-bit mono = 5120 bytes
-// Larger frames reduce WebSocket message overhead
-const AUDIO_FRAME_BYTES = 5120;
+// Voice Agent API standard sample rate: 24kHz 16-bit mono PCM
+const AUDIO_SAMPLE_RATE = 24000;
+// Audio frame size: 100ms @ 24kHz 16-bit mono = 4800 bytes
+// Larger frames reduce WebSocket message overhead while maintaining low latency
+const AUDIO_FRAME_BYTES = 4800;
 // Buffer ~5s of audio during disconnections to avoid speech loss
-const MAX_BUFFERED_FRAMES = 32;
+const MAX_BUFFERED_FRAMES = 50;
 // RMS threshold for barge-in detection (user interrupting assistant)
-const BARGE_IN_THRESHOLD = Number(process.env.BARGE_IN_THRESHOLD || 2800);
+// Default 8000 prevents laptop speaker bleed from triggering self-interruption; 0 disables
+const BARGE_IN_THRESHOLD = Number(process.env.BARGE_IN_THRESHOLD ?? 8000);
 
 /**
  * Calculate Root Mean Square (RMS) of PCM16 audio buffer
@@ -57,6 +61,28 @@ function rmsInt16(buf) {
     sum += v * v;
   }
   return Math.sqrt(sum / Math.max(1, n));
+}
+
+/**
+ * Windows dshow has no "default" pseudo-device (unlike ALSA): capture with
+ * `audio=default` always fails. Resolve the first real audio input device
+ * once and cache the result. Returns null when no microphone is found.
+ */
+let _dshowDevicePromise = null;
+function resolveWindowsAudioDevice() {
+  if (!_dshowDevicePromise) {
+    _dshowDevicePromise = new Promise((resolve) => {
+      const p = spawn('ffmpeg', ['-hide_banner', '-f', 'dshow', '-list_devices', 'true', '-i', 'dummy'], { stdio: ['ignore', 'ignore', 'pipe'] });
+      let stderr = '';
+      p.stderr.on('data', (d) => (stderr += d.toString()));
+      p.on('close', () => {
+        const m = stderr.match(/"(.+?)"\s+\(audio\)/);
+        resolve(m ? m[1] : null);
+      });
+      p.on('error', () => resolve(null));
+    });
+  }
+  return _dshowDevicePromise;
 }
 
 /**
@@ -98,7 +124,8 @@ class VoiceAgent {
     this.reconnectAttempts = 0; // Current reconnection attempt count
     this.shouldRun = true; // Flag for graceful shutdown
     this.audioBuffer = []; // Base64 audio frames queued during disconnection
-    this._frameAcc = Buffer.alloc(0); // Accumulator for audio frame building
+    this._chunkList = []; // Buffered audio chunks from ffmpeg
+    this._chunkTotalBytes = 0; // Running total of buffered bytes
     this._heartbeat = null; // WebSocket heartbeat interval
     this._graceTimer = null; // Timer for grace window expiration
     this._disconnectAt = null; // Timestamp of last disconnection
@@ -106,6 +133,58 @@ class VoiceAgent {
     this.isPlayingAudio = false; // Current playback state
     this.currentPlayProcess = null; // Current ffplay process
     this._unmuteTimer = null; // Timer for post-playback microphone unmute delay
+    this.vad = new VoiceActivityDetector({
+      sampleRate: AUDIO_SAMPLE_RATE,
+      bargeInThreshold: BARGE_IN_THRESHOLD,
+    });
+  }
+
+  /**
+   * Ensure a streaming ffplay process is active to receive synthesized PCM audio
+   * AssemblyAI streams 24kHz 16-bit mono PCM chunks in real time
+   * @returns {import('child_process').ChildProcess} Active ffplay process
+   */
+  _ensureAudioPlayer() {
+    if (this.currentPlayProcess && !this.currentPlayProcess.killed && this.currentPlayProcess.stdin && !this.currentPlayProcess.stdin.destroyed) {
+      return this.currentPlayProcess;
+    }
+    clearTimeout(this._unmuteTimer);
+    this.isPlayingAudio = true;
+    this.vad.onPlaybackStarted();
+
+    // Stream raw PCM16 at 24000Hz mono directly to ffplay
+    // -ch_layout mono is the modern FFmpeg option (replacing deprecated -ac)
+    const proc = spawn('ffplay', ['-nodisp', '-autoexit', '-f', 's16le', '-ar', String(AUDIO_SAMPLE_RATE), '-ch_layout', 'mono', '-'], {
+      stdio: ['pipe', 'ignore', 'ignore'],
+    });
+
+    // Prevent uncaught EPIPE exceptions if ffplay exits or is interrupted
+    proc.stdin?.on('error', (err) => {
+      if (err.code !== 'EPIPE') {
+        console.error('Audio playback stdin error:', err.message);
+      }
+    });
+
+    this.currentPlayProcess = proc;
+
+    const cleanup = () => {
+      if (this.currentPlayProcess === proc) {
+        this.currentPlayProcess = null;
+      }
+      clearTimeout(this._unmuteTimer);
+      this._unmuteTimer = setTimeout(() => {
+        this.isPlayingAudio = false;
+        this.vad.onPlaybackEnded();
+      }, 250);
+    };
+
+    proc.on('close', cleanup);
+    proc.on('error', (err) => {
+      console.error('Audio playback stream error:', err.message);
+      cleanup();
+    });
+
+    return proc;
   }
 
   /**
@@ -124,8 +203,10 @@ class VoiceAgent {
     }
     clearTimeout(this._unmuteTimer);
     this.isPlayingAudio = false;
+    this.vad.onPlaybackEnded();
     this.playQueue = Promise.resolve();
-    this._frameAcc = Buffer.alloc(0);
+    this._chunkList = [];
+    this._chunkTotalBytes = 0;
     playEarcon('interrupted');
   }
 
@@ -225,13 +306,19 @@ class VoiceAgent {
 
       this.ws.on('open', () => {
         console.log('WebSocket connected to AssemblyAI');
-        this.reconnectAttempts = 0;
+        // NOTE: reconnectAttempts is NOT reset here — a socket can open and
+        // then be immediately rejected (session.error → close), and resetting
+        // on open makes the backoff counter never advance. The counter resets
+        // in the session.ready/resumed handlers instead.
         clearTimeout(this._graceTimer);
         if (this.sessionId && this._disconnectAt && Date.now() - this._disconnectAt < GRACE_WINDOW_MS) {
           console.log(`Resuming session ${this.sessionId} within grace window`);
           this._wsSend({ type: 'session.resume', session_id: this.sessionId });
         } else {
-          if (this.sessionId) console.log('Previous session outside grace window; starting fresh');
+          if (this.sessionId) {
+            console.log('Previous session outside grace window; starting fresh');
+            this.sessionId = null;
+          }
           this.initializeSession();
         }
         this._flushAudioBuffer();
@@ -274,34 +361,43 @@ class VoiceAgent {
   }
 
   /**
-   * Initialize or update session configuration
-   * Sends LLM provider configuration for BYOK (Bring Your Own Key) support
-   * Allows switching LLM providers without re-publishing the agent
+   * Initialize session configuration per the Voice Agent API protocol
+   * (docs: Events reference → session.update).
+   *
+   * `session.agent_id` binds a stored agent and is FIRST-update-only and
+   * MUTUALLY EXCLUSIVE with inline session fields (system_prompt, tools, llm…)
+   * — there is no llm field in session config at all. LLM routes therefore
+   * live on the published agent record (setup-agent.js embeds them), so
+   * switching providers is a re-publish, not a session field.
    */
   initializeSession() {
-    // Client-side session config: the LLM provider/models come from the local
-    // env on every connect, so switching providers needs no re-publish.
-    // The stored agent (AGENT_ID) remains the fallback for prompt/voice/tools.
-    const session = {
-      agent_id: cfg('AGENT_ID'),
-    };
+    const agentId = cfg('AGENT_ID');
+    if (agentId) {
+      this._wsSend({
+        type: 'session.update',
+        session: { agent_id: agentId },
+      });
+      console.log(`Session bound to stored agent ${agentId}`);
+      return;
+    }
+
+    // No stored agent: degraded inline mode — client-side tools + local LLM
+    // routes, AssemblyAI's default prompt/voice. Publish (`npm run publish`)
+    // to get the full agent.
+    console.warn('⚠️  No AGENT_ID configured — connecting in inline mode with client-side tools only. Run `npm run publish`.');
+    const session = { tools: buildAllTools() };
     try {
       const llm = buildLlmRoutes();
       if (llm.length > 0) {
         session.llm = llm;
-        const cfg = resolveLlmConfig();
-        console.log(`Session LLM override: ${cfg.baseUrl} (fast=${cfg.fast}, strong=${cfg.strong})`);
-      } else {
-        console.log('No local LLM provider configured; using stored agent LLM');
+        const llmCfg = resolveLlmConfig();
+        console.log(`Inline LLM: ${llmCfg.baseUrl} (fast=${llmCfg.fast}, strong=${llmCfg.strong})`);
       }
     } catch (err) {
-      console.warn(`Could not build session LLM override, using stored agent LLM: ${err.message}`);
+      console.warn(`Could not build LLM routes, using managed LLM: ${err.message}`);
     }
-    this._wsSend({
-      type: 'session.update',
-      session,
-    });
-    console.log('Session configuration sent');
+    this._wsSend({ type: 'session.update', session });
+    console.log('Session configuration sent (inline mode)');
   }
 
   /**
@@ -325,7 +421,7 @@ class VoiceAgent {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     while (this.audioBuffer.length > 0) {
       const audio = this.audioBuffer.shift();
-      this.ws.send(JSON.stringify({ type: 'input.audio', audio }));
+      this.ws.send('{"type":"input.audio","audio":"' + audio + '"}');
     }
   }
 
@@ -337,7 +433,7 @@ class VoiceAgent {
   _sendAudioFrame(base64Audio) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this._flushAudioBuffer();
-      this.ws.send(JSON.stringify({ type: 'input.audio', audio: base64Audio }));
+      this.ws.send('{"type":"input.audio","audio":"' + base64Audio + '"}');
     } else {
       // Buffer during outages (bounded) so speech in the grace window isn't lost
       if (this.audioBuffer.length < MAX_BUFFERED_FRAMES) {
@@ -357,14 +453,22 @@ class VoiceAgent {
   async handleMessage(data) {
     try {
       const message = JSON.parse(data.toString());
-      console.log('Received message type:', message.type);
+      if (
+        message.type !== 'reply.audio' &&
+        message.type !== 'transcript.agent.delta' &&
+        message.type !== 'transcript.user.delta'
+      ) {
+        console.log('Received message type:', message.type);
+      }
 
       switch (message.type) {
         case 'session.ready':
           console.log('Session ready, starting audio capture');
           this.sessionId = message.session_id;
+          process.env.AGENT_SESSION_ID = this.sessionId; // tags undo journal rows
           await saveState({ sessionId: this.sessionId });
           this._disconnectAt = null;
+          this.reconnectAttempts = 0; // session established — reset backoff
           this.startRecording();
           playEarcon('listening');
           break;
@@ -372,8 +476,10 @@ class VoiceAgent {
         case 'session.resumed':
           console.log(`Session resumed: ${message.session_id}`);
           this.sessionId = message.session_id;
+          process.env.AGENT_SESSION_ID = this.sessionId; // tags undo journal rows
           await saveState({ sessionId: this.sessionId });
           this._disconnectAt = null;
+          this.reconnectAttempts = 0; // session established — reset backoff
           this.startRecording();
           playEarcon('listening');
           break;
@@ -382,29 +488,81 @@ class VoiceAgent {
           console.log('Session updated');
           break;
 
-        case 'user.transcript':
-          console.log(`User: ${message.transcript}`);
-          await saveState({ sessionId: this.sessionId, lastTranscript: message.transcript });
+        case 'reply.started':
+          // Prepare the streaming audio player for the assistant's speech turn
+          this._ensureAudioPlayer();
           break;
 
+        case 'reply.audio': {
+          const audio = message.data || message.audio;
+          if (audio) {
+            await this.playAudio(audio);
+          }
+          break;
+        }
+
+        case 'transcript.agent.delta': {
+          const delta = message.text_delta || message.delta || message.text || '';
+          if (delta) {
+            process.stdout.write(delta);
+          }
+          break;
+        }
+
+        case 'transcript.agent': {
+          const text = message.transcript || message.text || '';
+          if (text) {
+            console.log(`\nAssistant: ${text}`);
+          }
+          break;
+        }
+
+        case 'transcript.user.delta':
         case 'user.transcript.delta':
+        case 'input.speech.started':
+        case 'input.speech.stopped':
           break;
 
-        case 'reply.audio':
-          await this.playAudio(message.audio);
+        case 'transcript.user':
+        case 'user.transcript': {
+          const text = message.transcript || message.text || '';
+          console.log(`\nUser: ${text}`);
+          await saveState({ sessionId: this.sessionId, lastTranscript: text });
           break;
+        }
 
-        case 'reply.done':
-          console.log('Reply completed');
+        case 'reply.done': {
+          const status = message.status || 'completed';
+          console.log(`\nReply ${status}`);
+          if (status === 'interrupted') {
+            this.interruptPlayback();
+          } else {
+            // Signal EOF on stdin so ffplay plays remaining buffered PCM and exits cleanly
+            if (this.currentPlayProcess?.stdin && !this.currentPlayProcess.stdin.destroyed) {
+              this.currentPlayProcess.stdin.end();
+            }
+          }
           break;
+        }
 
         case 'tool.call':
           await this.handleToolCall(message);
           break;
 
-        case 'session.error':
-          console.error('Session error:', message.error);
+        case 'session.error': {
+          const errDetail = message.error || message.message || JSON.stringify(message);
+          console.error('Session error:', errDetail);
+          this.sessionId = null;
+          this._disconnectAt = null;
+          await saveState({ sessionId: null });
+          // A rejected session.update recurs on every reconnect — close now
+          // so the backoff loop advances and eventually exhausts instead of
+          // connect→error→close spinning at attempt 1 forever.
+          if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            try { this.ws.close(1000, 'session.error'); } catch { /* noop */ }
+          }
           break;
+        }
 
         case 'session.ended':
           console.log('Session ended');
@@ -478,20 +636,22 @@ class VoiceAgent {
    * Implements barge-in detection and audio frame accumulation
    * Auto-restarts on process exit if session is still active
    */
-  startRecording() {
+  async startRecording() {
     if (this.isRecording) return;
 
-    console.log('Starting audio capture');
     this.isRecording = true;
-    this._frameAcc = Buffer.alloc(0);
+    this._chunkList = [];
+    this._chunkTotalBytes = 0;
 
     const isWindows = process.platform === 'win32';
-    const device = process.env.AUDIO_DEVICE || (isWindows ? 'default' : ':default');
+    let device = process.env.AUDIO_DEVICE || (isWindows ? await resolveWindowsAudioDevice() : ':default');
+    if (!device) device = 'default'; // last resort: will fail loudly in ffmpeg stderr
+    console.log(`Starting audio capture (device: ${device})`);
     const ffmpegArgs = isWindows
-      ? ['-f', 'dshow', '-i', `audio=${device}`, '-ar', '16000', '-ac', '1', '-f', 's16le', '-']
+      ? ['-f', 'dshow', '-i', `audio=${device}`, '-ar', String(AUDIO_SAMPLE_RATE), '-ac', '1', '-f', 's16le', '-']
       : process.platform === 'darwin'
-        ? ['-f', 'avfoundation', '-i', device, '-ar', '16000', '-ac', '1', '-f', 's16le', '-']
-        : ['-f', 'alsa', '-i', process.env.AUDIO_DEVICE || 'default', '-ar', '16000', '-ac', '1', '-f', 's16le', '-'];
+        ? ['-f', 'avfoundation', '-i', device, '-ar', String(AUDIO_SAMPLE_RATE), '-ac', '1', '-f', 's16le', '-']
+        : ['-f', 'alsa', '-i', process.env.AUDIO_DEVICE || 'default', '-ar', String(AUDIO_SAMPLE_RATE), '-ac', '1', '-f', 's16le', '-'];
 
     try {
       this.recordingProcess = spawn('ffmpeg', ffmpegArgs);
@@ -502,23 +662,41 @@ class VoiceAgent {
     }
 
     this.recordingProcess.stdout.on('data', (data) => {
-      // Check for user barge-in / interruption while assistant is speaking
-      if (this.isPlayingAudio) {
-        const rms = rmsInt16(data);
-        if (rms > BARGE_IN_THRESHOLD) {
-          this.interruptPlayback();
-        } else {
-          // Duck microphone speaker echo while audio is playing
-          this._frameAcc = Buffer.alloc(0);
-          return;
+      // Accumulate into fixed-size frames to reduce WS message rate and feed VAD
+      this._chunkList.push(data);
+      this._chunkTotalBytes += data.length;
+      if (this._chunkTotalBytes >= AUDIO_FRAME_BYTES) {
+        const merged = Buffer.concat(this._chunkList);
+        let offset = 0;
+        while (merged.length - offset >= AUDIO_FRAME_BYTES) {
+          const frame = merged.subarray(offset, offset + AUDIO_FRAME_BYTES);
+          offset += AUDIO_FRAME_BYTES;
+
+          // Process frame through VAD and acoustic echo ducking
+          const vadRes = this.vad.process(frame, this.isPlayingAudio);
+
+          if (vadRes.shouldBargeIn) {
+            this.interruptPlayback();
+          }
+
+          if (vadRes.shouldSend) {
+            // Send any pre-roll frames to preserve word onset
+            if (vadRes.preRollFrames && vadRes.preRollFrames.length > 0) {
+              for (const preRoll of vadRes.preRollFrames) {
+                this._sendAudioFrame(preRoll.toString('base64'));
+              }
+            }
+            this._sendAudioFrame(frame.toString('base64'));
+          }
         }
-      }
-      // Accumulate into fixed-size frames to reduce WS message rate (perf optimization)
-      this._frameAcc = Buffer.concat([this._frameAcc, data]);
-      while (this._frameAcc.length >= AUDIO_FRAME_BYTES) {
-        const frame = this._frameAcc.subarray(0, AUDIO_FRAME_BYTES);
-        this._frameAcc = this._frameAcc.subarray(AUDIO_FRAME_BYTES);
-        this._sendAudioFrame(frame.toString('base64'));
+        const remaining = merged.subarray(offset);
+        if (remaining.length > 0) {
+          this._chunkList = [remaining];
+          this._chunkTotalBytes = remaining.length;
+        } else {
+          this._chunkList = [];
+          this._chunkTotalBytes = 0;
+        }
       }
     });
 
@@ -552,9 +730,11 @@ class VoiceAgent {
    */
   stopRecording() {
     // Flush any partial frame first
-    if (this._frameAcc && this._frameAcc.length > 0) {
-      this._sendAudioFrame(this._frameAcc.toString('base64'));
-      this._frameAcc = Buffer.alloc(0);
+    if (this._chunkTotalBytes > 0) {
+      const merged = Buffer.concat(this._chunkList);
+      this._sendAudioFrame(merged.toString('base64'));
+      this._chunkList = [];
+      this._chunkTotalBytes = 0;
     }
     if (!this.isRecording || !this.recordingProcess) return;
 
@@ -567,53 +747,25 @@ class VoiceAgent {
   }
 
   /**
-   * Play audio response using ffplay
-   * Serializes playback to prevent overlapping TTS chunks
-   * Implements 250ms post-playback delay for room reverb dissipation
+   * Play audio response by streaming PCM chunks to ffplay
+   * Writes base64-decoded PCM16 frames directly to the active audio player process
    * @param {string} base64Audio - Base64-encoded audio data
    */
   async playAudio(base64Audio) {
-    // Serialize playback so overlapping TTS chunks don't spawn competing ffplay instances
-    this.playQueue = this.playQueue.then(
-      () =>
-        new Promise((resolve) => {
-          try {
-            clearTimeout(this._unmuteTimer);
-            this.isPlayingAudio = true;
-            const audioBuffer = Buffer.from(base64Audio, 'base64');
-            const playProcess = spawn('ffplay', ['-nodisp', '-autoexit', '-'], {
-              stdio: ['pipe', 'ignore', 'ignore'],
-            });
-            this.currentPlayProcess = playProcess;
-
-            const onDone = () => {
-              if (this.currentPlayProcess === playProcess) {
-                this.currentPlayProcess = null;
-              }
-              // 250ms grace period so room reverb dissipates before microphone re-opens
-              clearTimeout(this._unmuteTimer);
-              this._unmuteTimer = setTimeout(() => {
-                this.isPlayingAudio = false;
-              }, 250);
-              resolve();
-            };
-
-            playProcess.stdin.write(audioBuffer);
-            playProcess.stdin.end();
-            playProcess.on('close', () => onDone());
-            playProcess.on('error', (err) => {
-              console.error('Audio playback error:', err.message);
-              onDone();
-            });
-          } catch (error) {
-            console.error('Error playing audio:', error);
-            this.isPlayingAudio = false;
-            this.currentPlayProcess = null;
-            resolve();
+    if (!base64Audio || typeof base64Audio !== 'string') return;
+    try {
+      const proc = this._ensureAudioPlayer();
+      const audioBuffer = Buffer.from(base64Audio, 'base64');
+      if (proc?.stdin && !proc.stdin.destroyed && proc.stdin.writable) {
+        proc.stdin.write(audioBuffer, (err) => {
+          if (err && err.code !== 'EPIPE') {
+            console.error('Audio write error:', err.message);
           }
-        })
-    );
-    return this.playQueue;
+        });
+      }
+    } catch (error) {
+      console.error('Error writing audio chunk:', error.message);
+    }
   }
 
   /**

@@ -124,19 +124,25 @@ export async function systemStatus(args) {
 
 // List running processes — native OS commands (node-os-utils has no process list API).
 // Windows: tasklist CSV. macOS/Linux: ps. Normalized to { pid, name, cpu, mem }.
-export async function listProcesses(args) {
-  const { sortBy = 'cpu', limit = 20 } = args;
-  const key = cacheKey('proc-list', { sortBy, limit });
+export async function listProcesses(args = {}) {
+  const { sortBy = 'cpu', limit = 20, name = '' } = args;
+  const key = cacheKey('proc-list', { sortBy, limit, name });
   const cached = systemCache.get(key);
   if (cached) return cached;
 
   try {
     const processes = await getProcessList();
 
+    let filteredProcesses = processes;
+    if (name && typeof name === 'string' && name.trim()) {
+      const q = name.trim().toLowerCase();
+      filteredProcesses = processes.filter((p) => p.name.toLowerCase().includes(q));
+    }
+
     // Sort processes based on sortBy parameter
     // (Windows tasklist has no per-process CPU% — 'cpu' sort falls back to memory there.)
     const sortField = sortBy.toLowerCase() === 'cpu' && process.platform === 'win32' ? 'mem' : sortBy.toLowerCase();
-    let sortedProcesses = [...processes];
+    let sortedProcesses = [...filteredProcesses];
     switch (sortField) {
       case 'cpu':
         sortedProcesses.sort((a, b) => b.cpu - a.cpu);
@@ -174,14 +180,30 @@ export async function killProcess(args) {
 
   try {
     // Protected PIDs check
-    if (pid === 1) {
+    if (pid === 1 || pid === 0) {
       throw new Error('Cannot kill PID 1 (system process)');
     }
 
-    // Get current process PID to protect the assistant itself
+    // Get current process PID and parent PID to protect the assistant itself and runner
     const currentPid = process.pid;
-    if (pid === currentPid) {
-      throw new Error('Cannot kill the assistant process itself');
+    const parentPid = process.ppid;
+    if (pid === currentPid || pid === parentPid) {
+      throw new Error('Cannot kill the assistant process itself or its parent runner');
+    }
+
+    // Protect known IDEs and critical system processes
+    try {
+      const procs = await getProcessList();
+      const target = procs.find((p) => p.pid === pid);
+      if (target) {
+        const lower = target.name.toLowerCase();
+        const PROTECTED = ['antigravity', 'code', 'node', 'explorer', 'dwm', 'csrss', 'lsass', 'services'];
+        if (PROTECTED.some((p) => lower.includes(p))) {
+          throw new Error(`Cannot kill protected process: ${target.name} (PID ${pid})`);
+        }
+      }
+    } catch (err) {
+      if (err.message.startsWith('Cannot kill protected process')) throw err;
     }
 
     process.kill(pid, 'SIGTERM');

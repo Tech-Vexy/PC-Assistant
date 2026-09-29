@@ -4,7 +4,7 @@ import { vetAllTools, signToolManifest } from './lib/security-extras.js';
 import { initStore, cfg } from './lib/store.js';
 import dotenv from 'dotenv';
 
-dotenv.config();
+dotenv.config(process.env.DOTENV_PATH ? { path: process.env.DOTENV_PATH } : undefined);
 
 async function createAgent() {
   await initStore(); // local store (seeds from legacy files); config via cfg()
@@ -81,12 +81,23 @@ IMPORTANT SECURITY RULES:
     }
 
     const agent = await response.json();
-    
+
+    // The create endpoint returns the full agent record; accept any common
+    // id field shape so a renamed upstream field can't silently publish
+    // "AGENT_ID=undefined" (which the launcher would then store as real).
+    const agentId = agent?.id || agent?.agent_id || agent?.agentId || agent?.data?.id || agent?.data?.agent_id || null;
+    if (!agentId || typeof agentId !== 'string' || /^(undefined|null)$/i.test(agentId)) {
+      console.error('❌ Agent created, but no agent id found in the response.');
+      console.error(`Response keys: ${Object.keys(agent || {}).join(', ') || '(none)'}`);
+      console.error(`Raw response: ${JSON.stringify(agent).slice(0, 600)}`);
+      process.exit(1);
+    }
+
     console.log('✅ Agent created successfully!');
-    console.log(`Agent ID: ${agent.agent_id}`);
-    console.log(`Agent Name: ${agent.name}`);
+    console.log(`Agent ID: ${agentId}`);
+    console.log(`Agent Name: ${agent?.name || '(unnamed)'}`);
     console.log('\nAdd this to your .env file:');
-    console.log(`AGENT_ID=${agent.agent_id}`);
+    console.log(`AGENT_ID=${agentId}`);
     
     return agent;
   } catch (error) {

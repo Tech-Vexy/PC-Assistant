@@ -42,6 +42,30 @@ describe('tools dispatcher', () => {
     assert.ok(typeof r.processes[0].pid === 'number');
   });
 
+  it('list_processes filters by name when provided', async () => {
+    const { dispatchTool } = await import('../tools.js');
+    const r = await dispatchTool('list_processes', { name: 'node', limit: 5 });
+    assert.ok(Array.isArray(r.processes));
+    for (const p of r.processes) {
+      assert.match(p.name.toLowerCase(), /node/);
+    }
+  });
+
+  it('manage_windows validates action and target', async () => {
+    const { dispatchTool } = await import('../tools.js');
+    const badAction = await dispatchTool('manage_windows', { action: 'destroy_all' });
+    assert.match(badAction.error, /validation|action must be/i);
+    const missingTarget = await dispatchTool('manage_windows', { action: 'close' });
+    assert.match(missingTarget.error, /validation|target is required/i);
+  });
+
+  it('manage_windows blocks closing protected processes like antigravity', async () => {
+    const { dispatchTool } = await import('../tools.js');
+    const blocked = await dispatchTool('manage_windows', { action: 'close', target: 'antigravity' });
+    assert.equal(blocked.success, false);
+    assert.match(blocked.message, /cannot close protected/i);
+  });
+
   it('validates click_mouse arguments', async () => {
     const { dispatchTool } = await import('../tools.js');
     const r = await dispatchTool('click_mouse', { button: 'invalid_button' });
@@ -60,6 +84,11 @@ describe('tools dispatcher', () => {
     assert.match(bad.error, /validation|Invalid media action/i);
     const ok = await dispatchTool('media_control', { action: 'mute' });
     assert.equal(ok.success, true);
+    // Restore system state — this handler really mutes the OS audio.
+    // Absolute-state handler reports exactly what it did.
+    const restored = await dispatchTool('media_control', { action: 'unmute' });
+    assert.equal(restored.success, true);
+    assert.match(restored.message, /unmuted/i);
   });
 
   it('clipboard tool writes and reads', async () => {
@@ -90,7 +119,26 @@ describe('AssemblyAI message handling (mock WebSocket)', () => {
     const agent = new VoiceAgent();
     agent.startRecording = mock.fn(); // don't spawn ffmpeg in tests
     agent.ws = { readyState: 1, send: () => {} };
-    await agent.handleMessage(JSON.stringify({ type: 'session.ready', session_id: 'sess-123' }));
-    assert.equal(agent.sessionId, 'sess-123');
+    await agent.handleMessage(JSON.stringify({ type: 'session.ready', session_id: 'sess-test-unit' }));
+    assert.equal(agent.sessionId, 'sess-test-unit');
+  });
+
+  it('handles reply.audio with message.data without throwing', async () => {
+    const { VoiceAgent } = await import('../agent.js');
+    const agent = new VoiceAgent();
+    agent.playAudio = mock.fn();
+    // AssemblyAI sends message.data with base64 audio
+    await agent.handleMessage(JSON.stringify({ type: 'reply.audio', data: 'dGVzdA==' }));
+    assert.equal(agent.playAudio.mock.calls.length, 1);
+    assert.equal(agent.playAudio.mock.calls[0].arguments[0], 'dGVzdA==');
+
+    // Also handles message.audio
+    await agent.handleMessage(JSON.stringify({ type: 'reply.audio', audio: 'dGVzdDI=' }));
+    assert.equal(agent.playAudio.mock.calls.length, 2);
+    assert.equal(agent.playAudio.mock.calls[1].arguments[0], 'dGVzdDI=');
+
+    // Does not throw if empty/missing
+    await agent.handleMessage(JSON.stringify({ type: 'reply.audio' }));
+    assert.equal(agent.playAudio.mock.calls.length, 2);
   });
 });

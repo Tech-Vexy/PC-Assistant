@@ -1,4 +1,6 @@
 // Security configuration and confirmation gates
+import { SHELL_META_PATTERN } from './tools/shell-control.js';
+import { appendSecurityAudit } from './lib/store.js';
 
 // Tools that require explicit user confirmation before execution
 const DANGEROUS_TOOLS = [
@@ -16,7 +18,11 @@ const DANGEROUS_TOOLS = [
   'terminal_execute',
   'terminal_start',
   'execute_plan',
-  'spawn_agent'
+  'spawn_agent',
+  // Undo mutates real state (file renames, row restores) — gate it like
+  // any other consequential action.
+  'undo_last',
+  'undo_session'
 ];
 
 // System PIDs that should never be killed
@@ -112,8 +118,8 @@ export function validateToolArguments(toolName, args) {
         validationErrors.push('pid must be a positive integer');
       } else if (isProtectedPid(args.pid)) {
         validationErrors.push('Cannot kill protected system process');
-      } else if (args.pid === process.pid) {
-        validationErrors.push('Cannot kill the assistant process itself');
+      } else if (args.pid === process.pid || args.pid === process.ppid) {
+        validationErrors.push('Cannot kill the assistant process itself or its parent runner');
       }
       break;
 
@@ -250,8 +256,10 @@ export function validateToolArguments(toolName, args) {
       break;
 
     case 'manage_windows':
-      if (!args.action || !['minimize_all', 'restore_all', 'switch_to'].includes(String(args.action).toLowerCase())) {
-        validationErrors.push('action must be minimize_all, restore_all, or switch_to');
+      if (!args.action || !['minimize_all', 'restore_all', 'switch_to', 'close'].includes(String(args.action).toLowerCase())) {
+        validationErrors.push('action must be minimize_all, restore_all, switch_to, or close');
+      } else if (['switch_to', 'close'].includes(String(args.action).toLowerCase()) && (!args.target || typeof args.target !== 'string' || !args.target.trim())) {
+        validationErrors.push(`target is required when action is "${args.action}"`);
       }
       break;
 
@@ -407,9 +415,8 @@ export function validateToolArguments(toolName, args) {
   return validationErrors;
 }
 
-// Forbidden shell metacharacters (module scope — switch cases share one
-// scope, so case-local consts would hit TDZ from sibling cases).
-const SHELL_META_PATTERN = /[;&|`$<>\n\r]/;
+// Forbidden shell metacharacters — imported at module top from
+// tools/shell-control.js (canonical definition).
 
 // Simple email validation
 function isValidEmail(email) {
@@ -429,7 +436,6 @@ export async function logSecurityEvent(event, details) {
   console.log(`[SECURITY] ${event}: ${JSON.stringify(details)}`);
 
   try {
-    const { appendSecurityAudit } = await import('./lib/store.js');
     await appendSecurityAudit(logEntry);
   } catch {
     // Logging must never break tool execution
@@ -477,6 +483,17 @@ export function checkRateLimit(toolName) {
       count: 0,
       timestamp: now
     };
+  }
+
+  // Prune stale entries if map accumulates many keys
+  const keys = Object.keys(rateLimiter.counts);
+  if (keys.length > 50) {
+    const cutoff = now - rateLimiter.windowMs;
+    for (const k of keys) {
+      if (rateLimiter.counts[k].timestamp < cutoff) {
+        delete rateLimiter.counts[k];
+      }
+    }
   }
 
   rateLimiter.counts[key].count++;

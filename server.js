@@ -15,13 +15,32 @@ import {
   saveSession as storeSaveSession,
   appendToolAudit,
   appendSecurityAudit,
+  undoRecord as storeUndoRecord,
+  undoGet as storeUndoGet,
+  undoList as storeUndoList,
+  undoMarkDone as storeUndoMarkDone,
+  memGet,
+  memGetFull,
+  memSearch,
+  memSet,
+  memDelete,
+  wfGet,
+  wfList,
+  wfSave,
+  wfDelete,
+  planGet,
+  planList,
+  planSave,
+  agentGet,
+  agentList,
+  agentSpawn,
 } from './lib/store.js';
 import { getHealthChecker, getMonitoringMetrics, createLogger } from './lib/monitor.js';
 
 const logger = createLogger('server');
 const healthChecker = getHealthChecker();
 
-dotenv.config();
+dotenv.config(process.env.DOTENV_PATH ? { path: process.env.DOTENV_PATH } : undefined);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -164,13 +183,15 @@ app.post('/api/approvals/request', (req, res) => {
   if (!validRemoteClient(req)) {
     return res.status(403).json({ error: 'Missing or invalid X-Requested-With header' });
   }
-  const { tool, args, ttlMs } = req.body || {};
+  const { tool, args, ttlMs, id: customId } = req.body || {};
   if (!tool || typeof tool !== 'string') {
     return res.status(400).json({ error: 'Missing "tool" in body' });
   }
   const ttl = Math.min(Math.max(Number(ttlMs) || 120_000, 1_000), 600_000);
   const { requestApproval } = _securityExtras;
-  const id = `appr-${crypto.randomBytes(16).toString('hex')}`;
+  const id = typeof customId === 'string' && customId.startsWith('appr-')
+    ? customId
+    : `appr-${crypto.randomBytes(16).toString('hex')}`;
   const decisionPromise = new Promise((resolve) => {
     __addRemoteWaiter(id, resolve, ttl);
   });
@@ -208,7 +229,7 @@ app.post('/api/approvals/:id', (req, res) => {
 });
 
 function escapeHtml(s) {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 // Tool-manifest integrity check: warn if tool definitions changed since signing
@@ -401,17 +422,19 @@ app.post('/setup', async (req, res) => {
 // ---- Store delegation endpoints (voice-agent process -> this server) ----
 // The agent never opens the DuckDB file (single-writer rule); it forwards
 // config/session/audit operations here, header-gated like approval requests.
-app.get('/api/store/config', (req, res) => {
+// Shared auth middleware: every /api/store/* route requires the agent header.
+app.use('/api/store', (req, res, next) => {
   if (!validRemoteClient(req)) {
     return res.status(403).json({ error: 'Missing or invalid X-Requested-With header' });
   }
+  next();
+});
+
+app.get('/api/store/config', (req, res) => {
   allConfig().then((config) => res.json({ config })).catch((err) => res.status(500).json({ error: err.message }));
 });
 
 app.post('/api/store/config', async (req, res) => {
-  if (!validRemoteClient(req)) {
-    return res.status(403).json({ error: 'Missing or invalid X-Requested-With header' });
-  }
   const { key, value } = req.body || {};
   if (!key || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
     return res.status(400).json({ error: 'Invalid "key"' });
@@ -421,24 +444,15 @@ app.post('/api/store/config', async (req, res) => {
 });
 
 app.get('/api/store/session', async (req, res) => {
-  if (!validRemoteClient(req)) {
-    return res.status(403).json({ error: 'Missing or invalid X-Requested-With header' });
-  }
   res.json({ session: await storeLoadSession() });
 });
 
 app.post('/api/store/session', async (req, res) => {
-  if (!validRemoteClient(req)) {
-    return res.status(403).json({ error: 'Missing or invalid X-Requested-With header' });
-  }
   await storeSaveSession(req.body?.session || {});
   res.json({ ok: true });
 });
 
 app.post('/api/store/audit', async (req, res) => {
-  if (!validRemoteClient(req)) {
-    return res.status(403).json({ error: 'Missing or invalid X-Requested-With header' });
-  }
   const { kind, entry } = req.body || {};
   if (kind === 'tool') await appendToolAudit(entry || {});
   else if (kind === 'security') await appendSecurityAudit(entry || {});
@@ -446,22 +460,45 @@ app.post('/api/store/audit', async (req, res) => {
   res.json({ ok: true });
 });
 
-app.get('/api/store/memory', async (req, res) => {
-  if (!validRemoteClient(req)) {
-    return res.status(403).json({ error: 'Missing or invalid X-Requested-With header' });
+// Undo journal (agent process is a remote store client).
+app.post('/api/store/undo', async (req, res) => {
+  const id = await storeUndoRecord(req.body?.entry || {});
+  res.json({ ok: true, id });
+});
+
+app.post('/api/store/undo/undone', async (req, res) => {
+  const { id, undoneBy } = req.body || {};
+  if (!id) return res.status(400).json({ error: 'id is required' });
+  await storeUndoMarkDone(Number(id), undoneBy == null ? null : Number(undoneBy));
+  res.json({ ok: true });
+});
+
+app.get('/api/store/undo', async (req, res) => {
+  const { id, limit, sessionId, planId, agentId, pendingOnly } = req.query;
+  if (id) {
+    const row = await storeUndoGet(Number(id));
+    if (!row) return res.status(404).json({ error: 'undo record not found' });
+    return res.json(row);
   }
+  const rows = await storeUndoList({
+    limit: Number(limit) || 50,
+    sessionId: sessionId || undefined,
+    planId: planId || undefined,
+    agentId: agentId || undefined,
+    pendingOnly: pendingOnly === '1',
+  });
+  res.json(rows);
+});
+
+app.get('/api/store/memory', async (req, res) => {
   const { key, q, category } = req.query;
-  const { memGet, memSearch } = await import('./lib/store.js');
+  if (key && req.query.full === '1') return res.json({ row: await memGetFull(String(key)) });
   if (key) return res.json({ value: await memGet(String(key)) });
   res.json({ memories: await memSearch(String(q || ''), { category: category || null }) });
 });
 
 app.post('/api/store/memory', async (req, res) => {
-  if (!validRemoteClient(req)) {
-    return res.status(403).json({ error: 'Missing or invalid X-Requested-With header' });
-  }
   const { op, key, value, category } = req.body || {};
-  const { memSet, memDelete } = await import('./lib/store.js');
   if (op === 'set' && key) {
     await memSet(String(key), value ?? '', category || 'fact');
     return res.json({ ok: true });
@@ -473,21 +510,13 @@ app.post('/api/store/memory', async (req, res) => {
 });
 
 app.get('/api/store/workflows', async (req, res) => {
-  if (!validRemoteClient(req)) {
-    return res.status(403).json({ error: 'Missing or invalid X-Requested-With header' });
-  }
-  const { wfGet, wfList } = await import('./lib/store.js');
   const { name } = req.query;
   if (name) return res.json({ workflow: await wfGet(String(name)) });
   res.json({ workflows: await wfList() });
 });
 
 app.post('/api/store/workflows', async (req, res) => {
-  if (!validRemoteClient(req)) {
-    return res.status(403).json({ error: 'Missing or invalid X-Requested-With header' });
-  }
   const { op, name, steps, description } = req.body || {};
-  const { wfSave, wfDelete } = await import('./lib/store.js');
   if (op === 'save' && name && Array.isArray(steps)) {
     let parsed = steps;
     if (typeof steps === 'string') {
@@ -507,21 +536,13 @@ app.post('/api/store/workflows', async (req, res) => {
 });
 
 app.get('/api/store/plans', async (req, res) => {
-  if (!validRemoteClient(req)) {
-    return res.status(403).json({ error: 'Missing or invalid X-Requested-With header' });
-  }
-  const { planGet, planList } = await import('./lib/store.js');
   const { id } = req.query;
   if (id) return res.json({ plan: await planGet(String(id)) });
   res.json({ plans: await planList() });
 });
 
 app.post('/api/store/plans', async (req, res) => {
-  if (!validRemoteClient(req)) {
-    return res.status(403).json({ error: 'Missing or invalid X-Requested-With header' });
-  }
   const { op, plan } = req.body || {};
-  const { planSave } = await import('./lib/store.js');
   if (op === 'save' && plan && plan.id && plan.goal && Array.isArray(plan.steps)) {
     await planSave(plan);
     return res.json({ ok: true, id: plan.id });
@@ -530,21 +551,13 @@ app.post('/api/store/plans', async (req, res) => {
 });
 
 app.get('/api/store/agents', async (req, res) => {
-  if (!validRemoteClient(req)) {
-    return res.status(403).json({ error: 'Missing or invalid X-Requested-With header' });
-  }
-  const { agentGet, agentList } = await import('./lib/store.js');
   const { id, limit, active } = req.query;
   if (id) return res.json({ agent: await agentGet(String(id)) });
   res.json({ agents: await agentList(limit, active === '1') });
 });
 
 app.post('/api/store/agents', async (req, res) => {
-  if (!validRemoteClient(req)) {
-    return res.status(403).json({ error: 'Missing or invalid X-Requested-With header' });
-  }
   const { op, agent } = req.body || {};
-  const { agentSpawn } = await import('./lib/store.js');
   if (op === 'save' && agent && agent.id && agent.role) {
     await agentSpawn(agent);
     return res.json({ ok: true, id: agent.id });
@@ -556,12 +569,10 @@ app.post('/api/store/agents', async (req, res) => {
 // GET /tasks -> auto-refreshing HTML table of plans/steps/statuses.
 // GET /api/tasks -> JSON list (for tray icon / polling).
 app.get('/api/tasks', async (req, res) => {
-  const { planList, agentList } = await import('./lib/store.js');
   res.json({ plans: await planList(50), agents: await agentList(50) });
 });
 
 app.get('/tasks', async (req, res) => {
-  const { planList, planGet, agentList, agentGet } = await import('./lib/store.js');
   const selected = req.query.plan ? await planGet(String(req.query.plan)) : null;
   const selectedAgent = req.query.agent ? await agentGet(String(req.query.agent)) : null;
   const plans = await planList(50);

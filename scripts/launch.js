@@ -173,7 +173,9 @@ async function autoPublish(port) {
       timeout: 120000,
     });
     const m = String(stdout).match(/AGENT_ID=(\S+)/);
-    if (m) {
+    // Reject placeholder values a broken publish script might print — storing
+    // "undefined" as the agent id would poison every later connect.
+    if (m && !/^(undefined|null)$/i.test(m[1])) {
       await setEnvKey(ENV_PATH, 'AGENT_ID', m[1]);
       process.env.AGENT_ID = m[1];
       // The server owns the store now — save through it (best-effort).

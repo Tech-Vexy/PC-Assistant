@@ -215,7 +215,11 @@ describe('browser setup UI (/setup)', () => {
 });
 
 describe('session-time LLM override (agent client)', () => {
-  const LLM_KEYS = ['LLM_API_KEY', 'LLM_BASE_URL', 'OPENAI_API_KEY', 'OPENAI_BASE_URL', 'FAST_MODEL', 'STRONG_MODEL'];
+  // GEMINI_* / LLM_FALLBACK_MODELS included because agent.js's module-load
+  // dotenv.config() refills these from the real .env at first import, and
+  // buildLlmRoutes() is Gemini-first (a leftover Gemini key returns a single
+  // Gemini route instead of the fast/strong pair).
+  const LLM_KEYS = ['LLM_API_KEY', 'LLM_BASE_URL', 'OPENAI_API_KEY', 'OPENAI_BASE_URL', 'FAST_MODEL', 'STRONG_MODEL', 'GEMINI_API_KEY', 'GEMINI_MODEL', 'LLM_FALLBACK_MODELS'];
   let savedEnv;
 
   before(async () => {
@@ -235,11 +239,37 @@ describe('session-time LLM override (agent client)', () => {
     }
   });
 
-  it('initializeSession sends the provider from local env (no re-publish)', async () => {
+  it('initializeSession binds the stored agent by id alone (API protocol)', async () => {
+    // session.agent_id is first-update-only and mutually exclusive with
+    // inline fields — llm routes live on the published agent, not the session.
+    // Set env directly: cfg() prefers env, and agent.js's dotenv.config()
+    // cannot refill a var that is already present (no-override behavior).
+    const savedAgentId = process.env.AGENT_ID;
+    process.env.AGENT_ID = 'agent-test-1234';
+    try {
+      const { VoiceAgent } = await import('../agent.js');
+      const agent = new VoiceAgent();
+      const sent = [];
+      agent.ws = { readyState: 1, send: (s) => sent.push(JSON.parse(s)) };
+      agent.initializeSession();
+      const update = sent.find((m) => m.type === 'session.update');
+      assert.ok(update, 'session.update was sent');
+      assert.deepEqual(update.session, { agent_id: 'agent-test-1234' });
+    } finally {
+      if (savedAgentId !== undefined) process.env.AGENT_ID = savedAgentId;
+    }
+  });
+
+  it('initializeSession inline mode sends local provider without agent_id', async () => {
+    // Delete again here: dotenv.config() (module load, during the first test)
+    // refilled these from the real .env after before() cleared them.
+    for (const k of LLM_KEYS) delete process.env[k];
     process.env.LLM_API_KEY = 'sess-key';
     process.env.LLM_BASE_URL = 'https://llm.example/v1';
     process.env.FAST_MODEL = 'f1';
     process.env.STRONG_MODEL = 's1';
+    const savedAgentId = process.env.AGENT_ID;
+    process.env.AGENT_ID = ''; // empty = falsy = inline mode; blocks dotenv refill
     const { VoiceAgent } = await import('../agent.js');
     const agent = new VoiceAgent();
     const sent = [];
@@ -247,14 +277,18 @@ describe('session-time LLM override (agent client)', () => {
     agent.initializeSession();
     const update = sent.find((m) => m.type === 'session.update');
     assert.ok(update, 'session.update was sent');
+    assert.ok(!('agent_id' in update.session), 'no agent_id in inline mode (mutually exclusive)');
     assert.equal(update.session.llm.length, 2);
     assert.equal(update.session.llm[0].base_url, 'https://llm.example/v1');
     assert.equal(update.session.llm[0].model, 'f1');
     assert.equal(update.session.llm[0].api_key, 'sess-key');
+    if (savedAgentId !== undefined) process.env.AGENT_ID = savedAgentId;
   });
 
-  it('initializeSession omits llm when no provider is configured (stored agent fallback)', async () => {
+  it('initializeSession inline mode omits llm when no provider is configured', async () => {
     for (const k of LLM_KEYS) delete process.env[k];
+    const savedAgentId = process.env.AGENT_ID;
+    process.env.AGENT_ID = '';
     const { VoiceAgent } = await import('../agent.js');
     const agent = new VoiceAgent();
     const sent = [];
@@ -263,5 +297,6 @@ describe('session-time LLM override (agent client)', () => {
     const update = sent.find((m) => m.type === 'session.update');
     assert.ok(update, 'session.update was sent');
     assert.ok(!('llm' in update.session), 'no llm override without provider config');
+    if (savedAgentId !== undefined) process.env.AGENT_ID = savedAgentId;
   });
 });

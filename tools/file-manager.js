@@ -170,6 +170,7 @@ export async function findFiles(args) {
   const dir = resolveSafePath(folderPath);
   const nameRe = namePattern ? new RegExp(namePattern, 'i') : null;
   const matches = [];
+  const startTime = Date.now();
 
   async function walk(current, depth) {
     if (matches.length >= maxResults || depth > maxDepth) return;
@@ -179,61 +180,145 @@ export async function findFiles(args) {
     } catch {
       return;
     }
+    
+    // Process directory entries in parallel for better performance
+    const promises = [];
     for (const entry of entries) {
-      if (matches.length >= maxResults) return;
+      if (matches.length >= maxResults) break;
       const full = path.join(current, entry.name);
+      
       if (entry.isDirectory()) {
-        await walk(full, depth + 1);
+        promises.push(walk(full, depth + 1));
         continue;
       }
+      
+      // Skip files that don't match name pattern
       if (nameRe && !nameRe.test(entry.name)) continue;
+      
+      // For content search, check file asynchronously
       if (contentQuery) {
-        try {
-          const stat = await fs.stat(full);
-          if (stat.size > 5 * 1024 * 1024) continue; // skip huge files for content search
-          const content = await fs.readFile(full, 'utf8').catch(() => null);
-          if (content === null || !content.toLowerCase().includes(String(contentQuery).toLowerCase())) continue;
-        } catch {
-          continue;
-        }
+        promises.push((async () => {
+          try {
+            const stat = await fs.stat(full);
+            if (stat.size > 5 * 1024 * 1024) return; // skip huge files for content search
+            const content = await fs.readFile(full, 'utf8').catch(() => null);
+            if (content !== null && content.toLowerCase().includes(String(contentQuery).toLowerCase())) {
+              matches.push(full);
+            }
+          } catch {
+            // Skip files that can't be read
+          }
+        })());
+      } else {
+        matches.push(full);
       }
-      matches.push(full);
     }
+    
+    await Promise.all(promises);
   }
 
-  await walk(dir, 0);
-  return { success: true, folder: dir, count: matches.length, files: matches };
+  try {
+    await walk(dir, 0);
+    const duration = Date.now() - startTime;
+    logger.info('File search completed', { 
+      folder: dir, 
+      found: matches.length, 
+      maxResults, 
+      maxDepth,
+      duration 
+    });
+    
+    return { 
+      success: true, 
+      folder: dir, 
+      count: matches.length, 
+      files: matches,
+      duration: `${duration}ms`
+    };
+  } catch (error) {
+    logger.error('File search failed', { folder: dir, error: error.message });
+    throw error;
+  }
 }
 // 4. Convert documents between formats using LibreOffice (soffice) headless mode when available.
 export async function convertDocument(args) {
   const { filePath, targetFormat } = args;
   const src = resolveSafePath(filePath);
-  const fmt = String(targetFormat || '').toLowerCase().replace(/^\./, '');
-  if (!fmt || !/^[a-z0-9]+$/.test(fmt)) {
-    throw new Error('targetFormat must be a simple extension like "pdf" or "docx"');
-  }
-  const outDir = path.dirname(src);
-  const sofficeCandidates = process.platform === 'win32'
-    ? ['soffice.exe', 'soffice']
-    : ['soffice', 'libreoffice'];
-
-  let lastErr = null;
-  for (const bin of sofficeCandidates) {
-    try {
-      await execFileAsync(bin, ['--headless', '--convert-to', fmt, '--outdir', outDir, src], { timeout: 60000 });
-      const base = path.basename(src, path.extname(src));
-      const outPath = path.join(outDir, `${base}.${fmt}`);
-      const exists = await fs.stat(outPath).then(() => true).catch(() => false);
-      if (exists) {
-        return { success: true, source: src, output: outPath, format: fmt };
-      }
-      lastErr = new Error('Conversion reported success but output file was not found');
-    } catch (err) {
-      lastErr = err;
+  const startTime = Date.now();
+  
+  try {
+    const fmt = String(targetFormat || '').toLowerCase().replace(/^\./, '');
+    if (!fmt || !/^[a-z0-9]+$/.test(fmt)) {
+      throw new Error('targetFormat must be a simple extension like "pdf" or "docx"');
     }
+    const outDir = path.dirname(src);
+    const sofficeCandidates = process.platform === 'win32'
+      ? ['soffice.exe', 'soffice']
+      : ['soffice', 'libreoffice'];
+
+    let lastErr = null;
+    for (const bin of sofficeCandidates) {
+      try {
+        logger.info('Attempting document conversion', { 
+          binary: bin, 
+          source: src, 
+          format: fmt 
+        });
+        
+        await execFileAsync(bin, ['--headless', '--convert-to', fmt, '--outdir', outDir, src], { 
+          timeout: 60000,
+          maxBuffer: 10 * 1024 * 1024 // 10MB buffer for LibreOffice output
+        });
+        
+        const base = path.basename(src, path.extname(src));
+        const outPath = path.join(outDir, `${base}.${fmt}`);
+        const exists = await fs.stat(outPath).then(() => true).catch(() => false);
+        
+        if (exists) {
+          const duration = Date.now() - startTime;
+          logger.info('Document conversion successful', { 
+            source: src, 
+            output: outPath, 
+            format: fmt,
+            duration 
+          });
+          
+          return { 
+            success: true, 
+            source: src, 
+            output: outPath, 
+            format: fmt,
+            duration: `${duration}ms`
+          };
+        }
+        lastErr = new Error('Conversion reported success but output file was not found');
+      } catch (err) {
+        lastErr = err;
+        logger.warn('Document conversion attempt failed', { 
+          binary: bin, 
+          error: err.message 
+        });
+      }
+    }
+    
+    const duration = Date.now() - startTime;
+    logger.error('Document conversion failed', { 
+      source: src, 
+      format: fmt, 
+      duration,
+      error: lastErr?.message 
+    });
+    
+    throw new Error(
+      `Document conversion failed (LibreOffice/soffice not found or conversion error): ${lastErr?.message || 'unknown error'}. ` +
+      'Install LibreOffice and ensure "soffice" is on PATH.'
+    );
+  } catch (error) {
+    logger.error('Document conversion error', { 
+      filePath, 
+      targetFormat, 
+      error: error.message 
+    });
+    throw error;
   }
-  throw new Error(
-    `Document conversion failed (LibreOffice/soffice not found or conversion error): ${lastErr?.message || 'unknown error'}. ` +
-    'Install LibreOffice and ensure "soffice" is on PATH.'
-  );
 }

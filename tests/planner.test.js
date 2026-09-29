@@ -7,6 +7,8 @@ process.env.MCP_ENABLED = 'false';
 import os from 'node:os';
 import path from 'node:path';
 process.env.STORE_PATH = path.join(os.tmpdir(), `test-planner-store-${process.pid}.db`);
+// Keep the real .env out of the first-run seed (see computer-use.test.js).
+process.env.DOTENV_PATH = path.join(os.tmpdir(), `test-planner-env-${process.pid}.env`);
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';

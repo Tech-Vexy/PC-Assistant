@@ -66,6 +66,27 @@ launches Playwright Chromium per task and closes it afterwards.
 - Plans reach the agent process over `/api/store/plans`; progress is visible
   at `/tasks` (and `/api/tasks` JSON).
 
+### Undo / Transaction Layer
+
+Every mutating tool action gets a reversal record in the DuckDB `undo_journal`
+(see `lib/undo.js`, wired centrally in `tools.js` dispatchTool):
+
+- **Automatic reversibility**: `file_organize` (moves + created category dirs
+  + overwritten destinations), `file_rename`, `file_convert` (created output),
+  `remember`/`forget` (previous value + category), `save_workflow`/
+  `delete_workflow` (previous steps). "Undo what you just did" works end to end.
+- **Manual reversibility**: `run_command`, `terminal_*`, `computer_use`,
+  `kill_process` — before-state is journaled, but a human decides how to
+  reverse; the agents only surface what changed.
+- Tools: `undo_last` (newest pending record; manual records are reported, never
+  auto-applied), `undo_session` (rolls back everything automatically-reversible
+  from one voice session, newest first — rows are tagged via
+  `AGENT_SESSION_ID` set in agent.js), `list_undo` (read-only).
+- `undo_last`/`undo_session` are confirmation-gated (DANGEROUS_TOOLS).
+- The agent process journals through `/api/store/undo*` remote routes, same
+  header gate as other store delegation.
+- Tests: `tests/undo.test.js` (isolated store + temp workspace root).
+
 ### Sub-agents (Phase 4: hybrid, deny-by-default, fully dynamic)
 
 - `spawn_agent` takes `{role, instructions, allowed_tools[], isolation,
@@ -144,10 +165,18 @@ curl -X POST http://localhost:3000/test-tool -d '{"tool":"system_status","args":
 
 ## Known Issues
 
-### Audio Capture
-- FFmpeg device names vary by platform and microphone
-- Windows: Use `ffmpeg -f dshow -list_devices true -i dummy` to find your device
-- macOS: Device selection may differ from placeholder implementation
+### Audio Capture & Voice Agent Protocol
+- **Transport**: AssemblyAI Voice Agent operates over a full-duplex WebSocket (`wss://agents.assemblyai.com/v1/ws`).
+- **Sample Rate**: Native 24 kHz 16-bit mono PCM (`s16le`) for both input capture (`input.audio`) and server reply streaming (`reply.audio`).
+- **Streaming Playback**: Reply audio chunks are piped directly to an active `ffplay -f s16le -ar 24000 -ac 1 -nodisp -` stdin process, avoiding per-chunk process spawn overhead and audio stutter.
+- **Protocol Events**:
+  - `reply.started`: Initializes streaming audio playback for the turn.
+  - `reply.audio`: Streams base64-encoded PCM16 audio chunks.
+  - `transcript.agent.delta`: Streams assistant's live words to stdout.
+  - `reply.done`: Flushes stdin on `completed` or halts playback immediately on `interrupted` (barge-in).
+- FFmpeg device names vary by platform and microphone:
+  - Windows: Use `ffmpeg -f dshow -list_devices true -i dummy` to find your device (resolved automatically by default).
+  - macOS: `avfoundation` input device.
 
 ### Wake Word Detection
 - Energy-VAD fallback triggers on any loud sound, not a specific keyword
@@ -176,7 +205,8 @@ curl -X POST http://localhost:3000/test-tool -d '{"tool":"system_status","args":
 - `open_application` is gated behind dangerous approval queue for safety
 
 ### Conversational Polish & Desktop Suite
-- **Barge-In Interruption**: Audio energy (RMS) of captured mic chunks is checked while TTS playback is active; exceeding `BARGE_IN_THRESHOLD` (default 2800) terminates `ffplay` immediately.
+- **VAD & Echo Ducking**: Audio frames pass through `VoiceActivityDetector` (`lib/vad.js`). Microphone frames are ducked during TTS playback to prevent the assistant from hearing its own voice or triggering false self-interruption.
+- **Barge-In Interruption**: While playback is active, sustained loud user speech (>400ms after onset, multiple frames above `BARGE_IN_THRESHOLD`, default 8000; set to 0 to disable) terminates `ffplay` immediately.
 - **Audio Earcons**: Zero-dependency sine-wave synthesized PCM16 chimes are emitted on listening (`session.ready`), action completion, confirmation prompts, and interruption.
 - **Desktop Tools**: `open_application`, `manage_windows`, `media_control`, and `clipboard` are integrated directly into the AssemblyAI Voice Agent tool registry.
 

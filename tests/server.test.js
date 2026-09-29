@@ -104,6 +104,32 @@ describe('auth server routes', () => {
     assert.equal(decision.approved, true);
   });
 
+  it('remote approval delegation: UI endpoint POST /api/approvals/:id resolves approved=true without crash', async () => {
+    const RH = { 'Content-Type': 'application/json', 'X-Requested-With': 'pc-assistant-agent' };
+    const decisionPromise = fetch(`${base}/api/approvals/request`, {
+      method: 'POST',
+      headers: RH,
+      body: JSON.stringify({ tool: 'open_application', args: { appName: 'Calculator' }, ttlMs: 10_000 }),
+    }).then((x) => x.json());
+
+    await new Promise((r) => setTimeout(r, 150));
+    const queue = await fetch(`${base}/api/approvals`).then((x) => x.json());
+    const entry = queue.pending.find((p) => p.tool === 'open_application');
+    assert.ok(entry);
+
+    // Simulate browser form post from /api/confirm
+    const deliver = await fetch(`${base}/api/approvals/${entry.id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'approved=true',
+      redirect: 'manual',
+    });
+    assert.equal(deliver.status, 302); // redirects back to /api/confirm
+
+    const decision = await decisionPromise;
+    assert.equal(decision.approved, true);
+  });
+
   it('POST /test-tool dispatches read-only tools', async () => {
     const r = await fetch(`${base}/test-tool`, {
       method: 'POST',
