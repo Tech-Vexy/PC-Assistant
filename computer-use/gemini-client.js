@@ -35,11 +35,28 @@ export function resolveComputerUse({ environment = 'desktop' } = {}) {
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY is not configured — set it at /setup or in the environment.');
   }
-  // Use gemini-2.5-pro as it's more stable for computer use, but allow override
   const model =
-    cfg('GEMINI_VISION_MODEL') || cfg('COMPUTER_USE_MODEL') || cfg('GEMINI_MODEL', 'gemini-2.5-pro');
+    cfg('GEMINI_VISION_MODEL') || cfg('COMPUTER_USE_MODEL') || cfg('GEMINI_MODEL', 'gemini-3.8-flash');
   const stepTimeoutMs = Number(cfg('COMPUTER_USE_STEP_TIMEOUT_MS', '30000')) || 30000;
-  return { apiKey, model, environment: environment === 'browser' ? 'browser' : 'desktop', stepTimeoutMs };
+  const enablePromptInjectionDetection = cfg('COMPUTER_USE_ENABLE_PROMPT_INJECTION_DETECTION', 'true') === 'true';
+  const disabledSafetyPolicies = cfg('COMPUTER_USE_DISABLED_SAFETY_POLICIES', '')
+    .split(',')
+    .map(s => s.trim().toUpperCase())
+    .filter(Boolean);
+  const excludedPredefinedFunctions = cfg('COMPUTER_USE_EXCLUDED_FUNCTIONS', '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+  
+  return { 
+    apiKey, 
+    model, 
+    environment: environment === 'browser' ? 'browser' : 'desktop', 
+    stepTimeoutMs,
+    enablePromptInjectionDetection,
+    disabledSafetyPolicies,
+    excludedPredefinedFunctions
+  };
 }
 
 // Default factory: real Gemini client using the correct interactions API.
@@ -140,10 +157,26 @@ export async function defaultClientFactory({ environment = 'desktop' } = {}) {
       create: async (params = {}) => {
         try {
           // Use the real interactions API
+          const computerUseTool = {
+            type: 'computer_use',
+            environment: resolved.environment,
+            enablePromptInjectionDetection: resolved.enablePromptInjectionDetection,
+          };
+
+          // Add disabled safety policies if configured
+          if (resolved.disabledSafetyPolicies.length > 0) {
+            computerUseTool.disabled_safety_policies = resolved.disabledSafetyPolicies;
+          }
+
+          // Add excluded predefined functions if configured
+          if (resolved.excludedPredefinedFunctions.length > 0) {
+            computerUseTool.excluded_predefined_functions = resolved.excludedPredefinedFunctions;
+          }
+
           const interactionParams = {
             model: resolved.model,
             input: toInteractionsInput(params.input),
-            tools: [{ type: 'computer_use', environment: resolved.environment }],
+            tools: [computerUseTool],
             config: {
               systemInstruction: buildSafetyInstruction(),
             },

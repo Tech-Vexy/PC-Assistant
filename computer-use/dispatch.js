@@ -127,7 +127,6 @@ export async function runComputerUseTask({ task, environment } = {}) {
         { type: 'text', text: `Task: ${t}` },
         { type: 'image', data: first.data, mime_type: first.mime_type || 'image/png' },
       ],
-      environment: env,
     });
 
     let continuations = 0;
@@ -173,7 +172,6 @@ export async function runComputerUseTask({ task, environment } = {}) {
       interaction = await client.interactions.create({
         previous_interaction_id: interaction.id,
         function_results: functionResults,
-        environment: env,
       });
     }
   } catch (err) {
