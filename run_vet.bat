@@ -1,3 +1,0 @@
-@echo off
-cd C:\Users\Veldrine\Projects\pc_assistant
-node -e "import('./tools.js').then(async m => { const { vetAllTools, signToolManifest } = await import('./lib/security-extras.js'); const tools = m.buildAllTools(); const vet = await vetAllTools(tools); const bad = vet.filter(v => !v.ok); console.log('Vet results:', vet.length, 'passed,', bad.length, 'failed'); if (bad.length > 0) { bad.forEach(v => console.log('  FAIL:', v.name, '->', v.reason)); process.exit(1); } console.log('All tools vetted OK'); const sm = await signToolManifest(tools); console.log('Manifest signed:', sm.sha256.slice(0,12) + '...'); })"
