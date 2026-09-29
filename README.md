@@ -112,7 +112,7 @@ Your voice sessions bind to a **stored agent** on AssemblyAI (`AGENT_ID` in `.en
 
 ## Approvals, audit, and control surfaces
 
-- **Dangerous tools** (shell, device control, app launches, sending communications, computer use, plan execution, undo) pause until you approve them at `http://localhost:3000/api/confirm` — a live queue shared by every process. `AUTO_APPROVE=true` skips it, for development only.
+- **Dangerous tools** (shell, device control, app launches, sending communications, computer use, plan execution, undo) pause until you approve them at `http://localhost:3000/api/confirm` or on the **dashboard's Pending Approvals panel** — a live queue shared by every process. `AUTO_APPROVE=true` skips it, for development only.
 - **Every tool call and security event** is written to the DuckDB audit tables:
 
   ```bash
@@ -122,6 +122,16 @@ Your voice sessions bind to a **stored agent** on AssemblyAI (`AGENT_ID` in `.en
 - **`http://localhost:3000/tasks`** shows plans and sub-agents with per-step results.
 - **`http://localhost:3000/api/metrics`** exposes tool timings and success rates.
 - **`POST /test-tool`** dispatches a single tool by hand (dangerous ones still queue for approval).
+
+### Live monitoring
+
+The agent process streams events (state, transcripts, tool calls/results, audio levels, approval requests/resolutions) to the server over a batched relay, and any subscriber watches them in real time:
+
+- **`http://localhost:3000/dashboard`** — web dashboard: live conversation, tool calls with status, audio visualizer, and one-click Approve/Deny for pending confirmations.
+- **`npm run tui`** — terminal monitor showing the same stream: status, waveform, transcript, active tools, and approval alerts.
+- **`GET /api/events`** — the raw SSE stream for anything else you want to build on top.
+
+Approval events carry the real pending-approval id, so a decision made in one surface (dashboard, `/api/confirm`, terminal) resolves everywhere at once.
 
 ## Tools reference
 
@@ -216,20 +226,24 @@ pc_assistant/
 ├── lib/
 │   ├── store.js            # DuckDB store (config, sessions, memory, plans, audit, undo)
 │   ├── device-context.js   # OS + installed-apps inventory for the agent prompt
+│   ├── event-emitter.js    # Event bus + cross-process relay feeding the SSE stream
 │   ├── model-router.js     # BYOK LLM routes, fast/strong routing, fallback chain
 │   ├── security-extras.js  # Manifest signing, semantic vetting, approval plumbing
 │   ├── undo.js / fs-safety.js / vad.js / sound-effects.js / monitor.js / …
 ├── tools/                  # Handlers: desktop suite, files, system, shell, terminal,
 │                           #   memory, plan, agents, search
 ├── computer-use/           # Gemini Computer Use: client, loop, executors, safety
+├── public/dashboard.html   # Web monitoring dashboard (live SSE client)
+├── tui.js                  # Terminal monitor for the same event stream
 ├── scripts/                # launch.js (`up`), setup, tray, Windows service scripts
-└── tests/                  # 16 suites, 130+ tests (node --test)
+└── tests/                  # 17 suites, 150+ tests (node --test)
 ```
 
 **Everyday commands**
 
 ```bash
 pnpm test              # full suite
+pnpm run tui           # terminal monitor for the live event stream
 pnpm run sign-manifest # re-sign after tool definition changes
 pnpm run vet-tools     # semantic vetting of tool descriptors
 pnpm run publish       # (re)publish the stored agent

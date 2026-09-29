@@ -68,7 +68,6 @@ for (const key of ['ASSEMBLYAI_API_KEY', 'LLM_API_KEY']) {
 try {
   const { buildAllTools } = await import('../tools.js');
   const { signToolManifest } = await import('../lib/security-extras.js');
-  process.env.AUTO_APPROVE = 'true';
   await signToolManifest(buildAllTools());
   ok('tool manifest signed (tool-manifest.json)');
 } catch (e) {

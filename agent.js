@@ -28,6 +28,8 @@ import { playEarcon } from './lib/sound-effects.js';
 import { buildLlmRoutes, resolveLlmConfig } from './lib/model-router.js';
 import { initStore, loadSession, saveSession, cfg } from './lib/store.js';
 import { VoiceActivityDetector } from './lib/vad.js';
+import { logEvent, colors, redactArgs } from './lib/pretty.js';
+import { eventEmitter, setRelayUrl } from './lib/event-emitter.js';
 import dotenv from 'dotenv';
 
 dotenv.config(process.env.DOTENV_PATH ? { path: process.env.DOTENV_PATH } : undefined);
@@ -306,6 +308,7 @@ class VoiceAgent {
 
       this.ws.on('open', () => {
         console.log('WebSocket connected to AssemblyAI');
+        eventEmitter.emitState('connected', { sessionId: this.sessionId });
         // NOTE: reconnectAttempts is NOT reset here — a socket can open and
         // then be immediately rejected (session.error → close), and resetting
         // on open makes the backoff counter never advance. The counter resets
@@ -313,12 +316,14 @@ class VoiceAgent {
         clearTimeout(this._graceTimer);
         if (this.sessionId && this._disconnectAt && Date.now() - this._disconnectAt < GRACE_WINDOW_MS) {
           console.log(`Resuming session ${this.sessionId} within grace window`);
+          eventEmitter.emitState('resuming', { sessionId: this.sessionId });
           this._wsSend({ type: 'session.resume', session_id: this.sessionId });
         } else {
           if (this.sessionId) {
             console.log('Previous session outside grace window; starting fresh');
             this.sessionId = null;
           }
+          eventEmitter.emitState('initializing', {});
           this.initializeSession();
         }
         this._flushAudioBuffer();
@@ -453,13 +458,6 @@ class VoiceAgent {
   async handleMessage(data) {
     try {
       const message = JSON.parse(data.toString());
-      if (
-        message.type !== 'reply.audio' &&
-        message.type !== 'transcript.agent.delta' &&
-        message.type !== 'transcript.user.delta'
-      ) {
-        console.log('Received message type:', message.type);
-      }
 
       switch (message.type) {
         case 'session.ready':
@@ -469,6 +467,7 @@ class VoiceAgent {
           await saveState({ sessionId: this.sessionId });
           this._disconnectAt = null;
           this.reconnectAttempts = 0; // session established — reset backoff
+          eventEmitter.emitState('ready', { sessionId: this.sessionId });
           this.startRecording();
           playEarcon('listening');
           break;
@@ -480,6 +479,7 @@ class VoiceAgent {
           await saveState({ sessionId: this.sessionId });
           this._disconnectAt = null;
           this.reconnectAttempts = 0; // session established — reset backoff
+          eventEmitter.emitState('resumed', { sessionId: this.sessionId });
           this.startRecording();
           playEarcon('listening');
           break;
@@ -505,6 +505,7 @@ class VoiceAgent {
           const delta = message.text_delta || message.delta || message.text || '';
           if (delta) {
             process.stdout.write(delta);
+            eventEmitter.emitTranscript('agent', delta, true);
           }
           break;
         }
@@ -512,7 +513,8 @@ class VoiceAgent {
         case 'transcript.agent': {
           const text = message.transcript || message.text || '';
           if (text) {
-            console.log(`\nAssistant: ${text}`);
+            console.log(`\n🤖 ${colors.magenta('Assistant:')} ${text}`);
+            eventEmitter.emitTranscript('agent', text, false);
           }
           break;
         }
@@ -526,17 +528,21 @@ class VoiceAgent {
         case 'transcript.user':
         case 'user.transcript': {
           const text = message.transcript || message.text || '';
-          console.log(`\nUser: ${text}`);
+          console.log(`\n👤 ${colors.cyan('You:')} ${text}`);
+          eventEmitter.emitTranscript('user', text, false);
           await saveState({ sessionId: this.sessionId, lastTranscript: text });
           break;
         }
 
         case 'reply.done': {
           const status = message.status || 'completed';
-          console.log(`\nReply ${status}`);
           if (status === 'interrupted') {
+            console.log(colors.yellow('\n⚠ speech interrupted'));
             this.interruptPlayback();
           } else {
+            if (process.env.DEBUG_WS) {
+              logEvent('·', colors.gray('reply completed'), undefined, {});
+            }
             // Signal EOF on stdin so ffplay plays remaining buffered PCM and exits cleanly
             if (this.currentPlayProcess?.stdin && !this.currentPlayProcess.stdin.destroyed) {
               this.currentPlayProcess.stdin.end();
@@ -572,7 +578,10 @@ class VoiceAgent {
           break;
 
         default:
-          console.log('Unhandled message type:', message.type);
+          // Low-signal protocol chatter stays quiet unless DEBUG_WS is set.
+          if (process.env.DEBUG_WS) {
+            logEvent('·', colors.gray(`Unhandled: ${message.type}`), undefined, {});
+          }
       }
     } catch (error) {
       console.error('Error handling message:', error);
@@ -600,7 +609,8 @@ class VoiceAgent {
    */
   async handleToolCall(message) {
     const { call_id, name, arguments: args } = message;
-    console.log(`Tool call: ${name}`, args);
+    logEvent('🔧', colors.cyan(name), redactArgs(args), { maxLen: 120 });
+    eventEmitter.emitToolCall(name, args, call_id);
 
     try {
       const result = await dispatchTool(name, args);
@@ -611,9 +621,11 @@ class VoiceAgent {
         result: JSON.stringify(result),
       });
 
-      console.log(`Tool result sent for ${name}`);
+      console.log(colors.gray(`   ↳ result sent (${name})`));
+      eventEmitter.emitToolResult(name, result, call_id, true);
     } catch (error) {
       console.error(`Error executing tool ${name}:`, error);
+      eventEmitter.emitError('tool_execution', error);
 
       // Send structured error response with fallback
       const errorResponse = {
@@ -627,6 +639,7 @@ class VoiceAgent {
         call_id: call_id,
         result: JSON.stringify(errorResponse),
       });
+      eventEmitter.emitToolResult(name, errorResponse, call_id, false);
     }
   }
 
@@ -674,6 +687,10 @@ class VoiceAgent {
 
           // Process frame through VAD and acoustic echo ducking
           const vadRes = this.vad.process(frame, this.isPlayingAudio);
+
+          // Emit audio level event for visualization
+          const rms = rmsInt16(frame);
+          eventEmitter.emitAudioLevel(rms, vadRes.speechDetected);
 
           if (vadRes.shouldBargeIn) {
             this.interruptPlayback();
@@ -799,6 +816,10 @@ if (isMain) {
   if (!process.env.APPROVAL_HTTP_URL) {
     process.env.APPROVAL_HTTP_URL = `http://localhost:${cfg('PORT', '3000')}`;
   }
+  // Forward agent-process events (transcripts, tool calls, audio levels,
+  // approval requests) to the server's SSE stream so the TUI and /dashboard
+  // can monitor the live session.
+  setRelayUrl(process.env.APPROVAL_HTTP_URL);
   const agent = new VoiceAgent();
 
   process.on('SIGINT', () => {

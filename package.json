@@ -9,6 +9,7 @@
     "up": "node scripts/launch.js",
     "agent": "node agent.js",
     "wakeword": "node wakeword.js",
+    "tui": "node tui.js",
     "setup-agent": "node setup-agent.js",
     "publish": "node setup-agent.js",
     "setup": "node scripts/setup.js",
@@ -16,7 +17,7 @@
     "tray": "node scripts/tray.js",
     "sign-manifest": "node -e \"import('./tools.js').then(async ({buildAllTools}) => (await import('./lib/security-extras.js')).signToolManifest(buildAllTools()).then(m => console.log('signed', m.sha256)))\"",
     "vet-tools": "node -e \"import('./tools.js').then(async ({buildAllTools}) => (await import('./lib/security-extras.js')).vetAllTools(buildAllTools()).then(r => { console.table(r); if (r.some(x => !x.ok)) process.exit(1); }))\"",
-    "test": "node --test tests/security.test.js tests/perf.test.js tests/mcp-client.test.js tests/store.test.js tests/tools.test.js tests/server.test.js tests/setup-ui.test.js tests/launch.test.js tests/computer-use.test.js tests/device-context.test.js tests/memory.test.js tests/terminal.test.js tests/planner.test.js tests/agents.test.js tests/config-validator.test.js",
+    "test": "node --test tests/security.test.js tests/perf.test.js tests/mcp-client.test.js tests/store.test.js tests/tools.test.js tests/server.test.js tests/setup-ui.test.js tests/launch.test.js tests/computer-use.test.js tests/device-context.test.js tests/memory.test.js tests/terminal.test.js tests/planner.test.js tests/agents.test.js tests/config-validator.test.js tests/pretty.test.js tests/events.test.js",
     "dev": "concurrently \"npm run start\" \"npm run agent\""
   },
   "keywords": [

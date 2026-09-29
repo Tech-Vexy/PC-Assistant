@@ -1,6 +1,7 @@
 // Security configuration and confirmation gates
 import { SHELL_META_PATTERN } from './tools/shell-control.js';
 import { appendSecurityAudit } from './lib/store.js';
+import { logEvent, colors } from './lib/pretty.js';
 
 // Tools that require explicit user confirmation before execution
 const DANGEROUS_TOOLS = [
@@ -433,7 +434,11 @@ export async function logSecurityEvent(event, details) {
     severity: getEventSeverity(event)
   };
 
-  console.log(`[SECURITY] ${event}: ${JSON.stringify(details)}`);
+  // Compact console line; the full details are already persisted to the DuckDB audit trail.
+  const sev = getEventSeverity(event);
+  const colorFn = sev === 'HIGH' ? colors.red : sev === 'MEDIUM' ? colors.yellow : colors.gray;
+  const sym = sev === 'HIGH' ? '🚨' : sev === 'MEDIUM' ? '🔒' : '·';
+  logEvent(sym, `[${event}]`, details, { colorFn, maxLen: 140 });
 
   try {
     await appendSecurityAudit(logEntry);

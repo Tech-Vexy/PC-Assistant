@@ -6,6 +6,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { listPendingApprovals, resolveApproval } from './lib/security-extras.js';
 import * as _securityExtras from './lib/security-extras.js';
+import { eventEmitter } from './lib/event-emitter.js';
 import {
   initStore,
   cfg,
@@ -37,13 +38,13 @@ import {
 } from './lib/store.js';
 import { getHealthChecker, getMonitoringMetrics, createLogger } from './lib/monitor.js';
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const logger = createLogger('server');
 const healthChecker = getHealthChecker();
 
 dotenv.config(process.env.DOTENV_PATH ? { path: process.env.DOTENV_PATH } : undefined);
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const app = express();
 // PORT is resolved after the store boots (DB value, env override); the
@@ -52,6 +53,14 @@ const app = express();
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Serve static files from public directory
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Dashboard route
+app.get('/dashboard', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'dashboard.html'));
+});
 
 // Routes
 
@@ -116,6 +125,68 @@ app.get('/api/metrics', (req, res) => {
     logger.error('Metrics collection failed', { error: error.message });
     res.status(500).json({ error: 'Failed to collect metrics' });
   }
+});
+
+// Server-Sent Events endpoint for real-time event streaming
+// Clients can subscribe to agent events (state, audio_level, transcript, tool_call, etc.)
+app.get('/api/events', async (req, res) => {
+  try {
+    // Set SSE headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
+
+    // Send initial connection event
+    res.write(`data: ${JSON.stringify({ type: 'connected', timestamp: new Date().toISOString() })}\n\n`);
+
+    // Stream events from the global event emitter. The client disconnect is
+    // detected via res 'close' (writes to a dead socket don't always throw),
+    // so the generator is raced against it and explicitly returned to release
+    // its 'event' listener.
+    const iterator = eventEmitter.getEventStream();
+    const clientClosed = new Promise((resolve) => res.once('close', () => resolve(true)));
+    try {
+      while (true) {
+        const next = await Promise.race([
+          iterator.next(),
+          clientClosed.then(() => ({ done: true })),
+        ]);
+        if (next.done) break;
+        try {
+          res.write(next.value);
+        } catch (err) {
+          logger.info('SSE client disconnected', { error: err.message });
+          break;
+        }
+      }
+    } finally {
+      try { iterator.return(); } catch { /* noop */ }
+    }
+  } catch (error) {
+    logger.error('SSE stream error', { error: error.message });
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Failed to establish event stream' });
+    }
+  }
+});
+
+// Relay endpoint: the agent process (voice capture, tool dispatch, approvals)
+// runs separately from this server, so it POSTs its emitted events here and
+// they are re-published to all SSE subscribers (/api/events). Same trust
+// boundary as the approval delegation API (header-gated, loopback use).
+app.post('/api/events/publish', (req, res) => {
+  if (!validRemoteClient(req)) {
+    return res.status(403).json({ error: 'Missing or invalid X-Requested-With header' });
+  }
+  const events = Array.isArray(req.body?.events) ? req.body.events : [];
+  let forwarded = 0;
+  for (const ev of events.slice(0, 200)) {
+    if (!ev || typeof ev.type !== 'string' || typeof ev.data === 'undefined') continue;
+    eventEmitter.forward(ev);
+    forwarded++;
+  }
+  res.json({ ok: true, forwarded });
 });
 
 // Human-in-the-loop confirmation UI for dangerous tools.

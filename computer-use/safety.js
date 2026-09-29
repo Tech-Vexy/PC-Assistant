@@ -12,6 +12,7 @@
 // other dangerous tool.
 import { requestApproval } from '../lib/security-extras.js';
 import { logSecurityEvent } from '../security.js';
+import { eventEmitter } from '../lib/event-emitter.js';
 
 // USER_CONFIRMATION categories (spec §5.1).
 export const CONFIRMATION_CATEGORIES = [
@@ -144,9 +145,11 @@ export async function gateAction({ action, task }) {
   if (raw) {
     const decision = String(raw.decision || raw.verdict || '').toLowerCase();
     if (/block|deny|refus|unsafe/.test(decision)) {
+      const reason = raw.explanation || raw.reason || 'model block';
       await logSecurityEvent('COMPUTER_USE_BLOCKED', {
-        tool: 'computer_use', task, action: name, reason: raw.explanation || raw.reason || 'model block',
+        tool: 'computer_use', task, action: name, reason,
       });
+      eventEmitter.emitError('computer_use', new Error(`Model blocked action: ${reason}`));
       return { ok: false, blocked: true };
     }
   }
@@ -155,6 +158,7 @@ export async function gateAction({ action, task }) {
   const verdict = evaluateAction(action);
   if (verdict.blocked) {
     await logSecurityEvent('COMPUTER_USE_BLOCKED', { tool: 'computer_use', task, action: name, reason: verdict.reason });
+    eventEmitter.emitError('computer_use', new Error(`Local policy blocked action: ${verdict.reason}`));
     return { ok: false, blocked: true };
   }
 
@@ -164,6 +168,8 @@ export async function gateAction({ action, task }) {
   }
 
   // Consequential: human-in-the-loop (audit first so the queue entry has context).
+  // requestApproval emits the live approval_request with the REAL queue id —
+  // no separate event needed here.
   await logSecurityEvent('DANGEROUS_TOOL_EXECUTION', { tool: 'computer_use', task, action: name, intent });
   const decision = await requestApproval('computer_use', {
     task,
@@ -173,6 +179,7 @@ export async function gateAction({ action, task }) {
   });
   if (!decision.approved) {
     await logSecurityEvent('CONFIRMATION_DENIED', { tool: 'computer_use', task, action: name });
+    eventEmitter.emitError('computer_use', new Error(`Computer use action denied: ${name}`));
     return { ok: false, cancelled: true };
   }
   await logSecurityEvent('COMPUTER_USE_APPROVED', { tool: 'computer_use', task, action: name });

@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PC Assistant Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .dashboard {
+            display: grid;
+            grid-template-columns: 300px 1fr 350px;
+            grid-template-rows: 60px 1fr 200px;
+            gap: 10px;
+            padding: 10px;
+            height: 100vh;
+        }
+
+        .header {
+            grid-column: 1 / -1;
+            background: #16213e;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+            border: 1px solid #0f3460;
+        }
+
+        .header h1 {
+            font-size: 1.5rem;
+            color: #e94560;
+        }
+
+        .status-badge {
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 0.9rem;
+        }
+
+        .status-connected { background: #4ade80; color: #000; }
+        .status-disconnected { background: #f87171; color: #000; }
+        .status-recording { background: #fbbf24; color: #000; }
+
+        .panel {
+            background: #16213e;
+            border-radius: 8px;
+            border: 1px solid #0f3460;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .panel-header {
+            background: #0f3460;
+            padding: 10px 15px;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .panel-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 15px;
+        }
+
+        /* Transcript Panel */
+        .transcript-panel {
+            grid-column: 1 / 3;
+            grid-row: 2 / 3;
+        }
+
+        .message {
+            margin-bottom: 15px;
+            padding: 10px;
+            border-radius: 8px;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .message.user {
+            background: #1e3a5f;
+            border-left: 3px solid #4ade80;
+        }
+
+        .message.agent {
+            background: #3d1e5f;
+            border-left: 3px solid #e94560;
+        }
+
+        .message-header {
+            font-size: 0.8rem;
+            color: #888;
+            margin-bottom: 5px;
+        }
+
+        .message-text {
+            line-height: 1.5;
+        }
+
+        /* Tool Calls Panel */
+        .tools-panel {
+            grid-column: 3 / 4;
+            grid-row: 2 / 3;
+        }
+
+        .tool-call {
+            background: #1e3a5f;
+            padding: 10px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            border-left: 3px solid #fbbf24;
+        }
+
+        .tool-name {
+            font-weight: bold;
+            color: #fbbf24;
+            margin-bottom: 5px;
+        }
+
+        .tool-args {
+            font-size: 0.85rem;
+            color: #aaa;
+            font-family: monospace;
+            background: #0f3460;
+            padding: 5px;
+            border-radius: 4px;
+            max-height: 100px;
+            overflow-y: auto;
+        }
+
+        .tool-status {
+            font-size: 0.8rem;
+            margin-top: 5px;
+        }
+
+        .status-running { color: #fbbf24; }
+        .status-completed { color: #4ade80; }
+        .status-failed { color: #f87171; }
+
+        /* Audio Panel */
+        .audio-panel {
+            grid-column: 1 / 2;
+            grid-row: 3 / 4;
+        }
+
+        .audio-visualizer {
+            height: 100px;
+            display: flex;
+            align-items: flex-end;
+            gap: 2px;
+            padding: 10px;
+        }
+
+        .audio-bar {
+            flex: 1;
+            background: linear-gradient(to top, #4ade80, #e94560);
+            border-radius: 2px 2px 0 0;
+            transition: height 0.1s ease;
+            min-height: 2px;
+        }
+
+        .audio-info {
+            padding: 10px;
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.9rem;
+        }
+
+        /* Approvals Panel */
+        .approvals-panel {
+            grid-column: 2 / 4;
+            grid-row: 3 / 4;
+        }
+
+        .approval-item {
+            background: #3d1e5f;
+            padding: 10px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            border: 2px solid #e94560;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .approval-info {
+            flex: 1;
+        }
+
+        .approval-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.2s;
+        }
+
+        .btn-approve {
+            background: #4ade80;
+            color: #000;
+        }
+
+        .btn-approve:hover {
+            background: #22c55e;
+        }
+
+        .btn-deny {
+            background: #f87171;
+            color: #000;
+        }
+
+        .btn-deny:hover {
+            background: #ef4444;
+        }
+
+        /* Quick Actions Panel */
+        .quick-actions {
+            grid-column: 1 / 2;
+            grid-row: 2 / 3;
+        }
+
+        .action-btn {
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 8px;
+            background: #0f3460;
+            border: 1px solid #1e3a5f;
+            color: #eee;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: left;
+        }
+
+        .action-btn:hover {
+            background: #1e3a5f;
+            border-color: #4ade80;
+        }
+
+        .action-btn:active {
+            transform: scale(0.98);
+        }
+
+        /* Scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #0f3460;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #1e3a5f;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #4ade80;
+        }
+
+        /* Responsive */
+        @media (max-width: 1200px) {
+            .dashboard {
+                grid-template-columns: 1fr 1fr;
+                grid-template-rows: auto auto 1fr auto;
+            }
+            
+            .transcript-panel {
+                grid-column: 1 / -1;
+                grid-row: 3 / 4;
+            }
+            
+            .tools-panel {
+                grid-column: 1 / 2;
+                grid-row: 4 / 5;
+            }
+            
+            .audio-panel {
+                grid-column: 2 / 3;
+                grid-row: 4 / 5;
+            }
+            
+            .approvals-panel {
+                grid-column: 1 / -1;
+                grid-row: 5 / 6;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard">
+        <div class="header">
+            <h1>🎙️ PC Assistant Dashboard</h1>
+            <div>
+                <span id="connectionStatus" class="status-badge status-disconnected">Disconnected</span>
+                <span id="agentStatus" class="status-badge status-disconnected">Agent Offline</span>
+            </div>
+        </div>
+
+        <div class="panel quick-actions">
+            <div class="panel-header">
+                <span>⚡ Quick Actions</span>
+            </div>
+            <div class="panel-content">
+                <button class="action-btn" onclick="navigateToSetup()">⚙️ Configuration</button>
+                <button class="action-btn" onclick="navigateToConfirm()">🔒 Approvals</button>
+                <button class="action-btn" onclick="navigateToTasks()">📋 Tasks & Plans</button>
+                <button class="action-btn" onclick="testConnection()">🔄 Test Connection</button>
+            </div>
+        </div>
+
+        <div class="panel transcript-panel">
+            <div class="panel-header">
+                <span>💬 Conversation</span>
+                <button class="btn" style="padding: 4px 8px; font-size: 0.8rem;" onclick="clearTranscript()">Clear</button>
+            </div>
+            <div class="panel-content" id="transcript">
+                <div style="text-align: center; color: #888; margin-top: 50px;">
+                    Waiting for conversation...
+                </div>
+            </div>
+        </div>
+
+        <div class="panel tools-panel">
+            <div class="panel-header">
+                <span>🔧 Tool Calls</span>
+                <span id="toolCount">0 active</span>
+            </div>
+            <div class="panel-content" id="toolCalls">
+                <div style="text-align: center; color: #888; margin-top: 50px;">
+                    No tool calls yet...
+                </div>
+            </div>
+        </div>
+
+        <div class="panel audio-panel">
+            <div class="panel-header">
+                <span>📊 Audio Level</span>
+            </div>
+            <div class="audio-visualizer" id="audioVisualizer">
+                <!-- Audio bars will be generated here -->
+            </div>
+            <div class="audio-info">
+                <span id="audioLevel">Level: 0</span>
+                <span id="speechStatus">Speech: No</span>
+            </div>
+        </div>
+
+        <div class="panel approvals-panel">
+            <div class="panel-header">
+                <span>🔒 Pending Approvals</span>
+                <span id="approvalCount">0 pending</span>
+            </div>
+            <div class="panel-content" id="approvals">
+                <div style="text-align: center; color: #888; margin-top: 50px;">
+                    No pending approvals...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // State management
+        const state = {
+            connected: false,
+            agentStatus: 'disconnected',
+            transcript: [],
+            toolCalls: {},
+            audioLevels: [],
+            approvals: {}
+        };
+
+        // Initialize audio visualizer
+        function initAudioVisualizer() {
+            const container = document.getElementById('audioVisualizer');
+            for (let i = 0; i < 50; i++) {
+                const bar = document.createElement('div');
+                bar.className = 'audio-bar';
+                bar.style.height = '2px';
+                container.appendChild(bar);
+            }
+        }
+
+        // Connect to SSE endpoint
+        function connectToEvents() {
+            const eventSource = new EventSource('/api/events');
+
+            eventSource.onopen = () => {
+                state.connected = true;
+                updateConnectionStatus();
+            };
+
+            eventSource.onerror = (error) => {
+                console.error('EventSource error:', error);
+                state.connected = false;
+                updateConnectionStatus();
+            };
+
+            eventSource.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleEvent(data);
+                } catch (e) {
+                    console.error('Failed to parse event:', e);
+                }
+            };
+
+            return eventSource;
+        }
+
+        // Handle incoming events
+        function handleEvent(event) {
+            switch (event.type) {
+                case 'connected':
+                    console.log('Connected to event stream');
+                    break;
+                case 'state':
+                    handleStateChange(event.data);
+                    break;
+                case 'transcript':
+                    handleTranscript(event.data);
+                    break;
+                case 'tool_call':
+                    handleToolCall(event.data);
+                    break;
+                case 'tool_result':
+                    handleToolResult(event.data);
+                    break;
+                case 'audio_level':
+                    handleAudioLevel(event.data);
+                    break;
+                case 'approval_request':
+                    handleApprovalRequest(event.data);
+                    break;
+                case 'approval_resolved':
+                    handleApprovalResolved(event.data);
+                    break;
+                case 'error':
+                    handleError(event.data);
+                    break;
+            }
+        }
+
+        function handleStateChange(data) {
+            state.agentStatus = data.state;
+            updateAgentStatus();
+        }
+
+        function handleTranscript(data) {
+            const { speaker, text, isDelta } = data;
+            
+            if (isDelta && state.transcript.length > 0) {
+                // Append to last message
+                state.transcript[state.transcript.length - 1].text += text;
+            } else {
+                // New message
+                state.transcript.push({
+                    speaker,
+                    text,
+                    timestamp: new Date().toISOString()
+                });
+            }
+
+            // Keep only last 50 messages
+            if (state.transcript.length > 50) {
+                state.transcript.shift();
+            }
+
+            renderTranscript();
+        }
+
+        function handleToolCall(data) {
+            const { toolName, args, callId } = data;
+            state.toolCalls[callId] = {
+                toolName,
+                args,
+                callId,
+                status: 'running',
+                timestamp: new Date().toISOString()
+            };
+            renderToolCalls();
+        }
+
+        function handleToolResult(data) {
+            const { toolName, callId, success } = data;
+            if (state.toolCalls[callId]) {
+                state.toolCalls[callId].status = success ? 'completed' : 'failed';
+                state.toolCalls[callId].result = data.result;
+            }
+            renderToolCalls();
+        }
+
+        function handleAudioLevel(data) {
+            const { level, isSpeech } = data;
+            state.audioLevels.push({ level, isSpeech });
+            
+            if (state.audioLevels.length > 50) {
+                state.audioLevels.shift();
+            }
+
+            renderAudioLevel();
+        }
+
+        function handleApprovalRequest(data) {
+            const { toolName, args, approvalId } = data;
+            state.approvals[approvalId] = {
+                toolName,
+                args,
+                approvalId,
+                timestamp: new Date().toISOString()
+            };
+            renderApprovals();
+        }
+
+        // Approval decided elsewhere (/api/confirm page, terminal, timeout) —
+        // drop it from the live queue so the panel stays in sync.
+        function handleApprovalResolved(data) {
+            const { approvalId, tool, approved, note } = data;
+            if (state.approvals[approvalId]) {
+                delete state.approvals[approvalId];
+                renderApprovals();
+            }
+            console.log(`Approval ${approved ? 'approved' : 'denied'}: ${tool || 'unknown'}${note ? ' — ' + note : ''}`);
+        }
+
+        function handleError(data) {
+            console.error('Agent error:', data);
+        }
+
+        // Render functions
+        function updateConnectionStatus() {
+            const statusEl = document.getElementById('connectionStatus');
+            if (state.connected) {
+                statusEl.textContent = 'Connected';
+                statusEl.className = 'status-badge status-connected';
+            } else {
+                statusEl.textContent = 'Disconnected';
+                statusEl.className = 'status-badge status-disconnected';
+            }
+        }
+
+        function updateAgentStatus() {
+            const statusEl = document.getElementById('agentStatus');
+            const statusMap = {
+                'connected': 'Connected',
+                'ready': 'Ready',
+                'recording': 'Recording',
+                'resuming': 'Resuming',
+                'initializing': 'Initializing',
+                'error': 'Error'
+            };
+            
+            const status = statusMap[state.agentStatus] || state.agentStatus;
+            statusEl.textContent = status;
+            
+            if (state.agentStatus === 'recording') {
+                statusEl.className = 'status-badge status-recording';
+            } else if (state.agentStatus === 'ready' || state.agentStatus === 'connected') {
+                statusEl.className = 'status-badge status-connected';
+            } else {
+                statusEl.className = 'status-badge status-disconnected';
+            }
+        }
+
+        function renderTranscript() {
+            const container = document.getElementById('transcript');
+            
+            if (state.transcript.length === 0) {
+                container.innerHTML = '<div style="text-align: center; color: #888; margin-top: 50px;">Waiting for conversation...</div>';
+                return;
+            }
+
+            container.innerHTML = state.transcript.map(msg => `
+                <div class="message ${msg.speaker}">
+                    <div class="message-header">
+                        ${msg.speaker === 'user' ? '👤 You' : '🤖 Assistant'} • ${new Date(msg.timestamp).toLocaleTimeString()}
+                    </div>
+                    <div class="message-text">${escapeHtml(msg.text)}</div>
+                </div>
+            `).join('');
+
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function renderToolCalls() {
+            const container = document.getElementById('toolCalls');
+            const countEl = document.getElementById('toolCount');
+            const calls = Object.values(state.toolCalls);
+            const activeCalls = calls.filter(c => c.status === 'running');
+            
+            countEl.textContent = `${activeCalls.length} active`;
+
+            if (calls.length === 0) {
+                container.innerHTML = '<div style="text-align: center; color: #888; margin-top: 50px;">No tool calls yet...</div>';
+                return;
+            }
+
+            container.innerHTML = calls.map(call => `
+                <div class="tool-call">
+                    <div class="tool-name">${escapeHtml(call.toolName)}</div>
+                    <div class="tool-args">${escapeHtml(JSON.stringify(call.args, null, 2))}</div>
+                    <div class="tool-status status-${call.status}">
+                        ${call.status === 'running' ? '⏳ Running' : call.status === 'completed' ? '✅ Completed' : '❌ Failed'}
+                    </div>
+                </div>
+            `).join('');
+
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function renderAudioLevel() {
+            const container = document.getElementById('audioVisualizer');
+            const bars = container.children;
+            const levelEl = document.getElementById('audioLevel');
+            const speechEl = document.getElementById('speechStatus');
+            
+            const latest = state.audioLevels[state.audioLevels.length - 1];
+            if (latest) {
+                levelEl.textContent = `Level: ${Math.floor(latest.level)}`;
+                speechEl.textContent = `Speech: ${latest.isSpeech ? 'Yes' : 'No'}`;
+            }
+
+            // Update bars
+            for (let i = 0; i < bars.length; i++) {
+                const levelIndex = state.audioLevels.length - bars.length + i;
+                if (levelIndex >= 0 && state.audioLevels[levelIndex]) {
+                    const { level, isSpeech } = state.audioLevels[levelIndex];
+                    const height = Math.min(Math.max(level / 100, 2), 100);
+                    bars[i].style.height = `${height}%`;
+                    bars[i].style.background = isSpeech 
+                        ? 'linear-gradient(to top, #4ade80, #22c55e)' 
+                        : 'linear-gradient(to top, #666, #888)';
+                } else {
+                    bars[i].style.height = '2px';
+                }
+            }
+        }
+
+        function renderApprovals() {
+            const container = document.getElementById('approvals');
+            const countEl = document.getElementById('approvalCount');
+            const approvals = Object.values(state.approvals);
+            
+            countEl.textContent = `${approvals.length} pending`;
+
+            if (approvals.length === 0) {
+                container.innerHTML = '<div style="text-align: center; color: #888; margin-top: 50px;">No pending approvals...</div>';
+                return;
+            }
+
+            container.innerHTML = approvals.map(approval => `
+                <div class="approval-item">
+                    <div class="approval-info">
+                        <div style="font-weight: bold; margin-bottom: 5px;">${escapeHtml(approval.toolName)}</div>
+                        <div style="font-size: 0.85rem; color: #aaa;">${escapeHtml(JSON.stringify(approval.args).substring(0, 100))}...</div>
+                    </div>
+                    <div class="approval-actions">
+                        <button class="btn btn-approve" onclick="approveApproval('${approval.approvalId}')">Approve</button>
+                        <button class="btn btn-deny" onclick="denyApproval('${approval.approvalId}')">Deny</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Action functions
+        function clearTranscript() {
+            state.transcript = [];
+            renderTranscript();
+        }
+
+        function navigateToSetup() {
+            window.location.href = '/setup';
+        }
+
+        function navigateToConfirm() {
+            window.location.href = '/api/confirm';
+        }
+
+        function navigateToTasks() {
+            window.location.href = '/tasks';
+        }
+
+        function testConnection() {
+            fetch('/health')
+                .then(res => res.json())
+                .then(data => {
+                    alert('Server is healthy!\n' + JSON.stringify(data, null, 2));
+                })
+                .catch(err => {
+                    alert('Connection failed: ' + err.message);
+                });
+        }
+
+        async function approveApproval(approvalId) {
+            try {
+                const response = await fetch(`/api/approvals/${approvalId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ approved: true })
+                });
+                
+                if (response.ok) {
+                    delete state.approvals[approvalId];
+                    renderApprovals();
+                }
+            } catch (error) {
+                console.error('Failed to approve:', error);
+            }
+        }
+
+        async function denyApproval(approvalId) {
+            try {
+                const response = await fetch(`/api/approvals/${approvalId}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ approved: false })
+                });
+                
+                if (response.ok) {
+                    delete state.approvals[approvalId];
+                    renderApprovals();
+                }
+            } catch (error) {
+                console.error('Failed to deny:', error);
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            initAudioVisualizer();
+            connectToEvents();
+        });
+    </script>
+</body>
+</html>

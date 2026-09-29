@@ -9,7 +9,11 @@ import {
 import {
   verifyScreenBeforeControl,
   requestApproval,
+  approvalTtlMs,
 } from './lib/security-extras.js';
+
+import { logEvent, colors, redactArgs } from './lib/pretty.js';
+import { eventEmitter } from './lib/event-emitter.js';
 
 import { appendToolAudit, cfg, undoRecord, undoList, undoMarkDone } from './lib/store.js';
 import { getPerformanceMonitor, createLogger } from './lib/monitor.js';
@@ -939,16 +943,22 @@ export async function dispatchTool(name, args) {
         if (screen.screenshot) entry.screenshot = screen.screenshot;
       }
 
-      // 2) Human approval (auto-approves iff AUTO_APPROVE=true)
+      // 2) Human approval (manual confirmation unless AUTO_APPROVE=true dev override)
       const isAuto = cfg('AUTO_APPROVE', 'false').toLowerCase() === 'true';
       if (!isAuto) {
-        console.log(`⚠️  Dangerous tool requested: ${name} ${JSON.stringify(args)}`);
-        console.log(`   Approve at http://localhost:${cfg('PORT', '3000')}/api/confirm (or set AUTO_APPROVE=true for dev)`);
+        logEvent('🔒', colors.yellow(`Confirmation needed: ${name}`), redactArgs(args), { maxLen: 140 });
+        console.log(colors.gray(
+          `   ⏳ Waiting for your decision (expires in ${Math.round(approvalTtlMs() / 1000)}s) — approve at http://localhost:${cfg('PORT', '3000')}/api/confirm`
+        ));
         playEarcon('attention');
       }
       const decision = await requestApproval(name, args);
       if (decision.auto || isAuto) {
-        console.log(`⚡ Auto-approved dangerous tool: ${name}`);
+        logEvent('⚡', colors.yellow(`Auto-approved: ${name}`), '(AUTO_APPROVE=true)', {});
+      } else if (decision.approved) {
+        logEvent('✓', colors.green(`Approved: ${name}`), decision.note || undefined, {});
+      } else {
+        logEvent('✗', colors.red(`Denied: ${name}`), decision.reason || decision.note || undefined, {});
       }
       entry.approval = decision;
       if (!decision.approved) {

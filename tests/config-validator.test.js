@@ -26,6 +26,15 @@ describe('configuration validator', () => {
     assert.ok(result.defaultsUsed.some(d => d.key === 'PORT'));
   });
 
+  it('defaults AUTO_APPROVE to false so dangerous tools need manual confirmation', async () => {
+    const { validateConfiguration } = await import('../lib/config-validator.js');
+    
+    const result = validateConfiguration({});
+    const aa = result.defaultsUsed.find((d) => d.key === 'AUTO_APPROVE');
+    assert.ok(aa, 'AUTO_APPROVE default applied');
+    assert.equal(aa.defaultValue, 'false');
+  });
+
   it('validates port number range', async () => {
     const { validateConfiguration } = await import('../lib/config-validator.js');
     
