@@ -18,12 +18,33 @@ npm start
 
 ### Agent Creation
 ```bash
-# Create the AssemblyAI agent with your tools and BYOK configuration
-# (OpenRouter + openrouter/free by default — just LLM_API_KEY;
-#  OPENAI_API_KEY/OPENAI_BASE_URL still work as fallback;
-#  local Ollama/LM Studio needs only LLM_BASE_URL, no key)
+# Create the AssemblyAI agent with your tools, BYOK configuration, and host
+# device context (installed apps). OpenRouter + openrouter/free by default —
+# just LLM_API_KEY; OPENAI_API_KEY/OPENAI_BASE_URL still work as fallback;
+# local Ollama/LM Studio needs only LLM_BASE_URL, no key.
 npm run publish  # alias of npm run setup-agent
 ```
+
+### Device Context (installed apps in the agent's knowledge)
+
+At publish time (`npm run publish`), `lib/device-context.js` inventories the host
+(Windows uninstall registry via PowerShell, macOS /Applications, Linux .desktop
+files) plus OS facts, and injects a compact block into the agent's system
+prompt:
+
+- The voice agent launches apps by their real installed names instead of
+  guessing (no more "The system cannot find the file Control Panel" detours).
+- When discovery is unavailable, it falls back to the common built-in Windows
+  app list and says so in the prompt.
+- The runtime `list_installed_apps` tool re-uses the same discovery path for a
+  live, full inventory.
+- Re-publish whenever installed apps change materially: the prompt is baked
+  into the stored agent, not re-read per session.
+
+The same prompt also makes the agent a **source of knowledge**: conceptual or
+factual questions ("Tell me about Transformer model architecture") are answered
+directly from model knowledge, while time-sensitive questions go through
+`web_search` first (Gemini Search Grounding fallback needs only `GEMINI_API_KEY`).
 
 ### Computer Use (Gemini vision automation, on by default)
 
@@ -58,6 +79,10 @@ launches Playwright Chromium per task and closes it afterwards.
 - `plan_task` decomposes goals (LLM via `lib/llm.js`, or explicit `steps`
   for programmatic use/tests); steps are validated against the live registry
   at plan time. Memory hits are injected as planner context.
+- The published agent prompt carries a "HOW TO PLAN AND EXECUTE MULTI-STEP
+  WORK" section (setup-agent.js) so the voice agent reaches for
+  `plan_task`/`execute_plan` on multi-step goals, `save_workflow`/`run_workflow`
+  for recurring routines, and direct tools for simple requests.
 - `execute_plan` runs steps through the real dispatcher (pass `dispatchTool`
   in, same anti-cycle pattern as workflows), with per-step `verify`
   checks, checkpoints after every step (`plans` table), one retry for

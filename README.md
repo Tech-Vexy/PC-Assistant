@@ -1,447 +1,252 @@
 # PC Personal Voice Assistant
 
-A production-grade PC-native personal voice assistant that enables hands-free interaction with Gmail, Google Calendar, web search, and direct device manipulation using AssemblyAI's Voice Agent API and MCP servers.
+A local-first, voice-driven assistant for your PC that is both a **knowledge source** and a **hands-free computer controller**. Ask it to explain something ("Tell me about Transformer model architecture"), to look something up ("What's the latest on X?"), or to actually *do* things on your machine ("Open Control Panel", "organize my Downloads folder", "check my email in the browser") — it talks back through your speakers.
 
-**Local-first: everything runs on your PC.** The Node.js auth/token server binds to `127.0.0.1` only, API keys stay in your local store, and there is no deployment step — no Docker, no hosting, no cloud services besides the APIs themselves (AssemblyAI, Google).
+Everything runs on your PC: the auth/token server binds to `127.0.0.1` only, API keys stay in your local store, and there is no deployment step — no Docker, no hosting. The only cloud services are the APIs themselves (AssemblyAI voice, your chosen LLM, Gemini for vision/search).
 
-## Storage (DuckDB)
+---
 
-All runtime state lives in a single DuckDB file, `data/assistant.db` (gitignored, override with `STORE_PATH`):
+## What you can say
 
-| Table | Replaces | Contents |
-|---|---|---|
-| `config` | `.env` (runtime) | API keys, provider URLs, models, timeouts, safety flags |
-| `oauth_tokens` | `tokens.json` | Google access + refresh tokens |
-| `sessions` | `.session-state.json` | Voice session ID + last transcript |
-| `tool_audit` / `security_audit` | `tool-audit.log` / `security-audit.log` | Every tool call + security event, queryable |
-
-Config precedence: **environment variables > database > built-in defaults**, so shell-exported vars and tests keep working. First boot migrates legacy files once (seed-only, fingerprint-guarded so logs are never double-imported); afterwards the old files aren't written — `tokens.json`, `.session-state.json`, and the audit logs can be deleted. `.env` remains as first-run seed plus bootstrap mirror (`PORT`, audio/wake-word settings the processes need before the DB is reachable).
-
-Architecture note: DuckDB allows only one read-write opener per file, so **the server is the sole writer**. The voice-agent process talks to it over localhost HTTP (`/api/store/*`, same header gate as approval delegation) and never opens the file. Still plaintext at rest — OS disk encryption (BitLocker/FileVault) is the at-rest story.
+| You say | What happens |
+|---|---|
+| "Tell me about Transformer model architecture" | Answered directly from model knowledge — structured explanation, no tools fired |
+| "What's the current price of the Framework 16?" | `web_search` first (time-sensitive → live results with sources), then a spoken summary |
+| "Open Control Panel" | Launched by real name from the agent's knowledge of your installed apps |
+| "Open my Tafiti project and start the dev server" | `plan_task` decomposes → `execute_plan` runs each step with verification + checkpoints |
+| "Organize my Downloads folder" | `file_organize` sorts files into category folders (reversible via `undo_last`) |
+| "Remember my editor is VS Code" | `remember` — later "open the project in my editor" just works |
+| "Every morning prepare my workspace" | `save_workflow` once, then `run_workflow` on demand |
+| "Mute, next track, read my clipboard" | Media + volume + clipboard in one sentence |
 
 ## Features
 
-- **Voice-first interaction** via AssemblyAI's single WebSocket at $4.50/hr
-- **Real-time barge-in interruption** that halts assistant TTS playback immediately when you speak
-- **Zero-dependency audio earcons** (listening, success, attention, interrupted chimes) synthesized dynamically in pure PCM16
-- **Desktop productivity suite** for app launching, window management, media/volume controls, and clipboard manipulation
-- **Vision-guided UI automation** via the `computer_use` tool (Gemini Computer Use): the agent screenshots the screen, decides the next mouse/keyboard action, executes it, and verifies the result — for tasks like *"Open Google Chrome"* or filling web forms
-- **BYOK flexibility** for custom LLM endpoints
-- **Extensible tool layer** via MCP servers (Gmail, Calendar, Search, Device Control)
-- **On-device wake word** with no audio leaving the machine until engaged
-- **Layered security** addressing MCP tool poisoning, device control risks, and token hardening
-- **Local auth service** keeping API keys server-side and minting one-time temporary tokens
+- **Voice-first interaction** over AssemblyAI's single WebSocket (STT → LLM → TTS → tool calling)
+- **Knowledge + search**: answers conceptual questions from its own knowledge; goes to `web_search` (Google Search Grounding) when information could be time-sensitive
+- **Knows your machine**: at publish time the agent is told your OS and your **installed applications**, so it launches real apps instead of guessing
+- **Vision-guided UI automation** via Gemini Computer Use: screenshot → decide → act → verify loops on the real desktop or in a Chromium browser, with confirmation gates on consequential actions
+- **Planner & executor**: multi-step goals become verified, checkpointed, resumable plans; recurring routines become saved workflows
+- **Memory**: preferences, project locations, and facts persist in a local DuckDB store
+- **Undo layer**: file moves/renames, memories, workflows — automatically reversible; shell/computer-use actions journaled for human review
+- **Sub-agents**: spawn scoped specialists (deny-by-default tool allowlists, budgets, isolation)
+- **Real-time barge-in**: start talking and it stops listening to itself; synthesized earcons for listening/success/attention states
+- **On-device wake word** with openWakeWord → Sherpa-ONNX → energy-VAD fallback chain
+- **Layered security**: confirmation queues, allowlists, veto lists, prompt-injection detection, audit trails, signed tool manifest
+
+## Quick start
+
+**Prerequisites**
+
+- Node.js 18+
+- [pnpm](https://pnpm.io/) (or npm — the scripts are identical)
+- [FFmpeg](https://ffmpeg.org/download.html) on PATH (audio capture + playback)
+  - Windows: download a build and add it to PATH; check with `ffmpeg -version`
+  - macOS: `brew install ffmpeg` · Linux: `sudo apt install ffmpeg`
+
+**API keys you'll need**
+
+| Key | For | Where |
+|---|---|---|
+| `ASSEMBLYAI_API_KEY` | Voice pipeline (STT/TTS/tool calls) — required | [assemblyai.com](https://www.assemblyai.com/dashboard/api-key) |
+| `LLM_API_KEY` | Voice LLM via OpenRouter (free model by default) — required | [openrouter.ai/keys](https://openrouter.ai/keys) |
+| `GEMINI_API_KEY` | Computer Use vision loop + Google Search Grounding — recommended | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+
+**Run it**
+
+```bash
+pnpm install
+pnpm run up
+```
+
+The launcher does everything: creates `.env` from the template, warns about missing FFmpeg, signs the tool manifest, starts the local server, opens `http://localhost:3000/setup` in your browser if keys are missing, gathers your installed apps, publishes the AssemblyAI agent on first run, then starts listening. **Ctrl+C stops everything.**
+
+Ideas for the first conversation: *"Tell me about how LLM attention works"* · *"What did the latest Chromium release change?"* · *"Open Calculator"*.
+
+<details>
+<summary>Running the pieces manually (separate terminals)</summary>
+
+```bash
+pnpm start        # local server: tokens, approvals UI, store API  → :3000
+pnpm run agent    # voice agent (talk now)
+pnpm run wakeword # idle on wake word, spawns the agent on detection
+```
+</details>
+
+## Configuration
+
+Keys can be set in `.env` or in the browser UI at `http://localhost:3000/setup` (recommended — validation, secrets never echoed back). Precedence: **environment variables > database > defaults**.
+
+```env
+# .env — minimal config
+ASSEMBLYAI_API_KEY=...   # voice pipeline
+LLM_API_KEY=...          # OpenRouter key (base URL + free model are defaults)
+GEMINI_API_KEY=...       # Computer Use + Search Grounding
+PORT=3000
+```
+
+Common tuning knobs (all optional, validated at startup):
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `FAST_MODEL` / `STRONG_MODEL` | `openrouter/free` | Voice LLM models (any OpenAI-compatible endpoint works via `LLM_BASE_URL`, incl. Ollama/LM Studio) |
+| `COMPUTER_USE_MAX_STEPS` / `COMPUTER_USE_STEP_TIMEOUT_MS` | 20 / 30000 | Vision-loop budgets |
+| `COMPUTER_USE_ENVIRONMENT` | `desktop` | Default surface: `desktop` or `browser` |
+| `COMPUTER_USE_ENABLE_PROMPT_INJECTION_DETECTION` | `true` | Screenshot scanning for adversarial instructions |
+| `GEMINI_VISION_MODEL` / `GEMINI_MODEL` | `gemini-3.8-flash` / `gemini-2.5-flash` | Vision loop model / search-grounding model |
+| `AUTO_APPROVE` | `false` | Dev-only: skip the approval queue for dangerous tools |
+| `BARGE_IN_THRESHOLD` | `8000` | Mic energy threshold for interrupting playback (0 disables) |
+| `WAKEWORD_ENGINE` / `WAKEWORD_THRESHOLD` | `auto` / `0.5` | Wake word engine and sensitivity |
+| `SCREEN_VERIFY` | `false` | Screenshot-verify device-control actions before execution |
+| `STORE_PATH` | `data/assistant.db` | DuckDB store location |
+
+## The published agent & device context
+
+Your voice sessions bind to a **stored agent** on AssemblyAI (`AGENT_ID` in `.env`). Publishing (`pnpm run publish`) bakes in:
+
+1. **Tool definitions** — the full local tool registry, semantically vetted and covered by a signed integrity manifest.
+2. **System prompt** — knowledge-first guidance, the planning workflow, and security rules.
+3. **Device context** — your OS facts and **installed application names** (Windows uninstall registry, macOS `/Applications`, Linux `.desktop` files), so app launches use real names. If discovery is unavailable it falls back to the common built-in app list and says so honestly.
+4. **LLM routes** — your BYOK provider(s), with optional cross-provider fallbacks via `LLM_FALLBACK_MODELS`.
+
+> **Re-publish whenever** tools, the system prompt, or your installed apps change materially — the prompt is a snapshot, not re-read per session. `pnpm run up` publishes automatically only when `AGENT_ID` is missing; to adopt an updated agent, put its printed `AGENT_ID` into `.env` (or set it at `/setup`).
+
+## Approvals, audit, and control surfaces
+
+- **Dangerous tools** (shell, device control, app launches, sending communications, computer use, plan execution, undo) pause until you approve them at `http://localhost:3000/api/confirm` — a live queue shared by every process. `AUTO_APPROVE=true` skips it, for development only.
+- **Every tool call and security event** is written to the DuckDB audit tables:
+
+  ```bash
+  node -e "import('./lib/store.js').then(async (s) => { await s.initStore(); console.table(await s.recentToolAudits(10)); await s.closeStore(); process.exit(0); })"
+  ```
+
+- **`http://localhost:3000/tasks`** shows plans and sub-agents with per-step results.
+- **`http://localhost:3000/api/metrics`** exposes tool timings and success rates.
+- **`POST /test-tool`** dispatches a single tool by hand (dangerous ones still queue for approval).
+
+## Tools reference
+
+| Tool | Description | Safety |
+|---|---|---|
+| `web_search` | Live Google Search Grounding (Gemini key) or Custom Search if configured | Read-only |
+| `list_installed_apps` | Inventory installed applications | Read-only |
+| `open_application` | Launch an installed app by name (with aliases) | Confirmation gate |
+| `manage_windows` | Minimize/restore all, focus or close a window | Confirmation gate |
+| `media_control` | Volume, mute (absolute state, not blind toggle), play/pause, skip | Safe |
+| `clipboard` | Read or write clipboard | Safe |
+| `move_mouse` / `click_mouse` | Cursor movement and clicks | Screenshot verify |
+| `type_text` / `press_keys` | Typing and shortcuts | Screenshot verify |
+| `system_status` | CPU/memory/disk/network | Read-only |
+| `list_processes` / `kill_process` | Process listing / termination | Read-only / protected-PID guard |
+| `run_command` | Allowlisted shell command (no chaining) | Confirmation gate |
+| `terminal_execute` / `terminal_start` / `terminal_read` / `terminal_input` / `terminal_kill` | One-shot + interactive background terminal sessions | Confirmation gate / session-scoped |
+| `file_organize` / `file_rename` / `file_find` / `file_convert` | Folder organization, templated renames, search, document conversion (LibreOffice) | Confirmation gate; first two auto-reversible |
+| `computer_use` | Vision-guided desktop/browser automation loop | Per-action gates + veto list + injection detection |
+| `remember` / `recall` / `forget` / `resolve_location` | Semantic memory for preferences, locations, projects | Validated, audited |
+| `save_workflow` / `list_workflows` / `run_workflow` / `delete_workflow` | Reusable multi-step routines | Validated; run gated |
+| `plan_task` / `execute_plan` / `plan_status` / `list_plans` / `cancel_plan` | Goal → verified, checkpointed, resumable plan execution | Gated; planning is side-effect free |
+| `spawn_agent` / `list_agents` / `agent_status` / `cancel_agent` / `send_to_agent` | Scoped sub-agents with budgets and isolation | Gated |
+| `undo_last` / `undo_session` / `list_undo` | Reverse journaled actions (auto-reversible ones applied; manual ones surfaced) | Gated |
+
+## Planning, workflows, memory, undo
+
+- **Plans** — *"Open the Tafiti project and start the dev server"* → `plan_task` decomposes the goal (grounded in remembered context), `execute_plan` runs it with per-step verification, a checkpoint after every step, one retry for transient failures (timeouts, 429/503), and resume-on-rerun. Watch it at `/tasks`.
+- **Workflows** — recurring routines saved once, replayed through the same per-step gates.
+- **Memory** — *"Remember that my Tafiti project lives at C:\Projects\tafiti"*; later *"Open Tafiti"* resolves through memory instead of asking again.
+- **Undo** — *"Undo that"* reverses the last auto-reversible action (file moves/renames, memory/workflow edits, created files). Shell commands and computer-use actions are journaled but only a human reverses those — `list_undo` shows exactly what changed.
+
+## Google services (Gmail, Calendar)
+
+Direct Google OAuth is **disabled** in this build; Gmail/Calendar tools return guidance instead. The agent handles email and calendar through the **browser**: it uses `computer_use` (environment `browser`) to open Gmail or Google Calendar, compose, and click through — with the standard confirmation gates before anything is sent. No Google Cloud project, OAuth client, or token files are needed.
 
 ## Architecture
 
 ```
-[Microphone] → [Wake Word Engine] → (detected) → [Audio Capture PCM16 24kHz]
+[Microphone] → [Wake Word Engine] → [Audio Capture PCM16 24kHz]
     → [WebSocket: wss://agents.assemblyai.com/v1/ws?token=...]
-    → [AssemblyAI: STT → LLM → Tool Call? → TTS]
-    → [Tool Call] → [Local Node.js Dispatcher] → [MCP Server] → [External API]
-    → [Tool Result] → [WebSocket: tool.result] → [AssemblyAI] → [TTS Audio]
-    → [Speaker]
+    → [AssemblyAI: STT → LLM (your BYOK routes) → tool call? → TTS]
+    → [tool.call] → [Local dispatcher: validation → approval gate → audit → undo journal]
+         → handler (native tool, or Gemini Computer Use loop for UI tasks)
+    → [tool.result] → [AssemblyAI TTS] → [Speaker, barge-in aware]
 ```
 
-> For the comprehensive Version 2.0 design covering Gemini Computer Use, vision-guided desktop/browser automation loops, AssemblyAI LLM Gateway routing, and HITL safety policies, see [ARCHITECTURE.md](ARCHITECTURE.md).
+The voice agent process and the local server are separate: **the server is the sole writer** of the DuckDB store (`data/assistant.db` — config, tokens, sessions, memories, workflows, plans, agents, undo journal, audit trails); the agent reaches it over localhost HTTP. Config precedence is env > DB > defaults, and legacy files (`tokens.json`, `.session-state.json`, audit logs) are migrated once and never written again.
 
-## Prerequisites
+For the full design — Computer Use loops, safety policies, LLM routing — see [ARCHITECTURE.md](ARCHITECTURE.md).
 
-- Node.js 18+ 
-- FFmpeg (for audio capture and playback)
-- AssemblyAI API key
-- (Optional) Gemini API key (for Computer Use vision loop & Google Search grounding)
+## Security
 
-## Installation
-
-1. **Clone the repository and install dependencies:**
-
-```bash
-cd pc_assistant
-npm install
-```
-
-2. **Install FFmpeg:**
-
-- **Windows:** Download from [ffmpeg.org](https://ffmpeg.org/download.html) and add to PATH
-- **macOS:** `brew install ffmpeg`
-- **Linux:** `sudo apt install ffmpeg` or `sudo yum install ffmpeg`
-
-3. **Start everything with one command:**
-
-```bash
-npm run up
-```
-
-This bootstraps `.env`, checks prerequisites, signs the tool manifest, starts
-the server, opens the browser setup UI if keys are missing, auto-publishes the
-AssemblyAI agent when keys exist, then starts the voice agent. Ctrl+C stops
-everything. Add `-- --wakeword` to idle on the wake word instead of talking
-immediately. (Separate terminals still work: `npm start` + `npm run agent` +
-`npm run wakeword`.)
-
-4. **Manual configuration (optional — `npm run up` covers this):**
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` with your credentials — by hand, or start the server and open
-`http://localhost:3000/setup` for a browser form (provider presets, validation,
-secrets never displayed back):
-
-```env
-# AssemblyAI (voice pipeline)
-ASSEMBLYAI_API_KEY=your_assemblyai_api_key_here
-
-# Voice LLM: OpenRouter + free model by default — just add your key
-# (https://openrouter.ai/keys). Base + openrouter/free model are baked in.
-LLM_API_KEY=your_openrouter_api_key_here
-
-# Google (Gmail/Calendar)
-GOOGLE_CLIENT_ID=your_google_client_id_here
-GOOGLE_CLIENT_SECRET=your_google_client_secret_here
-
-# Computer Use vision loop (on by default) needs a Gemini key
-# (https://aistudio.google.com/apikey)
-# GEMINI_API_KEY=
-
-# Server Configuration
-PORT=3000
-```
-
-4. **Verify prerequisites and sign the tool manifest:**
-
-```bash
-npm run setup        # checks node, ffmpeg, .env, signs tool manifest
-npm run check-ffmpeg # lists audio devices, tests 2s capture
-npm run setup-gcp    # validates Google OAuth scopes, APIs, stored tokens
-```
-
-## Google Cloud Setup
-
-1. **Create a Google Cloud project** and enable the following APIs:
-   - Gmail API
-   - Google Calendar API
-   - (Optional) Custom Search API
-
-2. **Configure OAuth consent screen:**
-   - External for testing, Internal for Workspace
-   - Add required scopes: `gmail.readonly`, `gmail.send`, `calendar.readonly`, `calendar.events`
-
-3. **Create OAuth 2.0 credentials:**
-   - Application type: Desktop application
-   - Add `http://localhost:3000/callback` as authorized redirect URI
-
-4. **(Optional) Set up Google Custom Search:**
-   - Create a Programmable Search Engine
-   - Enable Custom Search API
-   - Get API key and Search Engine ID (cx)
-
-## AssemblyAI Agent Setup
-
-1. **Create a stored agent** with your tools and BYOK configuration
-   (OpenRouter + free model by default — `npm run up` does this for you):
-
-```bash
-npm run publish   # alias of npm run setup-agent
-```
-
-Or manually create via REST API (swap in your provider's `base_url`/`model`/`api_key`):
-
-```bash
-curl -X POST https://agents.assemblyai.com/v1/agents \
-  -H "Authorization: Bearer $ASSEMBLYAI_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "PC Personal Assistant",
-    "system_prompt": "You are a personal assistant on the user'\''s PC. You can search the web, read/send email, manage calendar, control the desktop (mouse, keyboard, windows), and monitor system health.",
-    "voice": { "voice_id": "alba" },
-    "llm": [{
-      "base_url": "https://openrouter.ai/api/v1",
-      "model": "openrouter/free",
-      "api_key": "YOUR_OPENROUTER_API_KEY"
-    }],
-    "tools": [...] // Use the tool definitions from tools.js
-  }'
-```
-
-2. **Copy the returned `agent_id` to your `.env` file** (or set it at
-   `http://localhost:3000/setup`).
-
-   Provider/model changes afterwards need **no re-publish**: the voice agent
-   sends the local `LLM_BASE_URL` + `LLM_API_KEY` + `FAST_MODEL`/`STRONG_MODEL`
-   as a session override on every connect. Re-publish only when tools, the
-   system prompt, or the voice change.
-
-## Usage
-
-### Start the Auth Server
-
-```bash
-npm start
-```
-
-The server will run on `http://localhost:3000`.
-
-### Authenticate with Google
-
-1. Visit `http://localhost:3000/auth` in your browser
-2. Complete the Google OAuth flow
-3. Tokens will be saved to `tokens.json`
-
-### Start the Voice Agent
-
-```bash
-npm run agent
-```
-
-The agent will:
-1. Fetch a temporary AssemblyAI token from your local server
-2. Connect to the AssemblyAI Voice Agent WebSocket
-3. Start listening for voice input
-4. Process tool calls through local handlers
-5. Play audio responses
-
-### Start Wake Word Detection
-
-```bash
-npm run wakeword
-```
-
-Engine is auto-selected (`WAKEWORD_ENGINE=auto`): openWakeWord if its Python
-package is installed, else Sherpa-ONNX if configured, else an energy-based
-voice-activity trigger that needs only FFmpeg. On wake, it spawns the voice
-agent and resumes listening when the session ends.
-
-### Approve dangerous tool calls
-
-`send_email`, `create_event`, mouse/keyboard, `kill_process`, and
-`run_command` pause until you approve them at
-`http://localhost:3000/api/confirm` (auto-refreshing page). The voice agent
-process delegates approvals to the server automatically, so calls from either
-process show up in the same UI. For development only, set `AUTO_APPROVE=true`
-to skip the queue. `POST /test-tool` dispatches a single tool (dangerous ones
-still queue for approval).
-
-### Inspect the store
-
-```bash
-# Recent tool calls, straight from DuckDB
-node -e "import('./lib/store.js').then(async (s) => { await s.initStore(); console.table(await s.recentToolAudits(10)); await s.closeStore(); process.exit(0); })"
-```
-
-### Run in the background (Windows)
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\install-service.ps1
-```
-
-Installs a logon Scheduled Task in your user session (services run isolated in
-Session 0, where mouse/keyboard control fails) plus a Startup shortcut.
-`npm run tray` shows a console status monitor. Uninstall with
-`scripts\uninstall-service.ps1`.
-
-### Tests
-
-```bash
-npm test   # 111 tests: security, cache/router, MCP mock server, dispatcher, routes, desktop suite, remote approvals, Computer Use loop & safety gates, memory & workflows, terminal sessions, planner & executor, sub-agents
-```
-
-## Available Tools
-
-| Tool | Description | Safety |
-|---|---|---|
-| `web_search` | Search the web with live Google Search Grounding | Read-only |
-| `computer_use` | Vision-guided desktop/browser UI automation (screenshot → decide → act loop) | Per-action confirmation gates + local veto list |
-| `open_application` | Launch desktop applications | Confirmation gate |
-| `manage_windows` | Minimize, restore, or focus windows | Read-only / Safe |
-| `media_control` | Control volume and media playback | Read-only / Safe |
-| `clipboard` | Read or write clipboard contents | Read-only / Safe |
-| `move_mouse` | Move cursor | Screenshot verify |
-| `type_text` | Type at cursor | Screenshot verify |
-| `press_keys` | Keyboard shortcut | Allowlist |
-| `system_status` | CPU/memory/disk/net | Read-only |
-| `list_processes` | List processes | Read-only |
-| `kill_process` | Terminate process | Protected PIDs guard |
-| `run_command` | Allowlisted command | Strict allowlist |
-| `terminal_execute` | Run allowlisted command with cwd + timeout, wait for exit | Confirmation gate |
-| `terminal_start` | Start a background session (dev servers, REPLs); approved once | Confirmation gate |
-| `terminal_read` | Poll new session output | Session-scoped |
-| `terminal_input` | Type into session stdin (covered by start approval) | Session-scoped |
-| `terminal_kill` | Terminate a session | Session-scoped |
-| `remember` | Store a preference, location, project path, or fact | Validated, audited |
-| `recall` | Search stored memories (exact key + substring, category filter) | Read-only |
-| `forget` | Delete a stored memory | Validated, audited |
-| `resolve_location` | Resolve a project/place alias to its saved path | Read-only |
-| `save_workflow` | Save a named multi-step tool sequence (steps validated on save) | Validated, audited |
-| `list_workflows` | List workflows with use/success stats | Read-only |
-| `run_workflow` | Execute a workflow step by step (per-step gates still apply) | Confirmation gate |
-| `delete_workflow` | Delete a saved workflow | Validated, audited |
-| `plan_task` | Decompose a goal into an executable plan (LLM or explicit steps) | Validated (side-effect free) |
-| `execute_plan` | Run a plan with verification, checkpoints, retry, resume | Confirmation gate |
-| `plan_status` | Plan detail with per-step results + checkpoint | Read-only |
-| `list_plans` | Recent plans with progress | Read-only |
-| `cancel_plan` | Cancel a plan (executor stops at next step) | Validated, audited |
-| `spawn_agent` | Spawn a specialist sub-agent (deny-by-default tools, budgets) | Confirmation gate |
-| `list_agents` | Sub-agents with status, depth, parent linkage | Read-only |
-| `agent_status` | Full agent detail: role, budget, messages, result | Read-only |
-| `cancel_agent` | Cancel a sub-agent (stops at next step boundary) | Validated, audited |
-| `send_to_agent` | Queue a message for a live sub-agent | Validated, audited |
-
-### Sub-agents
-
-Fully dynamic specialists — no presets. *"Research the Gemini Live API and
-summarize Flutter-relevant changes"* → `spawn_agent` with a researcher role
-and a browser/search-only allowlist. High-risk toolsets (terminal, computer
-use, email) run in an isolated worker process and report back through the
-store; safe ones run in-process. Guardrails: max 10 active agents, max depth
-3, max 4 parallel, per-agent step + timeout budgets. Watch everything in
-`http://localhost:3000/tasks` next to plans.
-
-### Planner & tasks
-
-`plan_task` turns *"Open the Tafiti project and start the dev server"* into
-ordered tool calls (grounded with memory context — known locations are used,
-not re-asked). `execute_plan` runs them with per-step verification, a
-checkpoint after every step, one retry for transient failures, and resume via
-re-running `execute_plan`. Watch progress at `http://localhost:3000/tasks`
-(auto-refreshing timeline with per-step results).
-
-### Memory & workflows
-
-Teach the assistant once, reuse forever:
-
-- *"Remember that my Tafiti project lives at C:\Projects\tafiti"* → `remember`
-  (`project:tafiti`), later *"Open Tafiti"* resolves via `resolve_location`.
-- *"Remember my editor is VS Code"* → `recall` finds it before asking again.
-- *"Save 'prepare-tafiti' as: open VS Code, then open Chrome"* →
-  `save_workflow`, later `run_workflow` replays it with per-step approvals.
-- Memories live in the DuckDB `memories` table, workflows in `workflows`
-  (with use/success counters for future workflow learning).
-
-## Security Features
-
-### MCP Tool Poisoning Protection
-- Tool description sanitization
-- Argument validation
-- Security event logging
-- Rate limiting for dangerous operations
-
-### Device Control Safety
-- Confirmation gates for destructive actions
-- Protected PID checks
-- Strict command allowlist
-- Audit logging for all tool calls
-
-### Computer Use Safety (Gemini vision automation)
-- Official RULE 1/2 (USER_CONFIRMATION / ACTUATE) system instruction on every request
-- Model `safety_decision` honored: `require_confirmation` queues a human approval, `blocked` halts the task
-- Independent local veto list (credential stores, destructive commands, prompt-injection phrasing in action intents) enforced even if the model allows the action
-- Local always-confirm list (send/purchase/login/download/delete/accept-terms) mapped to the same `/api/confirm` queue
-- `enable_prompt_injection_detection: true` — screenshot pixels scanned for hidden adversarial instructions
-- Hard caps: max steps, per-step timeout, 5-minute wall-clock limit, one task at a time
-- Every action audited to the `tool_audit` store; tasks can be denied at any gate and the voice agent relays the outcome
-
-### Token & Auth Hardening
-- Short-lived AssemblyAI temporary tokens (5 minutes)
-- Local server keeps permanent API keys secure
-- Restricted file permissions for tokens.json
-- Session lifecycle management to prevent billing surprises
-- OAuth `state` validation on the Google callback (CSRF protection)
-- Cross-origin approval POSTs rejected (browsers can't forge custom headers on form posts)
-- Unpredictable 128-bit approval IDs, so pending approvals can't be guessed
-- Approval requests are only accepted from known internal clients (header-gated), and the decision API is separate from the browser form path
-- Tool manifest integrity verified at server startup (`npm run sign-manifest` re-signs after tool changes)
-
-## Security Monitoring
-
-All tool calls are logged to `tool-audit.log` with:
-- Timestamp
-- Tool name
-- Arguments
-- Result/error
-
-Security events are logged with severity levels:
-- HIGH: Unauthorized access, dangerous operations
-- MEDIUM: Tool execution, validation failures
-- LOW: Normal operations
+- **Human in the loop**: confirmation queue for every consequential action; the voice agent describes what it's about to do and relays outcomes.
+- **Computer Use safety**: official RULE 1/2 (USER_CONFIRMATION / ACTUATE) system instruction; model `safety_decision` honored (`require_confirmation` → approval queue, blocked → halt); an independent local veto list (credential stores, destructive commands, injection phrasing); `enable_prompt_injection_detection: true`; hard caps on steps, per-step timeout, wall clock, and concurrency.
+- **Shell safety**: strict allowlist, no chaining/pipes/redirection, protected process guards on kill/close.
+- **Auth hardening**: 5-minute temporary voice tokens, header-gated internal store API, unpredictable approval IDs, CSRF-checked callbacks, cross-origin approval POSTs rejected.
+- **Integrity**: tool descriptors are semantically vetted and covered by a signed manifest verified at server startup.
+- **At rest**: the store is plaintext on disk — OS disk encryption (BitLocker/FileVault) is the at-rest story; `.env` and tokens are gitignored with restrictive permissions.
 
 ## Troubleshooting
 
-### Audio Issues
-- Ensure FFmpeg is installed and accessible
-- Check microphone device name in `agent.js`
-- Test audio capture: `ffmpeg -f dshow -list_devices true -i dummy` (Windows)
+**"FFmpeg not on PATH" at startup** — install FFmpeg (see Quick start) or install the audio features later; the server still boots for setup.
 
-### OAuth Issues
-- Verify redirect URI matches Google Cloud Console
-- Check that tokens.json exists and is valid
-- Re-authenticate if tokens expire
+**The agent launches the wrong app / can't find one** — say "list my installed apps"; if the app is missing from the list, re-publish (`pnpm run publish` + update `AGENT_ID`) so device context refreshes. `open_application` knows common aliases ("control panel" → `control`).
 
-### AssemblyAI Issues
-- Verify API key is valid
-- Check agent_id matches your stored agent
-- Ensure temporary token minting works via `/api/voice-token`
+**Computer Use errors with a 400 about `enable_prompt_injection_detection`** — you're on an old `@google/genai` interaction shape; update dependencies (`pnpm install`) so the snake_case interactions API is used.
 
-### Tool Execution Errors
-- Check `tool-audit.log` for detailed error messages
-- Verify MCP server credentials are configured
-- Ensure required APIs are enabled in Google Cloud
+**Voice doesn't capture** — test your mic: `ffmpeg -f dshow -list_devices true -i dummy` (Windows; macOS uses avfoundation, Linux ALSA), or set `AUDIO_DEVICE`.
 
-## Billing Considerations
+**Dangerous tool seems stuck** — approve it at `http://localhost:3000/api/confirm` (or set `AUTO_APPROVE=true` for dev). Check the audit trail if unsure what ran.
 
-**AssemblyAI Voice Agent API:** $4.50/hr flat ($0.075/min)
-- Includes STT, LLM reasoning, TTS, turn detection, tool calling
-- Temporary tokens have 30-second grace window after disconnect
-- Always send explicit `session.end` to avoid idle charges
-- BYOK LLM providers billed separately
+**AssemblyAI connection issues** — verify `ASSEMBLYAI_API_KEY`, that `AGENT_ID` matches a published agent, and that `http://localhost:3000/api/voice-token` returns a token while the server runs.
+
+**Store locked / config not saving** — DuckDB allows one writer: make sure only one server process runs; the agent intentionally never opens the DB file.
+
+## Billing notes
+
+- **AssemblyAI Voice Agent API**: $4.50/hr flat (STT, LLM turn-taking, TTS, tool calling included). Sessions get a 30-second reconnect grace window; explicit `session.end` is sent on shutdown to avoid idle charges.
+- **LLM + Gemini vision** are billed by your providers (BYOK). The default OpenRouter route can be a free model; Computer Use and Search Grounding use your Gemini key.
 
 ## Development
 
-### Project Structure
-
 ```
-voice-assistant/
-├── server.js              # Auth + token minting
-├── agent.js               # AssemblyAI WebSocket + tool dispatch + barge-in
-├── wakeword.js            # Wake word listener
-├── computer-use/          # Gemini Computer Use (vision-guided UI automation)
-│   ├── gemini-client.js   # @google/genai Interactions API wrapper
-│   ├── dispatch.js        # Screenshot → decide → act loop orchestration
-│   ├── desktop-executor.js# nut.js action execution (real desktop)
-│   ├── browser-executor.js# Playwright action execution (Chromium)
-│   ├── safety.js          # RULE 1/2 instruction, veto/confirm policy, gates
-│   ├── screenshot.js      # Desktop + browser screenshot capture
-│   └── coordinates.js     # 0-1000 → pixel denormalization
+pc_assistant/
+├── server.js               # Local server: tokens, approvals, store API, setup UI
+├── agent.js                # Voice agent: WebSocket, audio, VAD/barge-in, dispatch
+├── wakeword.js             # Wake word supervisor (openWakeWord → sherpa → energy)
+├── setup-agent.js          # Publishes the stored agent (tools + prompt + device context)
+├── tools.js                # Unified tool definitions + security-checked dispatcher
+├── security.js             # Dangerous-tool gates, argument validation, rate limits
 ├── lib/
-│   ├── sound-effects.js   # Synthesized PCM16 audio earcons/chimes
-│   ├── mcp-client.js      # Pool-based stdio MCP JSON-RPC client
-│   ├── security-extras.js # Manifest signing & semantic vetting
-│   ├── model-router.js    # Fast/strong LLM routing + provider resolution
-│   └── store.js           # DuckDB store: config, tokens, sessions, audits
-├── tools/
-│   ├── desktop-suite.js   # Apps, window management, media, clipboard
-│   ├── gmail-mcp.js       # Gmail tool handlers
-│   ├── calendar-mcp.js    # Calendar tool handlers
-│   ├── search-mcp.js      # Google Search tool handlers
-│   ├── device-control.js  # Mouse/keyboard automation
-│   ├── system-monitor.js  # CPU, memory, process management
-│   └── shell-control.js   # Allowlisted shell commands
-├── tools.js               # Unified tool definitions + dispatcher
-├── security.js            # Security measures and validation
-├── data/assistant.db      # DuckDB store (gitignore; override with STORE_PATH)
-└── .env                   # First-run seed + bootstrap mirror (PORT, audio)
+│   ├── store.js            # DuckDB store (config, sessions, memory, plans, audit, undo)
+│   ├── device-context.js   # OS + installed-apps inventory for the agent prompt
+│   ├── model-router.js     # BYOK LLM routes, fast/strong routing, fallback chain
+│   ├── security-extras.js  # Manifest signing, semantic vetting, approval plumbing
+│   ├── undo.js / fs-safety.js / vad.js / sound-effects.js / monitor.js / …
+├── tools/                  # Handlers: desktop suite, files, system, shell, terminal,
+│                           #   memory, plan, agents, search
+├── computer-use/           # Gemini Computer Use: client, loop, executors, safety
+├── scripts/                # launch.js (`up`), setup, tray, Windows service scripts
+└── tests/                  # 16 suites, 130+ tests (node --test)
 ```
 
-### Adding New Tools
+**Everyday commands**
 
-1. Create handler function in `tools/` directory
-2. Add tool definition to `tools.js`
-3. Add handler to `allHandlers` mapping
-4. Update security validation if needed
-5. Re-sign the manifest: `npm run sign-manifest`
-6. Recreate AssemblyAI agent with new tools (`npm run setup-agent`)
+```bash
+pnpm test              # full suite
+pnpm run sign-manifest # re-sign after tool definition changes
+pnpm run vet-tools     # semantic vetting of tool descriptors
+pnpm run publish       # (re)publish the stored agent
+pnpm run check-ffmpeg  # list audio devices, test 2s capture
+```
+
+**Run as a background app (Windows)**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install-service.ps1   # logon task + startup shortcut
+pnpm run tray                                                          # console status monitor
+powershell -ExecutionPolicy Bypass -File scripts\uninstall-service.ps1 # remove
+```
+
+(A logon task is used rather than a Windows service because services run in Session 0, where mouse/keyboard control doesn't work.)
+
+**Adding a tool** — create the handler in `tools/`, register the definition + handler in `tools.js`, add validation in `security.js` if needed, then `pnpm run sign-manifest` and `pnpm run publish`. The device context, vetting, and manifest all flow from `tools.js`.
 
 ## License
 
@@ -449,11 +254,8 @@ MIT
 
 ## References
 
-- [AssemblyAI Voice Agent WebSocket API](https://www.assemblyai.com/docs/voice-agent/api)
-- [Connect Your Own LLM](https://www.assemblyai.com/docs/voice-agent/guides/connect-your-own-llm)
-- [Gmail MCP Library](https://github.com/modelcontextprotocol/servers/tree/main/src/gmail)
-- [Calendar MCP Server](https://github.com/modelcontextprotocol/servers/tree/main/src/google-calendar)
-- [Google Custom Search API](https://developers.google.com/custom-search/v1/overview)
-- [nut.js Desktop Automation](https://nutjs.dev/)
-- [openWakeWord](https://github.com/dscripes/openWakeWord)
-- [Sherpa-ONNX](https://github.com/k2-fsa/sherpa-onnx)
+- [AssemblyAI Voice Agent API](https://www.assemblyai.com/docs/voice-agent/api) · [BYOM/BYOK guide](https://www.assemblyai.com/docs/voice-agent/guides/connect-your-own-llm)
+- [Gemini Computer Use documentation](https://ai.google.dev/gemini-api/docs/computer-use)
+- [OpenRouter](https://openrouter.ai/docs) (default LLM router) · [Google Custom Search API](https://developers.google.com/custom-search/v1/overview)
+- [nut.js desktop automation](https://nutjs.dev/) · [Playwright](https://playwright.dev/) · [DuckDB Node API](https://duckdb.org/docs/stable/api/nodejs/reference)
+- [openWakeWord](https://github.com/dscripka/openWakeWord) · [Sherpa-ONNX](https://github.com/k2-fsa/sherpa-onnx)

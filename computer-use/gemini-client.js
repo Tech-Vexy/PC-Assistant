@@ -1,15 +1,14 @@
 // Gemini Computer Use client (spec §4.3).
 //
-// NOTE ON API SHAPE: the spec's `ai.interactions.create({ model, input,
-// tools })` transport does not exist in @google/genai v2.24.0 (its
-// Interactions surface is agent-oriented with different params). What DOES
-// exist is `ai.models.generateContent` with `tools: [{ computerUse:
-// { environment, enablePromptInjectionDetection } }]` — the same
-// screenshot → functionCall → execute → screenshot loop. This module speaks
-// generateContent to the real API but exposes the spec's
+// NOTE ON API SHAPE: @google/genai v2.24.0 ships the interactions API
+// (`ai.interactions.create`) with snake_case params —
+// `enable_prompt_injection_detection`, `system_instruction` — which is the
+// primary transport here. The camelCase `ComputerUse` tool interface
+// (`ai.models.generateContent` with `tools: [{ computerUse: {...} }]`) is kept
+// as the fallback transport. Both drive the same screenshot → functionCall →
+// execute → screenshot loop. This module exposes the spec's
 // `interactions.create({ input, previous_interaction_id, function_results })`
 // interface, so dispatch.js (and its tests) are transport-agnostic.
-// Only this file needs to change if the SDK gains the doc's shape.
 //
 // setClientFactory(fn)/resetClient() let tests inject a fully fake client.
 
@@ -66,89 +65,71 @@ export async function defaultClientFactory({ environment = 'desktop' } = {}) {
   const ai = new GoogleGenAI({ apiKey: resolved.apiKey });
   let callSeq = 0;
 
-  // Convert the interactions API response to our internal step format
+  // Convert the interactions API response (typed `steps` array) to our
+  // internal step format. Function-call steps carry {name, id, arguments};
+  // model-output steps carry content items of the form {type:'text', text}.
   function toSteps(interaction) {
     const steps = [];
-    
-    // Extract function calls from the interaction
-    if (interaction && interaction.replies) {
-      for (const reply of interaction.replies) {
-        if (reply && reply.functionCalls && reply.functionCalls.length > 0) {
-          for (const fc of reply.functionCalls) {
-            steps.push({
-              type: 'function_call',
-              name: fc.name,
-              id: fc.id || `c${steps.length + 1}`,
-              arguments: fc.args || {},
-            });
-          }
-        }
-        // Check for safety decisions
-        if (reply && reply.safetyDecision) {
-          steps.push({
-            type: 'safety_decision',
-            decision: reply.safetyDecision,
-          });
-        }
-        // Check for intents (reasoning in Gemini 3.x)
-        if (reply && reply.intent) {
-          steps.push({
-            type: 'intent',
-            content: reply.intent,
-          });
-        }
-      }
-    }
-    
-    // If no function calls, check for text response
-    if (steps.length === 0 && interaction && interaction.replies) {
-      for (const reply of interaction.replies) {
-        if (reply && reply.content) {
-          for (const part of reply.content.parts || []) {
-            if (part && part.text) {
-              steps.push({
-                type: 'model_output',
-                content: [{ type: 'text', text: part.text }],
-              });
-            }
+
+    for (const step of interaction?.steps || []) {
+      if (step?.type === 'function_call') {
+        steps.push({
+          type: 'function_call',
+          name: step.name,
+          id: step.id || `c${steps.length + 1}`,
+          arguments: step.arguments || {},
+        });
+      } else if (step?.type === 'safety_decision') {
+        steps.push({ type: 'safety_decision', decision: step });
+      } else if (step?.type === 'model_output') {
+        for (const c of step.content || []) {
+          if (c?.type === 'text' && c.text) {
+            steps.push({ type: 'model_output', content: [{ type: 'text', text: c.text }] });
           }
         }
       }
+      // thought / other step types are intentionally ignored
     }
-    
+
+    // Some completions surface the final text only as output_text.
+    if (steps.length === 0 && typeof interaction?.output_text === 'string' && interaction.output_text) {
+      steps.push({ type: 'model_output', content: [{ type: 'text', text: interaction.output_text }] });
+    }
+
     return steps;
   }
 
-  // Convert our internal input format to the interactions API format
+  // Convert our internal input format to typed interactions content
+  // ({type:'text', text} / {type:'image', mime_type, data}).
   function toInteractionsInput(input) {
     const parts = [];
     for (const item of input || []) {
       if (item.type === 'text') {
-        parts.push({ text: item.text });
+        parts.push({ type: 'text', text: item.text });
       } else if (item.type === 'image') {
-        parts.push({ inlineData: { mimeType: 'image/png', data: item.data } });
+        parts.push({ type: 'image', mime_type: item.mime_type || 'image/png', data: item.data });
       } else if (typeof item.text === 'string') {
-        parts.push({ text: item.text });
+        parts.push({ type: 'text', text: item.text });
       }
     }
     return parts;
   }
 
-  // Convert function results to the interactions API format
-  function toFunctionResults(functionResults) {
-    return functionResults.map(fr => {
-      const parts = [];
+  // Convert function results to interactions input steps: a function_result
+  // step per result, matching the originating function_call via call_id.
+  function toResultSteps(functionResults) {
+    return functionResults.map((fr) => {
+      const result = [];
       const textPart = (fr.result || []).find((p) => typeof p.text === 'string');
-      let response = {};
-      try {
-        response = textPart ? JSON.parse(textPart.text) : {};
-      } catch {
-        response = { raw: textPart?.text || '' };
-      }
-      parts.push({ functionResponse: { name: fr.name, response } });
+      result.push({ type: 'text', text: textPart?.text || '' });
       const shot = (fr.result || []).find((p) => p.data);
-      if (shot) parts.push({ inlineData: { mimeType: 'image/png', data: shot.data } });
-      return { name: fr.name, parts };
+      if (shot) result.push({ type: 'image', mime_type: shot.mime_type || 'image/png', data: shot.data });
+      return {
+        type: 'function_result',
+        call_id: fr.call_id || fr.id,
+        name: fr.name,
+        result,
+      };
     });
   }
 
@@ -160,7 +141,7 @@ export async function defaultClientFactory({ environment = 'desktop' } = {}) {
           const computerUseTool = {
             type: 'computer_use',
             environment: resolved.environment,
-            enablePromptInjectionDetection: resolved.enablePromptInjectionDetection,
+            enable_prompt_injection_detection: resolved.enablePromptInjectionDetection,
           };
 
           // Add disabled safety policies if configured
@@ -173,24 +154,27 @@ export async function defaultClientFactory({ environment = 'desktop' } = {}) {
             computerUseTool.excluded_predefined_functions = resolved.excludedPredefinedFunctions;
           }
 
+          // The interactions API takes the system instruction as a top-level
+          // snake_case field (`system_instruction`); a `config.systemInstruction`
+          // wrapper is silently dropped by the REST backend.
           const interactionParams = {
             model: resolved.model,
             input: toInteractionsInput(params.input),
             tools: [computerUseTool],
-            config: {
-              systemInstruction: buildSafetyInstruction(),
-            },
+            system_instruction: buildSafetyInstruction(),
           };
 
-          // Handle function results for continuation
-          if (Array.isArray(params.function_results) && params.function_results.length > 0) {
-            interactionParams.functionResults = toFunctionResults(params.function_results);
+          // Continuation: thread the prior interaction id so the server has
+          // the conversation history.
+          if (params.previous_interaction_id) {
+            interactionParams.previous_interaction_id = params.previous_interaction_id;
           }
 
-          // Step timeout as a race
-          const timeout = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error(`Gemini step timed out after ${resolved.stepTimeoutMs}ms`)), resolved.stepTimeoutMs)
-          );
+          // Continuation: function results are passed as function_result
+          // INPUT steps (the API has no top-level function_results field).
+          if (Array.isArray(params.function_results) && params.function_results.length > 0) {
+            interactionParams.input = toResultSteps(params.function_results);
+          }
 
           // Add retry logic for 503 errors (high demand)
           let lastError;
@@ -198,6 +182,11 @@ export async function defaultClientFactory({ environment = 'desktop' } = {}) {
           for (let attempt = 0; attempt < maxRetries; attempt++) {
             try {
               const interactionPromise = ai.interactions.create(interactionParams);
+              // Step timeout as a race — a fresh timer per attempt so a retry
+              // after 503 backoff gets a full window.
+              const timeout = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error(`Gemini step timed out after ${resolved.stepTimeoutMs}ms`)), resolved.stepTimeoutMs)
+              );
               const interaction = await Promise.race([interactionPromise, timeout]);
               return {
                 id: interaction.id || `gen-${++callSeq}`,
@@ -217,11 +206,6 @@ export async function defaultClientFactory({ environment = 'desktop' } = {}) {
             }
           }
           throw lastError;
-
-          return {
-            id: interaction.id || `gen-${++callSeq}`,
-            steps: toSteps(interaction),
-          };
         } catch (error) {
           // If interactions API is not available, fall back to generateContent
           if (error.message && error.message.includes('interactions')) {
@@ -238,12 +222,20 @@ export async function defaultClientFactory({ environment = 'desktop' } = {}) {
 // Fallback to generateContent if interactions API is not available
 async function fallbackToGenerateContent(params, resolved, ai, callSeq) {
   const contents = [];
+  // generateContent uses the camelCase ComputerUse tool interface (the SDK
+  // converts to snake_case on the wire) — respect the configured flags here.
   const toolConfig = {
     computerUse: {
       environment: computerUseEnvName(resolved.environment),
-      enablePromptInjectionDetection: true,
+      enablePromptInjectionDetection: resolved.enablePromptInjectionDetection,
     },
   };
+  if (resolved.disabledSafetyPolicies.length > 0) {
+    toolConfig.computerUse.disabledSafetyPolicies = resolved.disabledSafetyPolicies;
+  }
+  if (resolved.excludedPredefinedFunctions.length > 0) {
+    toolConfig.computerUse.excludedPredefinedFunctions = resolved.excludedPredefinedFunctions;
+  }
   const safetyInstruction = buildSafetyInstruction();
 
   function toSteps(res) {

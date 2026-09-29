@@ -1,10 +1,16 @@
 # Environment variables
 .env
+.env.*
+!.env.example
 tokens.json
 manifest-private.pem
+*.pem.key
 
 # DuckDB store (credentials, tokens, sessions, audit logs)
 data/
+*.db
+*.db.wal
+*.db.tmp
 
 # Session / runtime state (legacy files — superseded by the DuckDB store)
 .session-state.json

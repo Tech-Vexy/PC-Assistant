@@ -31,7 +31,7 @@ import { webSearch } from './tools/search-mcp.js';
 import { moveMouse, clickMouse, typeText, pressKeys } from './tools/device-control.js';
 import { systemStatus, listProcesses, killProcess } from './tools/system-monitor.js';
 import { runCommand } from './tools/shell-control.js';
-import { openApplication, manageWindows, mediaControl, clipboardControl } from './tools/desktop-suite.js';
+import { openApplication, manageWindows, mediaControl, clipboardControl, listInstalledApps } from './tools/desktop-suite.js';
 import { organizeFolder, renameFiles, findFiles, convertDocument } from './tools/file-manager.js';
 import { runComputerUseTask } from './computer-use/dispatch.js';
 import {
@@ -291,7 +291,7 @@ export const toolDefinitions = [
   },
   {
     name: 'open_application',
-    description: sanitizeToolDescription('Launch an application by name (e.g. Spotify, Chrome, VS Code, Notepad, Calculator)'),
+    description: sanitizeToolDescription('Launch an application by name (e.g. Spotify, Chrome, VS Code, Notepad, Calculator, Control Panel). Use list_installed_apps to see available applications.'),
     parameters: {
       type: 'object',
       properties: {
@@ -301,6 +301,20 @@ export const toolDefinitions = [
         }
       },
       required: ['appName']
+    }
+  },
+  {
+    name: 'list_installed_apps',
+    description: sanitizeToolDescription('List installed applications on the system to help identify what apps are available to launch'),
+    parameters: {
+      type: 'object',
+      properties: {
+        limit: {
+          type: 'number',
+          description: 'Maximum number of applications to return (default: 50, max: 200)',
+          default: 50
+        }
+      }
     }
   },
   {
@@ -772,6 +786,7 @@ const allHandlers = {
   kill_process: killProcess,
   run_command: runCommand,
   open_application: openApplication,
+  list_installed_apps: listInstalledApps,
   manage_windows: manageWindows,
   media_control: mediaControl,
   clipboard: clipboardControl,

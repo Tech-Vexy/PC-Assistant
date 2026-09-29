@@ -4,6 +4,152 @@ import { keyboard, Key } from '@nut-tree-fork/nut-js';
 
 const execFileAsync = promisify(execFile);
 
+// 0. List Installed Applications
+export async function listInstalledApps(args) {
+  const { limit = 50 } = args;
+  const maxApps = Math.min(Math.max(Number(limit) || 50, 10), 200);
+  
+  try {
+    let apps = [];
+    
+    if (process.platform === 'win32') {
+      // Get applications from Windows Registry and Start Menu
+      const psScript = `
+        $apps = @()
+        
+        # Get apps from Registry (Start Menu programs)
+        $registryPaths = @(
+          "HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*",
+          "HKLM:\\Software\\Wow6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*",
+          "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*"
+        )
+        
+        foreach ($path in $registryPaths) {
+          if (Test-Path $path) {
+            Get-ItemProperty $path -ErrorAction SilentlyContinue | ForEach-Object {
+              if ($_.DisplayName -and $_.DisplayName.Trim() -ne "") {
+                $apps += [PSCustomObject]@{
+                  Name = $_.DisplayName.Trim()
+                  Publisher = if ($_.Publisher) { $_.Publisher.Trim() } else { "Unknown" }
+                  InstallLocation = if ($_.InstallLocation) { $_.InstallLocation.Trim() } else { "N/A" }
+                  Version = if ($_.DisplayVersion) { $_.DisplayVersion.Trim() } else { "N/A" }
+                }
+              }
+            }
+          }
+        }
+        
+        # Get common system apps by executable
+        $systemApps = @(
+          @{Name="Control Panel"; Executable="control.exe"},
+          @{Name="Settings"; Executable="ms-settings.exe"},
+          @{Name="Task Manager"; Executable="taskmgr.exe"},
+          @{Name="File Explorer"; Executable="explorer.exe"},
+          @{Name="Command Prompt"; Executable="cmd.exe"},
+          @{Name="PowerShell"; Executable="powershell.exe"},
+          @{Name="Notepad"; Executable="notepad.exe"},
+          @{Name="Calculator"; Executable="calc.exe"},
+          @{Name="Paint"; Executable="mspaint.exe"},
+          @{Name="Windows Terminal"; Executable="wt.exe"}
+        )
+        
+        foreach ($app in $systemApps) {
+          if ($apps.Name -notcontains $app.Name) {
+            $apps += [PSCustomObject]@{
+              Name = $app.Name
+              Publisher = "Microsoft"
+              InstallLocation = "System"
+              Version = "Built-in"
+            }
+          }
+        }
+        
+        # Sort by name and limit results
+        $apps | Sort-Object Name | Select-Object -First ${maxApps} | ConvertTo-Json
+      `;
+      
+      const { stdout } = await execFileAsync('powershell', ['-NoProfile', '-Command', psScript], { timeout: 30000 });
+      // ConvertTo-Json emits a single object (not an array) for exactly one
+      // match and an empty string for zero matches — normalize both to arrays.
+      let parsed;
+      try {
+        parsed = JSON.parse(stdout);
+      } catch {
+        parsed = [];
+      }
+      apps = Array.isArray(parsed) ? parsed : parsed ? [parsed] : [];
+      // Registry hives overlap (HKLM + Wow6432Node list the same app twice) —
+      // dedupe by display name, keeping the first (richest) entry.
+      const seen = new Set();
+      apps = apps.filter((a) => {
+        const key = String(a?.Name || '').toLowerCase();
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      
+    } else if (process.platform === 'darwin') {
+      // Get macOS applications from /Applications
+      const { stdout } = await execFileAsync('ls', ['/Applications'], { timeout: 10000 });
+      apps = stdout.split('\n')
+        .filter(name => name.endsWith('.app'))
+        .map(name => ({
+          Name: name.replace('.app', ''),
+          Publisher: 'Unknown',
+          InstallLocation: '/Applications',
+          Version: 'N/A'
+        }))
+        .slice(0, maxApps);
+    } else {
+      // Get Linux applications from common paths
+      const paths = ['/usr/share/applications', '/var/lib/snapd/desktop/applications'];
+      for (const path of paths) {
+        try {
+          const { stdout } = await execFileAsync('ls', [path], { timeout: 10000 });
+          const desktopFiles = stdout.split('\n')
+            .filter(name => name.endsWith('.desktop'))
+            .slice(0, maxApps - apps.length);
+          
+          for (const file of desktopFiles) {
+            try {
+              const { stdout: content } = await execFileAsync('cat', [`${path}/${file}`], { timeout: 5000 });
+              const nameMatch = content.match(/^Name=(.+)$/m);
+              if (nameMatch) {
+                apps.push({
+                  Name: nameMatch[1].trim(),
+                  Publisher: 'Unknown',
+                  InstallLocation: path,
+                  Version: 'N/A'
+                });
+              }
+            } catch {
+              // Skip files that can't be read
+            }
+          }
+        } catch {
+          // Skip paths that don't exist
+        }
+      }
+    }
+    
+    return {
+      success: true,
+      count: apps.length,
+      applications: apps.map(app => ({
+        name: app.Name,
+        publisher: app.Publisher,
+        location: app.InstallLocation,
+        version: app.Version
+      }))
+    };
+  } catch (error) {
+    const hint = error.code === 'ENOENT'
+      ? ' (powershell not found on PATH — required for app discovery)'
+      : '';
+    throw new Error(`Failed to list installed applications: ${error.message}${hint}`);
+  }
+}
+
 // Mapping of common user speech names to Windows executable / URI commands
 const APP_ALIASES = {
   spotify: 'spotify',
@@ -15,6 +161,12 @@ const APP_ALIASES = {
   notepad: 'notepad',
   calc: 'calc',
   calculator: 'calc',
+  'control panel': 'control',
+  control: 'control',
+  'command prompt': 'cmd',
+  cmd: 'cmd',
+  'snipping tool': 'snippingtool',
+  'windows security': 'windowsdefender:',
   camera: 'microsoft.windows.camera:',
   terminal: 'wt',
   powershell: 'powershell',

@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "createdAt": "2026-09-28T16:37:09.108Z",
-  "sha256": "4bf40b91887759b4d052f1f28c85f24550050ff9bd3f8e97ac954437c7736512",
-  "signature": "xlKqxQecKrG8WsRcYi+L6/j+ufWIRyl2huBpuQWdPC/MX5e9smIK4Ee1P7e/FF+16vP73jqblNpjCc/bFd9IzRbQ72fyWmWk79YmNyMad3MqHKI/CUCikLk1MgEPTZ4w5rRlMZiehTkssLwZSah0B/GlS8jZIKHeg1ZcXKn0OtlaESOhsBHZPhUVJIAyIJm48Nx4+sQv9L8wW4IP1c4jxHqGE8Zck41Z4Xb40JxFsl3nP9LhPJYlKqLQ+Yg0ZNI3CtR+MiMrbMdkjdNRhgk14HUc5h/A0d7kEySWGs1sGb8sAF5uzgxqjScLnjdDE9W3HRo4XbxPLEWLdN8pXX+5rg==",
+  "createdAt": "2026-09-29T11:19:01.104Z",
+  "sha256": "da07b47189a56aedb5573747fc4b62ee506dc3ef391233c3553b836734b9dc47",
+  "signature": "pi2VlIo4WX5JKrS0snyUPYdF7as/bI99Rb3MXb3sHpJ6jy+uiAitNnJbC9OeyYiz7t45PpPj2enPkgU92LHECahSpju+NWkCkfYAdNOUR/Oacm3NMUqGDEFkMHUC2v6ClW15bcqWFaq5IIGpiw/GPHoJxs/2btWND0yC0N7kjt5rhK5jU0j74gitysmTbD9KSr/OqIfB57o3gtt/pQokWQYY89HkFDFXEjU6EO4bKuSGv6hphIj1X7oItNkIZ5UIkJ7CzBtzOLE5lMUmV1O+WB7/rZkENH5FtaO6q7MhYW0hf5SJppo4pt/6/+qjzeIpaLdwdyCuvL0KkA2igZ5T4g==",
   "tools": [
     "web_search",
     "move_mouse",
@@ -19,6 +19,7 @@
     "terminal_input",
     "terminal_kill",
     "open_application",
+    "list_installed_apps",
     "manage_windows",
     "media_control",
     "clipboard",

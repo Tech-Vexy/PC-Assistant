@@ -94,4 +94,40 @@ describe('configuration validator', () => {
     assert.equal(config.PORT, '3000');
     assert.equal(config.AUDIO_DEVICE, 'default');
   });
+
+  describe('OpenAI-compatible base URL warning', () => {
+    const KEY = 'llm_key_12345678901234567890';
+
+    async function compatWarnings(baseUrl) {
+      const { validateConfiguration } = await import('../lib/config-validator.js');
+      return validateConfiguration({ LLM_API_KEY: KEY, LLM_BASE_URL: baseUrl })
+        .warnings.filter((w) => w.includes('OpenAI-compatible'));
+    }
+
+    it('warns on native non-OpenAI routes', async () => {
+      assert.equal((await compatWarnings('https://api.anthropic.com/v1/messages')).length, 1);
+      assert.equal(
+        (await compatWarnings('https://generativelanguage.googleapis.com/v1beta/models/gemini:generateContent')).length,
+        1
+      );
+    });
+
+    it('accepts OpenAI-compatible bases ending at the version segment', async () => {
+      for (const url of [
+        'https://openrouter.ai/api/v1',
+        'https://api.openai.com/v1',
+        'https://api.anthropic.com/v1', // Anthropic's OpenAI-compat base
+        'https://generativelanguage.googleapis.com/v1beta/openai',
+        'https://llm-gateway.assemblyai.com/v1',
+      ]) {
+        assert.equal((await compatWarnings(url)).length, 0, url);
+      }
+    });
+
+    it('accepts localhost dev servers and bare hosts', async () => {
+      for (const url of ['http://localhost:11434/v1', 'http://localhost:11434', 'http://host.lan:1234/v1']) {
+        assert.equal((await compatWarnings(url)).length, 0, url);
+      }
+    });
+  });
 });
