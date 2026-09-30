@@ -40,6 +40,9 @@ describe('security.js', () => {
     assert.ok(validateToolArguments('kill_process', { pid: 1 }).length > 0);
     assert.ok(validateToolArguments('run_command', { command: 'rm -rf /' }).length > 0);
     assert.deepEqual(validateToolArguments('system_status', {}), []);
+    assert.deepEqual(validateToolArguments('screen_context', { question: 'What window is open?' }), []);
+    assert.ok(validateToolArguments('screen_context', { question: 123 }).length > 0);
+    assert.ok(validateToolArguments('screen_context', { question: 'x'.repeat(1001) }).length > 0);
     assert.ok(validateToolArguments('send_email', { to: 'not-an-email' }).length > 0);
   });
 

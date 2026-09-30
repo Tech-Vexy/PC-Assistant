@@ -248,6 +248,16 @@ export function validateToolArguments(toolName, args) {
       }
       break;
 
+    case 'screen_context':
+      if (args && args.question !== undefined) {
+        if (typeof args.question !== 'string') {
+          validationErrors.push('question must be a string');
+        } else if (args.question.length > 1000) {
+          validationErrors.push('question exceeds safety limit (1000 characters)');
+        }
+      }
+      break;
+
     case 'open_application':
       if (!args.appName || typeof args.appName !== 'string') {
         validationErrors.push('appName must be a non-empty string');
@@ -257,8 +267,8 @@ export function validateToolArguments(toolName, args) {
       break;
 
     case 'manage_windows':
-      if (!args.action || !['minimize_all', 'restore_all', 'switch_to', 'close'].includes(String(args.action).toLowerCase())) {
-        validationErrors.push('action must be minimize_all, restore_all, switch_to, or close');
+      if (!args.action || !['minimize_all', 'restore_all', 'switch_to', 'close', 'list'].includes(String(args.action).toLowerCase())) {
+        validationErrors.push('action must be minimize_all, restore_all, switch_to, close, or list');
       } else if (['switch_to', 'close'].includes(String(args.action).toLowerCase()) && (!args.target || typeof args.target !== 'string' || !args.target.trim())) {
         validationErrors.push(`target is required when action is "${args.action}"`);
       }

@@ -39,7 +39,7 @@ describe('browser setup UI (/setup)', () => {
 
   it('GET /setup renders the slim form without leaking secrets', async () => {
     const html = await fetch(`${base}/setup`).then((x) => x.text());
-    for (const name of ['ASSEMBLYAI_API_KEY', 'LLM_API_KEY', 'GEMINI_API_KEY', 'COMPUTER_USE_ENABLED', 'PORT']) {
+    for (const name of ['ASSEMBLYAI_API_KEY', 'VOICE_ID', 'LLM_API_KEY', 'GEMINI_API_KEY', 'COMPUTER_USE_ENABLED', 'PORT']) {
       assert.match(html, new RegExp(`name="${name}"`), `expected field ${name}`);
     }
     assert.doesNotMatch(html, /name="FAST_MODEL"/, 'advanced model fields stay out of the UI');

@@ -1,5 +1,6 @@
 // One-command launcher: `npm run up` (add `--wakeword` to idle on wake word,
-// `--no-browser` to never auto-open the setup page).
+// `--no-browser` to never auto-open the setup page, `--no-tui` to skip the
+// live monitor window).
 //
 // Does everything needed to go from zero to talking:
 //   1. Creates .env from the template if missing
@@ -76,6 +77,15 @@ function shutdown(code = 0) {
   for (const c of children) {
     try {
       c.kill('SIGTERM');
+    } catch {
+      /* noop */
+    }
+  }
+  // The TUI lives in its own window (spawned via `start`), outside `children`
+  // — close it by window title so Ctrl+C here takes the monitor down too.
+  if (process.platform === 'win32') {
+    try {
+      execFile('taskkill', ['/F', '/T', '/FI', 'WINDOWTITLE eq PC Assistant Monitor*'], { timeout: 3000 }, () => {});
     } catch {
       /* noop */
     }
@@ -330,6 +340,31 @@ async function main() {
   } else {
     console.log('Starting voice agent — talk now. Ctrl+C to stop.');
     spawnChild('voice agent', 'agent.js');
+  }
+
+  // 9) live monitor in its own terminal window (shares nothing with this
+  // console, so Ink rendering stays clean). Closing it never stops the stack;
+  // Ctrl+C here takes it down. Opt out with --no-tui.
+  if (!process.argv.includes('--no-tui')) {
+    if (process.platform === 'win32') {
+      try {
+        // `start <title> cmd /c "title <title> && node tui.js"`: the inner
+        // `title` keeps the window title deterministic while node runs (so
+        // shutdown can taskkill by title); /c closes the window when the TUI
+        // exits on its own.
+        const tui = spawn(
+          'cmd.exe',
+          ['/c', 'start', 'PC Assistant Monitor', 'cmd', '/c', 'title PC Assistant Monitor && node tui.js'],
+          { cwd: ROOT, stdio: 'ignore', env: process.env }
+        );
+        children.push(tui);
+        console.log('Live monitor opened in its own window (close it anytime; --no-tui to skip).');
+      } catch {
+        console.log(colors.gray('ℹ️  Monitor not opened — run `npm run tui` in another terminal.'));
+      }
+    } else {
+      console.log(colors.gray('ℹ️  Live monitor: run `npm run tui` in another terminal.'));
+    }
   }
 
   process.on('SIGINT', () => shutdown(0));

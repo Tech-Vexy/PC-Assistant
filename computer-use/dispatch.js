@@ -56,7 +56,9 @@ async function shotFor(env, page) {
   }
   if (overrides.shotDesktop) return overrides.shotDesktop();
   const { captureDesktopScreenshot } = await import('./screenshot.js');
-  return { data: await captureDesktopScreenshot(), mime_type: 'image/png' };
+  // Capture returns { data, mime_type } — the watcher feed yields JPEG,
+  // legacy fallbacks PNG; both are accepted by the vision model.
+  return await captureDesktopScreenshot();
 }
 
 async function execFor(env, action, page, screenSize) {

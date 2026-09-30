@@ -231,6 +231,30 @@ export async function manageWindows(args) {
         return { success: true, message: 'Minimized all windows' };
       }
 
+      if (act === 'list') {
+        const ps = `
+          Get-Process | Where-Object { $_.MainWindowTitle -and $_.MainWindowTitle.Trim() -ne "" } | 
+            Select-Object Id, ProcessName, MainWindowTitle | 
+            ConvertTo-Json -Compress
+        `;
+        const { stdout } = await execFileAsync('powershell', ['-NoProfile', '-Command', ps], { timeout: 10000 });
+        const trimmed = stdout.trim();
+        let windows = [];
+        if (trimmed) {
+          try {
+            const raw = JSON.parse(trimmed);
+            const arr = Array.isArray(raw) ? raw : [raw];
+            windows = arr.map((w) => ({ pid: Number(w.Id), process: w.ProcessName, title: w.MainWindowTitle }));
+          } catch { /* empty/malformed */ }
+        }
+        return {
+          success: true,
+          count: windows.length,
+          windows,
+          message: windows.length ? `Found ${windows.length} active window(s)` : 'No active windows with titles found'
+        };
+      }
+
       if (act === 'restore_all') {
         const ps = '(New-Object -ComObject Shell.Application).UndoMinimizeALL()';
         await execFileAsync('powershell', ['-NoProfile', '-Command', ps], { timeout: 10000 });
@@ -318,6 +342,26 @@ export async function manageWindows(args) {
       } catch {
         await execFileAsync('pkill', ['-f', target], { timeout: 5000 });
         return { success: true, message: `Closed process matching "${target}"` };
+      }
+    }
+
+    if (act === 'list') {
+      if (process.platform === 'darwin') {
+        try {
+          const script = 'tell application "System Events" to get name of every window of (every process whose background only is false)';
+          const { stdout } = await execFileAsync('osascript', ['-e', script], { timeout: 10000 });
+          const list = stdout.split(',').map((s) => s.trim()).filter(Boolean);
+          return { success: true, count: list.length, windows: list.map((title) => ({ title })), message: `Found ${list.length} window(s)` };
+        } catch {
+          return { success: true, count: 0, windows: [], message: 'No active windows found' };
+        }
+      }
+      try {
+        const { stdout } = await execFileAsync('wmctrl', ['-l'], { timeout: 5000 });
+        const list = stdout.split('\n').filter(Boolean).map((l) => ({ title: l.slice(l.indexOf(' ') + 1).trim() }));
+        return { success: true, count: list.length, windows: list, message: `Found ${list.length} window(s)` };
+      } catch {
+        return { success: true, count: 0, windows: [], message: 'No active windows found' };
       }
     }
 

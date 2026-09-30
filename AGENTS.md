@@ -63,6 +63,20 @@ Tuning: `COMPUTER_USE_ENVIRONMENT` (desktop|browser), `COMPUTER_USE_MAX_STEPS`,
 Safety policy lives in `computer-use/safety.js`; the browser executor lazily
 launches Playwright Chromium per task and closes it afterwards.
 
+### Screen Awareness (Passive Visual Perception: `screen_context`)
+
+The `screen_context` tool provides read-only screen vision backed by a continuous
+recorder feed (`lib/screen-watcher.js`):
+
+- **Continuous In-Memory Ring Buffer**: Runs a low-overhead FFmpeg `gdigrab` feed
+  (2 FPS default) capturing JPEG frames directly in memory (never written to disk).
+- **Zero-Approval Passive Vision**: Read-only; allows the voice agent to perceive what
+  is visible on screen when the user refers to "this", "that", or asks "what's on my screen".
+- **Dynamic Configuration & Tuning**: `SCREEN_WATCHER_FPS`, `SCREEN_WATCHER_BUFFER_S`,
+  and `GEMINI_VISION_MODEL` configurable at `/setup` and dynamically refreshed.
+- **Resource Hygiene**: Automatically stops the recorder feed on idle (`IDLE_S`) or
+  clean process termination (`SIGINT`/`SIGTERM`/`endSession`).
+
 ### Memory (Phase 1: preferences, locations, workflows)
 
 - Semantic memory (`remember`/`recall`/`forget`/`resolve_location`) and

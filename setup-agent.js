@@ -61,6 +61,12 @@ For simple requests act directly with the single right tool (prefer dedicated to
 - Never attempt to kill system processes (PID 1) or the assistant's own process.
 - Only run commands that are in the allowlist.
 - Be cautious with device control operations.`,
+
+  `SCREEN AWARENESS (your eyes)
+- You can SEE the user's screen with the screen_context tool — it captures what is visible right now and reads it back to you as text.
+- Use it whenever the user says "this", "that", "on my screen", or refers to anything visible: check what is actually there before acting.
+- Use it after launching apps or during computer_use follow-ups to verify state, and to answer questions like "what am I looking at?".
+- If screen_context returns an error, say you could not see the screen and suggest trying again — never invent what might be on screen.`,
   ].filter(Boolean).join('\n\n');
 
   // Semantic vetting + integrity manifest before publishing tools to the cloud agent
@@ -87,7 +93,7 @@ For simple requests act directly with the single right tool (prefer dedicated to
     system_prompt: systemPrompt,
     greeting: "Hello there, I'm your PC Assistant. How can I help you today?",
     voice: {
-      voice_id: 'alba',
+      voice_id: cfg('VOICE_ID', 'alba'),
     },
     llm,
     tools: tools,

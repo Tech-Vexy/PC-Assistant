@@ -807,6 +807,9 @@ class VoiceAgent {
       setTimeout(() => this.ws?.close(), 500);
     }
     this.stopRecording();
+    try {
+      import('./lib/screen-watcher.js').then(({ screenWatcher }) => screenWatcher.stop()).catch(() => {});
+    } catch { /* noop */ }
     this.sessionId = null;
     saveState({ sessionId: null });
   }
@@ -827,19 +830,26 @@ if (isMain) {
   // approval requests) to the server's SSE stream so the TUI and /dashboard
   // can monitor the live session.
   setRelayUrl(process.env.APPROVAL_HTTP_URL);
+  // Keep the screen-recorder feed warm for the whole session so the assistant
+  // always has recent frames for screen_context / computer_use (best-effort).
+  try {
+    const { screenWatcher } = await import('./lib/screen-watcher.js');
+    screenWatcher.acquire('agent');
+  } catch { /* screen awareness stays optional */ }
   const agent = new VoiceAgent();
 
-  process.on('SIGINT', () => {
+  const shutdown = async () => {
     console.log('Shutting down gracefully...');
+    try {
+      const { screenWatcher } = await import('./lib/screen-watcher.js');
+      screenWatcher.stop();
+    } catch { /* noop */ }
     agent.endSession();
     setTimeout(() => process.exit(0), 800);
-  });
+  };
 
-  process.on('SIGTERM', () => {
-    console.log('Shutting down gracefully...');
-    agent.endSession();
-    setTimeout(() => process.exit(0), 800);
-  });
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 
   initStore({ remote: process.env.APPROVAL_HTTP_URL })
     .then(() => agent.start())

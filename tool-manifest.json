@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "createdAt": "2026-09-29T21:05:47.166Z",
-  "sha256": "da07b47189a56aedb5573747fc4b62ee506dc3ef391233c3553b836734b9dc47",
-  "signature": "pi2VlIo4WX5JKrS0snyUPYdF7as/bI99Rb3MXb3sHpJ6jy+uiAitNnJbC9OeyYiz7t45PpPj2enPkgU92LHECahSpju+NWkCkfYAdNOUR/Oacm3NMUqGDEFkMHUC2v6ClW15bcqWFaq5IIGpiw/GPHoJxs/2btWND0yC0N7kjt5rhK5jU0j74gitysmTbD9KSr/OqIfB57o3gtt/pQokWQYY89HkFDFXEjU6EO4bKuSGv6hphIj1X7oItNkIZ5UIkJ7CzBtzOLE5lMUmV1O+WB7/rZkENH5FtaO6q7MhYW0hf5SJppo4pt/6/+qjzeIpaLdwdyCuvL0KkA2igZ5T4g==",
+  "createdAt": "2026-09-29T21:30:39.249Z",
+  "sha256": "a6c4f7d6b859d2d955b4cef2e88158d7b7d7f32916e742a5785bf81391cb4734",
+  "signature": "zFJTdDr6SzKGOpQtinKUFsfupWAPmBXuqENNKIBic/g1lAithuzTWxuKy1tzBBvr4h4tQhGinU7dwGJWNcVlWSTZIRTOOLdMd3Qr8Hye3qjUZhnTGL5RAxkhMfS33Pw10JsK+MpiRa+GELWXx84OYXd4NZTrUk9wyfNiii/VCnHQUmCU810MYfwtkoMKXfw5kAE/TOmaD1UqJUy14wtO4M2HVTlshIymJoWOEY4Tn59ZavYJdaP7tbMp4l72mY5PLY3ZVu25iTwrRDyZcQplHRVXp/Y8yYc4p+1etNgfAySgXNYsLOSsJj7R07tggK0DmuyR1dS/wPnBJgnHbnWPsw==",
   "tools": [
     "web_search",
     "move_mouse",
@@ -10,6 +10,7 @@
     "type_text",
     "press_keys",
     "system_status",
+    "screen_context",
     "list_processes",
     "kill_process",
     "run_command",

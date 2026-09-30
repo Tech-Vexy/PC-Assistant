@@ -36,6 +36,7 @@ import { moveMouse, clickMouse, typeText, pressKeys } from './tools/device-contr
 import { systemStatus, listProcesses, killProcess } from './tools/system-monitor.js';
 import { runCommand } from './tools/shell-control.js';
 import { openApplication, manageWindows, mediaControl, clipboardControl, listInstalledApps } from './tools/desktop-suite.js';
+import { screenContext } from './tools/screen-context.js';
 import { organizeFolder, renameFiles, findFiles, convertDocument } from './tools/file-manager.js';
 import { runComputerUseTask } from './computer-use/dispatch.js';
 import {
@@ -171,6 +172,22 @@ export const toolDefinitions = [
       properties: {},
       required: []
     }
+  },
+  {
+    name: 'screen_context',
+    description: sanitizeToolDescription(
+      'Look at the user\'s screen right now and describe what is visible (active window, apps, on-screen text). Read-only; use before acting on anything the user refers to visually, and to report screen state.'
+    ),
+    parameters: {
+      type: 'object',
+      properties: {
+        question: {
+          type: 'string',
+          description: 'What to look for on screen, e.g. "which Chrome profile is selected?" Omit for a general description.',
+        },
+      },
+      required: [],
+    },
   },
   {
     name: 'list_processes',
@@ -323,14 +340,14 @@ export const toolDefinitions = [
   },
   {
     name: 'manage_windows',
-    description: sanitizeToolDescription('Manage desktop windows: minimize all windows, restore windows, switch to an open window by name, or close an application window by name'),
+    description: sanitizeToolDescription('Manage desktop windows: minimize all windows, restore windows, switch to an open window by name, close an application window by name, or list all visible windows'),
     parameters: {
       type: 'object',
       properties: {
         action: {
           type: 'string',
-          description: 'Window action to perform: "minimize_all", "restore_all", "switch_to", or "close"',
-          enum: ['minimize_all', 'restore_all', 'switch_to', 'close']
+          description: 'Window action to perform: "minimize_all", "restore_all", "switch_to", "close", or "list"',
+          enum: ['minimize_all', 'restore_all', 'switch_to', 'close', 'list']
         },
         target: {
           type: 'string',
@@ -786,6 +803,7 @@ const allHandlers = {
   type_text: typeText,
   press_keys: pressKeys,
   system_status: systemStatus,
+  screen_context: screenContext,
   list_processes: listProcesses,
   kill_process: killProcess,
   run_command: runCommand,

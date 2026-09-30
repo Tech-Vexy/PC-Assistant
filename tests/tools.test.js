@@ -32,7 +32,8 @@ describe('tools dispatcher', () => {
   it('system_status returns structured data', async () => {
     const { dispatchTool } = await import('../tools.js');
     const r = await dispatchTool('system_status', {});
-    assert.ok(r.cpu && r.memory && r.system);
+    assert.ok(r.cpu && r.memory && r.system && r.display);
+    assert.ok(r.display.width && r.display.height);
   });
 
   it('list_processes returns a process list', async () => {
@@ -64,6 +65,14 @@ describe('tools dispatcher', () => {
     const blocked = await dispatchTool('manage_windows', { action: 'close', target: 'antigravity' });
     assert.equal(blocked.success, false);
     assert.match(blocked.message, /cannot close protected/i);
+  });
+
+  it('manage_windows list returns window list', async () => {
+    const { dispatchTool } = await import('../tools.js');
+    const r = await dispatchTool('manage_windows', { action: 'list' });
+    assert.equal(r.success, true);
+    assert.ok(Array.isArray(r.windows));
+    assert.ok(typeof r.count === 'number');
   });
 
   it('validates click_mouse arguments', async () => {

@@ -16,11 +16,13 @@ async function getProcessList() {
         .split(/\r?\n/)
         .filter((l) => l.trim().startsWith('"'))
         .map((line) => {
-          const cols = line.match(/"([^"]*)"/g).map((c) => c.slice(1, -1));
+          const matches = line.match(/"([^"]*)"/g);
+          if (!matches || matches.length < 5) return null;
+          const cols = matches.map((c) => c.slice(1, -1));
           const memKb = Number((cols[4] || '0').replace(/[, K]/g, '')) || 0;
-          return { pid: Number(cols[1]), name: cols[0], cpu: 0, mem: Math.round(memKb / 1024) };
+          return { pid: Number(cols[1]), name: cols[0] || 'unknown', cpu: 0, mem: Math.round(memKb / 1024) };
         })
-        .filter((p) => Number.isFinite(p.pid));
+        .filter((p) => p && Number.isFinite(p.pid));
       if (lines.length > 0) return lines;
     } catch {
       // Fallback: PowerShell Get-Process
@@ -29,7 +31,9 @@ async function getProcessList() {
     try {
       const ps = 'Get-Process | Select-Object -First 60 -Property Id, ProcessName, CPU, WorkingSet64 | ConvertTo-Json -Compress';
       const { stdout } = await execFileAsync('powershell', ['-NoProfile', '-Command', ps], { timeout: 15000, maxBuffer: 10 * 1024 * 1024 });
-      const raw = JSON.parse(stdout.trim());
+      const trimmed = stdout.trim();
+      if (!trimmed) return [];
+      const raw = JSON.parse(trimmed);
       const arr = Array.isArray(raw) ? raw : [raw];
       return arr
         .map((p) => ({
@@ -84,10 +88,22 @@ export async function systemStatus(args) {
     } catch (driveErr) {
       driveInfo = { error: driveErr.message };
     }
-    const osType = os.type();
-    const osRelease = os.release();
-    const hostname = os.hostname();
-    const uptime = os.uptime();
+    // Display stats: probe primary screen dimensions
+    let displayInfo = null;
+    try {
+      const { screen } = await import('@nut-tree-fork/nut-js');
+      const width = await screen.width();
+      const height = await screen.height();
+      if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+        displayInfo = {
+          width,
+          height,
+          resolution: `${width}x${height}`
+        };
+      }
+    } catch {
+      /* display probe optional */
+    }
 
     const result = {
       cpu: {
@@ -107,12 +123,13 @@ export async function systemStatus(args) {
         free: driveInfo.freeGb,
         usage: driveInfo.usage
       } : { error: driveInfo?.error || 'unavailable' },
+      display: displayInfo || { width: 1920, height: 1080, resolution: '1920x1080' },
       system: {
-        type: osType,
-        release: osRelease,
-        hostname: hostname,
-        uptime: uptime,
-        uptimeFormatted: formatUptime(uptime)
+        type: os.type(),
+        release: os.release(),
+        hostname: os.hostname(),
+        uptime: os.uptime(),
+        uptimeFormatted: formatUptime(os.uptime())
       }
     };
     systemCache.set(key, result);

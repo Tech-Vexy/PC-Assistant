@@ -119,6 +119,7 @@ function ToolsPanel({ items }) {
 }
 
 function ApprovalsPanel({ items }) {
+  const port = process.env.PORT || '3000';
   return h(
     Box,
     { flexDirection: 'column', borderStyle: 'round', borderColor: items.length ? 'red' : 'gray', paddingX: 1 },
@@ -142,7 +143,7 @@ function ApprovalsPanel({ items }) {
           h(
             Text,
             { key: 'hint', color: 'yellow' },
-            '→ decide at http://localhost:3000/api/confirm  (or the /dashboard panel)'
+            `→ decide at http://localhost:${port}/api/confirm  (or the /dashboard panel)`
           ),
         ]
       : [h(Text, { key: 'empty', color: 'gray' }, 'queue clear')]),
@@ -179,7 +180,8 @@ function App() {
       errTimer = setTimeout(() => setError(''), 4000);
     };
 
-    const stream = createEventStream('http://localhost:3000');
+    const port = process.env.PORT || '3000';
+    const stream = createEventStream(`http://localhost:${port}`);
 
     stream.on('connected', () => setConnected(true));
     stream.on('disconnected', () => setConnected(false));
@@ -267,7 +269,7 @@ function App() {
     h(ToolsPanel, { items: tools }),
     h(ApprovalsPanel, { items: approvals }),
     h(ErrorToast, { message: error }),
-    h(Text, { color: 'gray' }, `${clock}  ·  Ctrl+C to exit  ·  setup http://localhost:3000/setup`)
+    h(Text, { color: 'gray' }, `${clock}  ·  Ctrl+C to exit  ·  setup http://localhost:${process.env.PORT || '3000'}/setup`)
   );
 }
 

@@ -372,9 +372,19 @@ async function mirrorBootstrapToFile(map) {
 const SETUP_FIELDS = [
   { key: 'ASSEMBLYAI_API_KEY', label: 'AssemblyAI API key', kind: 'password', secret: true, section: 'Voice', required: true, placeholder: 'aai-...' },
   { key: 'AGENT_ID', label: 'Stored agent ID', section: 'Voice', hint: 'Filled automatically by `npm run up` / `npm run publish`.' },
+  {
+    key: 'VOICE_ID',
+    label: 'Assistant voice',
+    kind: 'select',
+    section: 'Voice',
+    options: ['alba', 'marian', 'oliver', 'sophia', 'michael', 'charlotte', 'james', 'william'],
+    hint: 'Voice persona for speech synthesis. Re-publish (`npm run publish`) after changing.'
+  },
   { key: 'LLM_API_KEY', label: 'OpenRouter API key', kind: 'password', secret: true, section: 'Voice LLM (free model by default)', required: true, hint: 'The only LLM key you need. Defaults to OpenRouter + the free openrouter/free model.' },
-  { key: 'GEMINI_API_KEY', label: 'Gemini API key (Google AI Studio)', kind: 'password', secret: true, section: 'Computer Use (on by default)', hint: 'Powers the computer_use vision loop and search grounding.' },
-  { key: 'COMPUTER_USE_ENABLED', label: 'Enable computer_use tool', kind: 'checkbox', section: 'Computer Use (on by default)', def: 'true', hint: 'Every consequential UI action still needs approval in /api/confirm.' },
+  { key: 'GEMINI_API_KEY', label: 'Gemini API key (Google AI Studio)', kind: 'password', secret: true, section: 'Computer Use & Vision (on by default)', hint: 'Powers the computer_use vision loop, screen_context, and search grounding.' },
+  { key: 'COMPUTER_USE_ENABLED', label: 'Enable computer_use tool', kind: 'checkbox', section: 'Computer Use & Vision (on by default)', def: 'true', hint: 'Every consequential UI action still needs approval in /api/confirm.' },
+  { key: 'GEMINI_VISION_MODEL', label: 'Gemini Vision Model', section: 'Computer Use & Vision (on by default)', placeholder: 'gemini-3.8-flash', hint: 'Model used for screen_context and computer_use.' },
+  { key: 'SCREEN_WATCHER_FPS', label: 'Screen recorder FPS', kind: 'number', section: 'Computer Use & Vision (on by default)', placeholder: '2', hint: 'Framerate of live gdigrab buffer (0.2 - 10, default 2).' },
   { key: 'PORT', label: 'Server port', kind: 'number', section: 'Server', placeholder: '3000' },
 ];
 // Display map: DB config overlaid with real process env (env wins, like cfg()).
