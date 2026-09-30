@@ -196,9 +196,40 @@ describe('computer-use dispatch loop', () => {
     });
   });
 
-  it('includes an initial desktop screenshot in the first request', async () => {
+  it('threads screen context into the first request ahead of the screenshot', async () => {
     await withEnv({ COMPUTER_USE_ENABLED: 'true', GEMINI_API_KEY: 'test-key' }, async () => {
       const cu = await import('../computer-use/gemini-client.js');
+      const { resetRateLimit } = await import('../security.js');
+      const fake = fakeClient([DONE]);
+      cu.setClientFactory(() => fake);
+      const { runComputerUseTask, resetTaskLock, __setOverrides } = await import('../computer-use/dispatch.js');
+      resetTaskLock();
+      __setOverrides(NO_TOUCH_OVERRIDES);
+      try {
+        const result = await runComputerUseTask({
+          task: 'read the error on my screen and fix it',
+          context: 'Notepad window titled "setup.log", red error text: ECONNREFUSED 127.0.0.1:3000',
+        });
+        const text = fake.calls[0].input[0].text;
+        assert.equal(fake.calls[0].input[0].type, 'text');
+        assert.match(text, /Task: read the error on my screen and fix it/);
+        assert.match(text, /Screen observed moments ago:/);
+        assert.match(text, /ECONNREFUSED 127\.0\.0\.1:3000/);
+        assert.equal(fake.calls[0].input[1].type, 'image'); // fresh screenshot still follows
+        assert.equal(result.status, 'complete');
+      } finally {
+        __setOverrides({});
+        cu.resetClient();
+        resetTaskLock();
+        resetRateLimit('computer_use');
+      }
+    });
+  });
+
+  it('sends no context section when context is absent', async () => {
+    await withEnv({ COMPUTER_USE_ENABLED: 'true', GEMINI_API_KEY: 'test-key' }, async () => {
+      const cu = await import('../computer-use/gemini-client.js');
+      const { resetRateLimit } = await import('../security.js');
       const fake = fakeClient([DONE]);
       cu.setClientFactory(() => fake);
       const { runComputerUseTask, resetTaskLock, __setOverrides } = await import('../computer-use/dispatch.js');
@@ -206,6 +237,7 @@ describe('computer-use dispatch loop', () => {
       __setOverrides(NO_TOUCH_OVERRIDES);
       try {
         const result = await runComputerUseTask({ task: 'tidy the desktop' });
+        assert.doesNotMatch(fake.calls[0].input[0].text, /Screen observed/);
         const input = fake.calls[0].input;
         assert.equal(Array.isArray(input), true);
         assert.equal(input[0].type, 'text');
@@ -216,6 +248,7 @@ describe('computer-use dispatch loop', () => {
         __setOverrides({});
         cu.resetClient();
         resetTaskLock();
+        resetRateLimit('computer_use');
       }
     });
   });

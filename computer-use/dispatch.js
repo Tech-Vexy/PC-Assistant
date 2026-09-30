@@ -83,7 +83,7 @@ async function pageFor() {
   };
 }
 
-export async function runComputerUseTask({ task, environment } = {}) {
+export async function runComputerUseTask({ task, environment, context } = {}) {
   const t = String(task || '').trim();
   if (!t) return { status: 'error', message: 'computer_use needs a task description' };
   if (cfg('COMPUTER_USE_ENABLED', 'true').toLowerCase() !== 'true') {
@@ -123,13 +123,15 @@ export async function runComputerUseTask({ task, environment } = {}) {
       }
     }
 
+    // Chain from screen_context: what the voice agent saw moments ago is
+    // often the ground truth for "read the error on my screen and fix it".
+    // Fresh observation still wins — context is a starting point, not a map.
+    const observed = String(context || '').trim().slice(0, 4000);
+    const input = [{ type: 'text', text: observed ? `Task: ${t}\n\nScreen observed moments ago:\n${observed}` : `Task: ${t}` }];
+
     const first = await shotFor(env, pageHandle?.page);
-    let interaction = await client.interactions.create({
-      input: [
-        { type: 'text', text: `Task: ${t}` },
-        { type: 'image', data: first.data, mime_type: first.mime_type || 'image/png' },
-      ],
-    });
+    input.push({ type: 'image', data: first.data, mime_type: first.mime_type || 'image/png' });
+    let interaction = await client.interactions.create({ input });
 
     let continuations = 0;
     for (;;) {

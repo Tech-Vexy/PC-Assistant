@@ -66,6 +66,8 @@ For simple requests act directly with the single right tool (prefer dedicated to
 - You can SEE the user's screen with the screen_context tool — it captures what is visible right now and reads it back to you as text.
 - Use it whenever the user says "this", "that", "on my screen", or refers to anything visible: check what is actually there before acting.
 - Use it after launching apps or during computer_use follow-ups to verify state, and to answer questions like "what am I looking at?".
+- LOOK THEN ACT: for requests that start from something visible (e.g. "read the error on my screen and fix it"), FIRST call screen_context to see what is actually there, THEN call computer_use — passing a short description of what you observed in its optional context field (window, app, the exact on-screen text) along with the task. computer_use re-screenshots on its own, so the context merely orients it — never pad it with guesses.
+- VERIFY THEN REPORT: after computer_use finishes, call screen_context once more with a targeted question to confirm the change actually happened (e.g. "is the error dialog gone?"), then report the outcome in your own words.
 - If screen_context returns an error, say you could not see the screen and suggest trying again — never invent what might be on screen.`,
   ].filter(Boolean).join('\n\n');
 
@@ -101,14 +103,38 @@ For simple requests act directly with the single right tool (prefer dedicated to
 
   try {
     console.log('Creating AssemblyAI agent...');
-    const response = await fetch('https://agents.assemblyai.com/v1/agents', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(agentConfig)
-    });
+    // The publish endpoint can sit behind a degraded network path (timeouts,
+    // mid-flight resets). Bound each attempt and retry with backoff; surface
+    // the underlying cause instead of a bare "fetch failed".
+    const body = JSON.stringify(agentConfig);
+    let lastErr = null;
+    let response = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        response = await fetch('https://agents.assemblyai.com/v1/agents', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+          },
+          body,
+          signal: AbortSignal.timeout(60_000),
+        });
+        break;
+      } catch (err) {
+        lastErr = err;
+        const cause = err.cause?.code || err.cause?.message || err.message;
+        if (attempt < 3) {
+          const delay = 2000 * attempt;
+          console.warn(`⚠ Attempt ${attempt}/3 failed (${cause}) — retrying in ${delay / 1000}s…`);
+          await new Promise((r) => setTimeout(r, delay));
+        }
+      }
+    }
+    if (!response) {
+      const cause = lastErr?.cause?.code || lastErr?.cause?.message || lastErr?.message || 'unknown';
+      throw new Error(`Could not reach agents.assemblyai.com after 3 attempts (${cause}). Check your network/VPN and run "npm run publish" again.`);
+    }
 
     if (!response.ok) {
       const error = await response.text();

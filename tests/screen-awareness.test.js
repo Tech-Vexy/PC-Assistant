@@ -88,4 +88,13 @@ describe('screen awareness', () => {
     assert.match(def.description, /screen/i);
     assert.ok(def.parameters.properties.question, 'question param exists');
   });
+
+  it('computer_use accepts a context hint so the agent can chain look → act', async () => {
+    const { buildAllTools } = await import('../tools.js');
+    const def = buildAllTools().find((t) => t.name === 'computer_use');
+    assert.ok(def, 'computer_use definition exists');
+    const ctx = def.parameters.properties.context;
+    assert.ok(ctx, 'context param exists on computer_use');
+    assert.match(ctx.description, /screen_context/i);
+  });
 });

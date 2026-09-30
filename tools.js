@@ -498,6 +498,10 @@ export const toolDefinitions = [
           type: 'string',
           description: 'The UI task to perform, e.g. "Open Google Chrome" or "Search for flights on Kayak"'
         },
+        context: {
+          type: 'string',
+          description: 'Optional description of the current screen you just observed via screen_context (window, app, visible text/labels). Helps the model start from what you saw instead of re-exploring.'
+        },
         environment: {
           type: 'string',
           description: 'Where to act: "desktop" (native apps, taskbar, file manager) or "browser" (web pages in Chromium)',
