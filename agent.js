@@ -827,7 +827,7 @@ if (isMain) {
     process.env.APPROVAL_HTTP_URL = `http://localhost:${cfg('PORT', '3000')}`;
   }
   // Forward agent-process events (transcripts, tool calls, audio levels,
-  // approval requests) to the server's SSE stream so the TUI and /dashboard
+  // approval requests) to the server's SSE stream so the /dashboard
   // can monitor the live session.
   setRelayUrl(process.env.APPROVAL_HTTP_URL);
   // Keep the screen-recorder feed warm for the whole session so the assistant
