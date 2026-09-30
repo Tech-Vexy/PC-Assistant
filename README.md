@@ -1,5 +1,7 @@
 # PC Personal Voice Assistant
 
+**Repository:** [github.com/Tech-Vexy/PC-Assistant](https://github.com/Tech-Vexy/PC-Assistant)
+
 A local-first, voice-driven assistant for your PC that is both a **knowledge source** and a **hands-free computer controller**. Ask it to explain something ("Tell me about Transformer model architecture"), to look something up ("What's the latest on X?"), or to actually *do* things on your machine ("Open Control Panel", "organize my Downloads folder", "check my email in the browser") — it talks back through your speakers.
 
 Everything runs on your PC: the auth/token server binds to `127.0.0.1` only, API keys stay in your local store, and there is no deployment step — no Docker, no hosting. The only cloud services are the APIs themselves (AssemblyAI voice, your chosen LLM, Gemini for vision/search).
@@ -18,6 +20,7 @@ Everything runs on your PC: the auth/token server binds to `127.0.0.1` only, API
 | "Remember my editor is VS Code" | `remember` — later "open the project in my editor" just works |
 | "Every morning prepare my workspace" | `save_workflow` once, then `run_workflow` on demand |
 | "Mute, next track, read my clipboard" | Media + volume + clipboard in one sentence |
+| "Read the error on my screen and fix it" | Looks first (`screen_context`), acts with Gemini Computer Use starting from what it saw, then re-checks the screen and reports |
 
 ## Features
 
@@ -25,6 +28,7 @@ Everything runs on your PC: the auth/token server binds to `127.0.0.1` only, API
 - **Knowledge + search**: answers conceptual questions from its own knowledge; goes to `web_search` (Google Search Grounding) when information could be time-sensitive
 - **Knows your machine**: at publish time the agent is told your OS and your **installed applications**, so it launches real apps instead of guessing
 - **Vision-guided UI automation** via Gemini Computer Use: screenshot → decide → act → verify loops on the real desktop or in a Chromium browser, with confirmation gates on consequential actions
+- **Screen awareness**: a recorder-grade ffmpeg feed keeps a few seconds of frames in memory, and `screen_context` reads them with Gemini multimodal vision — the agent looks before it acts on anything visible and chains what it saw into `computer_use` tasks
 - **Planner & executor**: multi-step goals become verified, checkpointed, resumable plans; recurring routines become saved workflows
 - **Memory**: preferences, project locations, and facts persist in a local DuckDB store
 - **Undo layer**: file moves/renames, memories, workflows — automatically reversible; shell/computer-use actions journaled for human review
@@ -97,6 +101,7 @@ Common tuning knobs (all optional, validated at startup):
 | `BARGE_IN_THRESHOLD` | `8000` | Mic energy threshold for interrupting playback (0 disables) |
 | `WAKEWORD_ENGINE` / `WAKEWORD_THRESHOLD` | `auto` / `0.5` | Wake word engine and sensitivity |
 | `SCREEN_VERIFY` | `false` | Screenshot-verify device-control actions before execution |
+| `SCREEN_WATCHER_FPS` / `SCREEN_WATCHER_BUFFER_S` | `2` / `8` | Screen-awareness feed rate and history window (frames stay in RAM only) |
 | `STORE_PATH` | `data/assistant.db` | DuckDB store location |
 
 ## The published agent & device context
@@ -149,7 +154,8 @@ Approval events carry the real pending-approval id, so a decision made in one su
 | `run_command` | Allowlisted shell command (no chaining) | Confirmation gate |
 | `terminal_execute` / `terminal_start` / `terminal_read` / `terminal_input` / `terminal_kill` | One-shot + interactive background terminal sessions | Confirmation gate / session-scoped |
 | `file_organize` / `file_rename` / `file_find` / `file_convert` | Folder organization, templated renames, search, document conversion (LibreOffice) | Confirmation gate; first two auto-reversible |
-| `computer_use` | Vision-guided desktop/browser automation loop | Per-action gates + veto list + injection detection |
+| `screen_context` | Look at the screen right now: active window, apps, on-screen text (Gemini multimodal) | Read-only |
+| `computer_use` | Vision-guided desktop/browser automation loop; accepts a context hint from `screen_context` | Per-action gates + veto list + injection detection |
 | `remember` / `recall` / `forget` / `resolve_location` | Semantic memory for preferences, locations, projects | Validated, audited |
 | `save_workflow` / `list_workflows` / `run_workflow` / `delete_workflow` | Reusable multi-step routines | Validated; run gated |
 | `plan_task` / `execute_plan` / `plan_status` / `list_plans` / `cancel_plan` | Goal → verified, checkpointed, resumable plan execution | Gated; planning is side-effect free |
@@ -189,6 +195,7 @@ For the full design — Computer Use loops, safety policies, LLM routing — see
 - **Shell safety**: strict allowlist, no chaining/pipes/redirection, protected process guards on kill/close.
 - **Auth hardening**: 5-minute temporary voice tokens, header-gated internal store API, unpredictable approval IDs, CSRF-checked callbacks, cross-origin approval POSTs rejected.
 - **Integrity**: tool descriptors are semantically vetted and covered by a signed manifest verified at server startup.
+- **Screen privacy**: awareness frames live only in a short in-memory ring buffer (~8 s) that idles down when unused — nothing is written to disk, and frames go only to your configured Gemini key for description.
 - **At rest**: the store is plaintext on disk — OS disk encryption (BitLocker/FileVault) is the at-rest story; `.env` and tokens are gitignored with restrictive permissions.
 
 ## Troubleshooting
@@ -228,13 +235,14 @@ pc_assistant/
 │   ├── event-emitter.js    # Event bus + cross-process relay feeding the SSE stream
 │   ├── model-router.js     # BYOK LLM routes, fast/strong routing, fallback chain
 │   ├── security-extras.js  # Manifest signing, semantic vetting, approval plumbing
+│   ├── screen-watcher.js   # ffmpeg gdigrab frame feed + Gemini multimodal describeScreen
 │   ├── undo.js / fs-safety.js / vad.js / sound-effects.js / monitor.js / …
 ├── tools/                  # Handlers: desktop suite, files, system, shell, terminal,
-│                           #   memory, plan, agents, search
+│                           #   memory, plan, agents, search, screen context
 ├── computer-use/           # Gemini Computer Use: client, loop, executors, safety
 ├── public/dashboard.html   # Web monitoring dashboard (live SSE client)
 ├── scripts/                # launch.js (`up`), setup, tray, Windows service scripts
-└── tests/                  # 17 suites, 150+ tests (node --test)
+└── tests/                  # 20 suites, 170+ tests (node --test)
 ```
 
 **Everyday commands**
