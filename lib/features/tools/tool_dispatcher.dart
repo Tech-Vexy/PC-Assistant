@@ -216,7 +216,8 @@ class ToolDispatcher {
       return result;
     } catch (e) {
       final errResult = {'error': e.toString()};
-      db.logAudit(toolName: toolName, args: args, result: errResult, isBlocked: false);
+      db.logAudit(
+          toolName: toolName, args: args, result: errResult, isBlocked: false);
       return errResult;
     }
   }
@@ -271,7 +272,11 @@ class ToolDispatcher {
       db.recordUndo(
         toolName: 'forget',
         description: 'Forgot "$key"',
-        reversalData: {'action': 'restore', 'key': key, 'previous_value': previous},
+        reversalData: {
+          'action': 'restore',
+          'key': key,
+          'previous_value': previous
+        },
       );
       return {'status': 'forgotten', 'key': key};
     }
@@ -326,14 +331,18 @@ class ToolDispatcher {
           db.deleteWorkflow(name);
         } else if (action == 'restore') {
           final desc = reversal['previous_description'] as String?;
-          final steps = (reversal['previous_steps'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ?? [];
+          final steps = (reversal['previous_steps'] as List<dynamic>?)
+                  ?.cast<Map<String, dynamic>>() ??
+              [];
           db.saveWorkflow(name, description: desc, steps: steps);
         }
       }
     } else if (tool == 'delete_workflow') {
       final name = reversal['name'] as String?;
       final desc = reversal['previous_description'] as String?;
-      final steps = (reversal['previous_steps'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ?? [];
+      final steps = (reversal['previous_steps'] as List<dynamic>?)
+              ?.cast<Map<String, dynamic>>() ??
+          [];
       if (name != null) {
         db.saveWorkflow(name, description: desc, steps: steps);
       }
@@ -348,7 +357,8 @@ class ToolDispatcher {
     };
   }
 
-  Future<Map<String, dynamic>> _handlePlanTask(Map<String, dynamic> args) async {
+  Future<Map<String, dynamic>> _handlePlanTask(
+      Map<String, dynamic> args) async {
     final goal = args['goal'] as String;
     if (nebiusClient == null) {
       return {'error': 'Nebius client (Nemotron-3-super-vl) is not configured'};
@@ -378,11 +388,13 @@ class ToolDispatcher {
       'goal': goal,
       'steps': steps,
       'planner': 'nemotron-3-super-vl',
-      'message': 'Plan generated and saved. Call execute_plan with plan_id "$planId" to execute it.',
+      'message':
+          'Plan generated and saved. Call execute_plan with plan_id "$planId" to execute it.',
     };
   }
 
-  Future<Map<String, dynamic>> _handleExecutePlan(Map<String, dynamic> args) async {
+  Future<Map<String, dynamic>> _handleExecutePlan(
+      Map<String, dynamic> args) async {
     final planId = args['plan_id'] as String;
     final plan = db.getPlan(planId);
     if (plan == null) {
@@ -406,13 +418,17 @@ class ToolDispatcher {
         'result': stepRes,
       });
 
-      if (stepRes.containsKey('error') || stepRes.containsKey('blocked') || stepRes['status'] == 'blocked') {
+      if (stepRes.containsKey('error') ||
+          stepRes.containsKey('blocked') ||
+          stepRes['status'] == 'blocked') {
         db.updatePlanStatus(planId, 'failed', steps: executionLog);
         return {
           'status': 'failed',
           'plan_id': planId,
           'failed_step': i + 1,
-          'reason': stepRes['error'] ?? stepRes['security_alert'] ?? 'Execution halted',
+          'reason': stepRes['error'] ??
+              stepRes['security_alert'] ??
+              'Execution halted',
           'log': executionLog,
         };
       }
@@ -437,7 +453,8 @@ class ToolDispatcher {
     final name = args['name'] as String;
     final desc = args['description'] as String?;
     final rawSteps = args['steps'] as List<dynamic>;
-    final steps = rawSteps.map((s) => Map<String, dynamic>.from(s as Map)).toList();
+    final steps =
+        rawSteps.map((s) => Map<String, dynamic>.from(s as Map)).toList();
 
     final previous = db.getWorkflow(name);
     db.saveWorkflow(name, description: desc, steps: steps);
@@ -456,14 +473,16 @@ class ToolDispatcher {
     return {'status': 'saved', 'name': name, 'steps_count': steps.length};
   }
 
-  Future<Map<String, dynamic>> _handleRunWorkflow(Map<String, dynamic> args) async {
+  Future<Map<String, dynamic>> _handleRunWorkflow(
+      Map<String, dynamic> args) async {
     final name = args['name'] as String;
     final workflow = db.getWorkflow(name);
     if (workflow == null) {
       return {'error': 'Workflow "$name" not found'};
     }
 
-    final steps = (workflow['steps'] as List<dynamic>).cast<Map<String, dynamic>>();
+    final steps =
+        (workflow['steps'] as List<dynamic>).cast<Map<String, dynamic>>();
     final results = <Map<String, dynamic>>[];
 
     for (int i = 0; i < steps.length; i++) {
@@ -478,7 +497,9 @@ class ToolDispatcher {
         'result': stepRes,
       });
 
-      if (stepRes.containsKey('error') || stepRes.containsKey('blocked') || stepRes['status'] == 'blocked') {
+      if (stepRes.containsKey('error') ||
+          stepRes.containsKey('blocked') ||
+          stepRes['status'] == 'blocked') {
         return {
           'status': 'halted',
           'failed_step': i + 1,
@@ -530,7 +551,8 @@ class ToolDispatcher {
       return {'error': 'Workflow "$workflowName" does not exist'};
     }
 
-    final id = 'sched_${workflowName}_${DateTime.now().millisecondsSinceEpoch % 100000}';
+    final id =
+        'sched_${workflowName}_${DateTime.now().millisecondsSinceEpoch % 100000}';
     final now = DateTime.now().millisecondsSinceEpoch;
     final nextRunAt = now + (intervalSeconds * 1000);
 
@@ -546,7 +568,8 @@ class ToolDispatcher {
       'schedule_id': id,
       'workflow_name': workflowName,
       'interval_seconds': intervalSeconds,
-      'next_run_at': DateTime.fromMillisecondsSinceEpoch(nextRunAt).toIso8601String(),
+      'next_run_at':
+          DateTime.fromMillisecondsSinceEpoch(nextRunAt).toIso8601String(),
     };
   }
 
@@ -555,13 +578,18 @@ class ToolDispatcher {
     return {'count': list.length, 'scheduled_workflows': list};
   }
 
-  Map<String, dynamic> _handleCancelScheduledWorkflow(Map<String, dynamic> args) {
+  Map<String, dynamic> _handleCancelScheduledWorkflow(
+      Map<String, dynamic> args) {
     final scheduleId = args['schedule_id'] as String;
     final ok = db.deleteScheduledWorkflow(scheduleId);
-    return {'status': ok ? 'cancelled' : 'not_found', 'schedule_id': scheduleId};
+    return {
+      'status': ok ? 'cancelled' : 'not_found',
+      'schedule_id': scheduleId
+    };
   }
 
-  Future<Map<String, dynamic>> _handleShellCommand(Map<String, dynamic> args) async {
+  Future<Map<String, dynamic>> _handleShellCommand(
+      Map<String, dynamic> args) async {
     if (Platform.isAndroid || Platform.isIOS) {
       return {'error': 'Shell commands are not permitted on mobile platforms'};
     }
@@ -591,29 +619,41 @@ class ToolDispatcher {
       return {'status': success ? 'launched' : 'app_not_found', 'app': appName};
     } else if (Platform.isLinux) {
       // Launch via gtk-launch or background process on desktop
-      await Process.start('gtk-launch', [appName], mode: ProcessStartMode.detached);
+      await Process.start('gtk-launch', [appName],
+          mode: ProcessStartMode.detached);
       return {'status': 'launched', 'app': appName};
     } else if (Platform.isWindows) {
-      await Process.start('cmd', ['/c', 'start', '', appName], mode: ProcessStartMode.detached);
+      await Process.start('cmd', ['/c', 'start', '', appName],
+          mode: ProcessStartMode.detached);
       return {'status': 'launched', 'app': appName};
     }
 
     return {'status': 'unsupported_platform', 'app': appName};
   }
 
-  Future<Map<String, dynamic>> _handleClickElement(Map<String, dynamic> args) async {
+  Future<Map<String, dynamic>> _handleClickElement(
+      Map<String, dynamic> args) async {
     final text = args['text'] as String? ?? '';
     final viewId = args['view_id'] as String?;
     if (androidBridge == null) {
-      return {'error': 'Mobile accessibility bridge is not available on this platform'};
+      return {
+        'error': 'Mobile accessibility bridge is not available on this platform'
+      };
     }
     final success = await androidBridge!.clickByText(text, viewId: viewId);
-    return {'action': 'click', 'target': text.isNotEmpty ? text : (viewId ?? ''), 'success': success};
+    return {
+      'action': 'click',
+      'target': text.isNotEmpty ? text : (viewId ?? ''),
+      'success': success
+    };
   }
 
-  Future<Map<String, dynamic>> _handleTouchGesture(Map<String, dynamic> args) async {
+  Future<Map<String, dynamic>> _handleTouchGesture(
+      Map<String, dynamic> args) async {
     if (androidBridge == null) {
-      return {'error': 'Mobile touch gestures are not available on this platform'};
+      return {
+        'error': 'Mobile touch gestures are not available on this platform'
+      };
     }
     final type = args['type'] as String;
     if (type == 'tap') {
@@ -626,13 +666,15 @@ class ToolDispatcher {
       final startY = (args['startY'] as num?)?.toDouble() ?? 0.0;
       final endX = (args['endX'] as num?)?.toDouble() ?? 0.0;
       final endY = (args['endY'] as num?)?.toDouble() ?? 0.0;
-      final success = await androidBridge!.injectSwipe(startX, startY, endX, endY);
+      final success =
+          await androidBridge!.injectSwipe(startX, startY, endX, endY);
       return {'gesture': 'swipe', 'success': success};
     }
     return {'error': 'Unknown gesture type: $type'};
   }
 
-  Future<Map<String, dynamic>> _handleNavigate(Map<String, dynamic> args) async {
+  Future<Map<String, dynamic>> _handleNavigate(
+      Map<String, dynamic> args) async {
     if (androidBridge == null) {
       return {'error': 'Mobile navigation is not available on this platform'};
     }
@@ -645,7 +687,8 @@ class ToolDispatcher {
     return {'action': actionStr, 'success': success};
   }
 
-  Future<Map<String, dynamic>> _handleInspectScreen(Map<String, dynamic> args) async {
+  Future<Map<String, dynamic>> _handleInspectScreen(
+      Map<String, dynamic> args) async {
     final query = args['query'] as String? ?? 'General screen context';
 
     // On mobile, check sensitive app shield
@@ -674,19 +717,23 @@ class ToolDispatcher {
     };
   }
 
-  Future<Map<String, dynamic>> _handleInputText(Map<String, dynamic> args) async {
+  Future<Map<String, dynamic>> _handleInputText(
+      Map<String, dynamic> args) async {
     final text = args['text'] as String;
     final viewId = args['view_id'] as String?;
 
     if (androidBridge == null) {
-      return {'error': 'Text input automation is not available on this platform'};
+      return {
+        'error': 'Text input automation is not available on this platform'
+      };
     }
 
     final success = await androidBridge!.inputText(text, viewId: viewId);
     return {'action': 'input_text', 'text': text, 'success': success};
   }
 
-  Future<Map<String, dynamic>> _handleScrollScreen(Map<String, dynamic> args) async {
+  Future<Map<String, dynamic>> _handleScrollScreen(
+      Map<String, dynamic> args) async {
     final direction = (args['direction'] as String?)?.toLowerCase() ?? 'down';
     final forward = direction != 'up';
 
@@ -698,7 +745,8 @@ class ToolDispatcher {
     return {'action': 'scroll', 'direction': direction, 'success': success};
   }
 
-  Future<Map<String, dynamic>> _handleCaptureScreen(Map<String, dynamic> args) async {
+  Future<Map<String, dynamic>> _handleCaptureScreen(
+      Map<String, dynamic> args) async {
     // Sensitive app shield check
     final decision = guard.evaluate(packageName: activePackageName);
     if (decision.isBlocked) {
@@ -716,12 +764,14 @@ class ToolDispatcher {
           'status': 'captured',
           'format': 'jpeg',
           'bytes_length': bytes.length,
-          'message': 'Visual screen frame captured and streamed to Gemini Live model under security shield approval',
+          'message':
+              'Visual screen frame captured and streamed to Gemini Live model under security shield approval',
         };
       }
       return {
         'status': 'unavailable',
-        'message': 'Screen capture unavailable or blocked by Android FLAG_SECURE',
+        'message':
+            'Screen capture unavailable or blocked by Android FLAG_SECURE',
       };
     }
 
@@ -734,14 +784,18 @@ class ToolDispatcher {
 
   // --- WEB SEARCH & KNOWLEDGE ---
 
-  Future<Map<String, dynamic>> _handleWebSearch(Map<String, dynamic> args) async {
+  Future<Map<String, dynamic>> _handleWebSearch(
+      Map<String, dynamic> args) async {
     final query = args['query'] as String? ?? '';
     if (query.trim().isEmpty) {
       return {'error': 'Search query is required'};
     }
 
     if (nebiusClient == null) {
-      return {'error': 'Nebius client (NVIDIA Nemotron) is not configured for knowledge synthesis'};
+      return {
+        'error':
+            'Nebius client (NVIDIA Nemotron) is not configured for knowledge synthesis'
+      };
     }
 
     try {
@@ -752,7 +806,8 @@ class ToolDispatcher {
         messages: [
           {
             'role': 'system',
-            'content': 'You are the knowledge synthesis engine of Device Assistant powered by NVIDIA Nemotron. Answer the user query accurately, concisely, and factually.',
+            'content':
+                'You are the knowledge synthesis engine of Device Assistant powered by NVIDIA Nemotron. Answer the user query accurately, concisely, and factually.',
           },
           {'role': 'user', 'content': query},
         ],
@@ -764,7 +819,8 @@ class ToolDispatcher {
         'status': 'success',
         'query': query,
         'answer': answer,
-        'complexity': complexity == TaskComplexity.complex ? 'complex' : 'simple',
+        'complexity':
+            complexity == TaskComplexity.complex ? 'complex' : 'simple',
         'model_used': modelUsed,
         'source': 'nemotron smart routing ($modelUsed)',
       };
@@ -779,7 +835,8 @@ class ToolDispatcher {
     if (pcBridgeClient == null) {
       return {
         'status': 'not_configured',
-        'message': 'PC Assistant server bridge is not configured. Configure the PC server URL in Settings.',
+        'message':
+            'PC Assistant server bridge is not configured. Configure the PC server URL in Settings.',
       };
     }
     return await pcBridgeClient!.checkHealth();
@@ -787,21 +844,31 @@ class ToolDispatcher {
 
   Future<Map<String, dynamic>> _handleSyncMemories() async {
     if (pcBridgeClient == null) {
-      return {'status': 'error', 'error': 'PC Assistant server bridge is not configured'};
+      return {
+        'status': 'error',
+        'error': 'PC Assistant server bridge is not configured'
+      };
     }
     return await pcBridgeClient!.syncMemories(db);
   }
 
   Future<Map<String, dynamic>> _handleSyncWorkflows() async {
     if (pcBridgeClient == null) {
-      return {'status': 'error', 'error': 'PC Assistant server bridge is not configured'};
+      return {
+        'status': 'error',
+        'error': 'PC Assistant server bridge is not configured'
+      };
     }
     return await pcBridgeClient!.syncWorkflows(db);
   }
 
-  Future<Map<String, dynamic>> _handleDelegateToPc(Map<String, dynamic> args) async {
+  Future<Map<String, dynamic>> _handleDelegateToPc(
+      Map<String, dynamic> args) async {
     if (pcBridgeClient == null) {
-      return {'status': 'error', 'error': 'PC Assistant server bridge is not configured'};
+      return {
+        'status': 'error',
+        'error': 'PC Assistant server bridge is not configured'
+      };
     }
     final tool = args['tool'] as String? ?? '';
     final toolArgs = (args['args'] as Map<String, dynamic>?) ?? {};
@@ -813,13 +880,16 @@ class ToolDispatcher {
 
   // --- SUB-AGENT HANDLERS ---
 
-  Future<Map<String, dynamic>> _handleSpawnAgent(Map<String, dynamic> args) async {
+  Future<Map<String, dynamic>> _handleSpawnAgent(
+      Map<String, dynamic> args) async {
     final role = args['role'] as String?;
     final instructions = args['instructions'] as String?;
     final rawTools = args['allowed_tools'] as List<dynamic>?;
 
     if (role == null || instructions == null || rawTools == null) {
-      return {'error': 'Missing required fields: role, instructions, allowed_tools'};
+      return {
+        'error': 'Missing required fields: role, instructions, allowed_tools'
+      };
     }
 
     final allowedTools = rawTools.map((e) => e.toString()).toList();

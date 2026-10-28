@@ -105,14 +105,16 @@ class SubAgentManager {
     if (_activeRunningCount >= maxConcurrentAgents) {
       return {
         'status': 'rejected',
-        'error': 'Max concurrent sub-agents limit reached ($maxConcurrentAgents active).',
+        'error':
+            'Max concurrent sub-agents limit reached ($maxConcurrentAgents active).',
       };
     }
 
     if (depth > maxDepthLimit) {
       return {
         'status': 'rejected',
-        'error': 'Sub-agent spawn depth limit exceeded (max depth: $maxDepthLimit).',
+        'error':
+            'Sub-agent spawn depth limit exceeded (max depth: $maxDepthLimit).',
       };
     }
 
@@ -144,7 +146,8 @@ class SubAgentManager {
       sanitizedTools.remove('spawn_agent');
     }
 
-    final agentId = 'agent_${DateTime.now().millisecondsSinceEpoch}_${(role.replaceAll(' ', '_')).toLowerCase()}';
+    final agentId =
+        'agent_${DateTime.now().millisecondsSinceEpoch}_${(role.replaceAll(' ', '_')).toLowerCase()}';
 
     // 3. Persist agent record
     db.saveAgent(
@@ -179,10 +182,12 @@ class SubAgentManager {
       ),
       cancelToken: cancelCompleter,
     ).then((_) {
-      _activeRunningCount = (_activeRunningCount - 1).clamp(0, maxConcurrentAgents);
+      _activeRunningCount =
+          (_activeRunningCount - 1).clamp(0, maxConcurrentAgents);
       _activeCancellations.remove(agentId);
     }).catchError((err) {
-      _activeRunningCount = (_activeRunningCount - 1).clamp(0, maxConcurrentAgents);
+      _activeRunningCount =
+          (_activeRunningCount - 1).clamp(0, maxConcurrentAgents);
       _activeCancellations.remove(agentId);
       db.updateAgentStatus(agentId, 'failed', error: err.toString());
     });
@@ -242,10 +247,13 @@ class SubAgentManager {
           };
         }
 
-        if (nextAction['action'] == 'finish' || nextAction['action'] == 'complete') {
-          final finalOutput = nextAction['output'] as Map<String, dynamic>? ?? {
-            'summary': nextAction['summary'] ?? 'Goal accomplished successfully.',
-          };
+        if (nextAction['action'] == 'finish' ||
+            nextAction['action'] == 'complete') {
+          final finalOutput = nextAction['output'] as Map<String, dynamic>? ??
+              {
+                'summary':
+                    nextAction['summary'] ?? 'Goal accomplished successfully.',
+              };
 
           db.updateAgentStatus(
             agentId,
@@ -319,7 +327,8 @@ class SubAgentManager {
       );
     } catch (e) {
       timeoutTimer.cancel();
-      db.updateAgentStatus(agentId, 'failed', stepsTaken: stepsTaken, error: e.toString());
+      db.updateAgentStatus(agentId, 'failed',
+          stepsTaken: stepsTaken, error: e.toString());
       return SubAgentExecutionResult(
         agentId: agentId,
         role: spec.role,

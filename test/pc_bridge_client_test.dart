@@ -14,11 +14,13 @@ void main() {
     test('checkHealth returns connected=true on 200 response', () async {
       final mockClient = MockClient((request) async {
         expect(request.url.path, equals('/health'));
-        expect(request.headers['X-Requested-With'], equals('pc-assistant-agent'));
+        expect(
+            request.headers['X-Requested-With'], equals('pc-assistant-agent'));
         return http.Response(jsonEncode({'status': 'ok', 'uptime': 1234}), 200);
       });
 
-      final bridge = PcBridgeClient(serverUrl: 'http://localhost:3000', httpClient: mockClient);
+      final bridge = PcBridgeClient(
+          serverUrl: 'http://localhost:3000', httpClient: mockClient);
       final health = await bridge.checkHealth();
 
       expect(health['connected'], isTrue);
@@ -31,7 +33,8 @@ void main() {
         return http.Response('Internal Server Error', 500);
       });
 
-      final bridge = PcBridgeClient(serverUrl: 'http://localhost:3000', httpClient: mockClient);
+      final bridge = PcBridgeClient(
+          serverUrl: 'http://localhost:3000', httpClient: mockClient);
       final health = await bridge.checkHealth();
 
       expect(health['connected'], isFalse);
@@ -45,10 +48,12 @@ void main() {
         expect(body['tool'], equals('media_control'));
         expect(body['args']['action'], equals('play'));
 
-        return http.Response(jsonEncode({'status': 'success', 'executed': true}), 200);
+        return http.Response(
+            jsonEncode({'status': 'success', 'executed': true}), 200);
       });
 
-      final bridge = PcBridgeClient(serverUrl: 'http://localhost:3000', httpClient: mockClient);
+      final bridge = PcBridgeClient(
+          serverUrl: 'http://localhost:3000', httpClient: mockClient);
       final res = await bridge.delegateTool(
         tool: 'media_control',
         args: {'action': 'play'},
@@ -66,12 +71,15 @@ void main() {
         return http.Response('{"ok":true}', 200);
       });
 
-      final bridge = PcBridgeClient(serverUrl: 'http://localhost:3000', httpClient: mockClient);
-      final success = await bridge.resolveApproval(approvalId: 'appr_123', approved: true);
+      final bridge = PcBridgeClient(
+          serverUrl: 'http://localhost:3000', httpClient: mockClient);
+      final success =
+          await bridge.resolveApproval(approvalId: 'appr_123', approved: true);
       expect(success, isTrue);
     });
 
-    test('fetchPendingApprovals returns list of approvals from /api/approvals', () async {
+    test('fetchPendingApprovals returns list of approvals from /api/approvals',
+        () async {
       final mockClient = MockClient((request) async {
         expect(request.url.path, equals('/api/approvals'));
         return http.Response(
@@ -89,14 +97,16 @@ void main() {
         );
       });
 
-      final bridge = PcBridgeClient(serverUrl: 'http://localhost:3000', httpClient: mockClient);
+      final bridge = PcBridgeClient(
+          serverUrl: 'http://localhost:3000', httpClient: mockClient);
       final pending = await bridge.fetchPendingApprovals();
       expect(pending.length, equals(1));
       expect(pending.first['id'], equals('appr_abc123'));
       expect(pending.first['tool'], equals('terminal_execute'));
     });
 
-    test('syncMemories pulls remote memories and stores in local database', () async {
+    test('syncMemories pulls remote memories and stores in local database',
+        () async {
       final tempDir = await Directory.systemTemp.createTemp('sync_mem_test_');
       final db = LocalDatabase();
       await db.initialize(baseDirectory: tempDir);
@@ -106,15 +116,24 @@ void main() {
         return http.Response(
           jsonEncode({
             'memories': [
-              {'key': 'work_laptop', 'value': 'ThinkPad X1', 'category': 'hardware'},
-              {'key': 'preferred_shell', 'value': 'zsh', 'category': 'preference'},
+              {
+                'key': 'work_laptop',
+                'value': 'ThinkPad X1',
+                'category': 'hardware'
+              },
+              {
+                'key': 'preferred_shell',
+                'value': 'zsh',
+                'category': 'preference'
+              },
             ]
           }),
           200,
         );
       });
 
-      final bridge = PcBridgeClient(serverUrl: 'http://localhost:3000', httpClient: mockClient);
+      final bridge = PcBridgeClient(
+          serverUrl: 'http://localhost:3000', httpClient: mockClient);
       final syncRes = await bridge.syncMemories(db);
 
       expect(syncRes['status'], equals('success'));
@@ -128,7 +147,8 @@ void main() {
       await tempDir.delete(recursive: true);
     });
 
-    test('syncWorkflows pulls remote workflows and stores in local database', () async {
+    test('syncWorkflows pulls remote workflows and stores in local database',
+        () async {
       final tempDir = await Directory.systemTemp.createTemp('sync_wf_test_');
       final db = LocalDatabase();
       await db.initialize(baseDirectory: tempDir);
@@ -151,7 +171,8 @@ void main() {
         );
       });
 
-      final bridge = PcBridgeClient(serverUrl: 'http://localhost:3000', httpClient: mockClient);
+      final bridge = PcBridgeClient(
+          serverUrl: 'http://localhost:3000', httpClient: mockClient);
       final syncRes = await bridge.syncWorkflows(db);
 
       expect(syncRes['status'], equals('success'));
@@ -185,23 +206,31 @@ void main() {
       }
     });
 
-    test('pc_status, sync_memories, sync_workflows, delegate_to_pc return not_configured when no bridge', () async {
+    test(
+        'pc_status, sync_memories, sync_workflows, delegate_to_pc return not_configured when no bridge',
+        () async {
       final dispatcher = ToolDispatcher(db: db, guard: guard);
 
-      final statusRes = await dispatcher.dispatch(toolName: 'pc_status', args: {});
+      final statusRes =
+          await dispatcher.dispatch(toolName: 'pc_status', args: {});
       expect(statusRes['status'], equals('not_configured'));
 
-      final syncMemRes = await dispatcher.dispatch(toolName: 'sync_memories', args: {});
+      final syncMemRes =
+          await dispatcher.dispatch(toolName: 'sync_memories', args: {});
       expect(syncMemRes['status'], equals('error'));
 
-      final syncWfRes = await dispatcher.dispatch(toolName: 'sync_workflows', args: {});
+      final syncWfRes =
+          await dispatcher.dispatch(toolName: 'sync_workflows', args: {});
       expect(syncWfRes['status'], equals('error'));
 
-      final delegRes = await dispatcher.dispatch(toolName: 'delegate_to_pc', args: {'tool': 'test'});
+      final delegRes = await dispatcher
+          .dispatch(toolName: 'delegate_to_pc', args: {'tool': 'test'});
       expect(delegRes['status'], equals('error'));
     });
 
-    test('pc_status and delegate_to_pc execute through configured PcBridgeClient', () async {
+    test(
+        'pc_status and delegate_to_pc execute through configured PcBridgeClient',
+        () async {
       final mockClient = MockClient((request) async {
         if (request.url.path == '/health') {
           return http.Response('{"status":"ok"}', 200);
@@ -212,20 +241,27 @@ void main() {
         return http.Response('Not Found', 404);
       });
 
-      final bridge = PcBridgeClient(serverUrl: 'http://localhost:3000', httpClient: mockClient);
-      final dispatcher = ToolDispatcher(db: db, guard: guard, pcBridgeClient: bridge);
+      final bridge = PcBridgeClient(
+          serverUrl: 'http://localhost:3000', httpClient: mockClient);
+      final dispatcher =
+          ToolDispatcher(db: db, guard: guard, pcBridgeClient: bridge);
 
-      final statusRes = await dispatcher.dispatch(toolName: 'pc_status', args: {});
+      final statusRes =
+          await dispatcher.dispatch(toolName: 'pc_status', args: {});
       expect(statusRes['connected'], isTrue);
 
       final delegRes = await dispatcher.dispatch(
         toolName: 'delegate_to_pc',
-        args: {'tool': 'open_app', 'args': {'app': 'notepad'}},
+        args: {
+          'tool': 'open_app',
+          'args': {'app': 'notepad'}
+        },
       );
       expect(delegRes['executed'], isTrue);
     });
 
-    test('web_search performs knowledge synthesis using NebiusClient', () async {
+    test('web_search performs knowledge synthesis using NebiusClient',
+        () async {
       final mockClient = MockClient((request) async {
         final body = jsonDecode(request.body) as Map<String, dynamic>;
         final messages = body['messages'] as List;
@@ -237,7 +273,8 @@ void main() {
               {
                 'message': {
                   'role': 'assistant',
-                  'content': 'Flutter is an open-source UI software development kit created by Google.',
+                  'content':
+                      'Flutter is an open-source UI software development kit created by Google.',
                 }
               }
             ]
@@ -247,7 +284,8 @@ void main() {
       });
 
       final nebius = NebiusClient(apiKey: 'test-key', httpClient: mockClient);
-      final dispatcher = ToolDispatcher(db: db, guard: guard, nebiusClient: nebius);
+      final dispatcher =
+          ToolDispatcher(db: db, guard: guard, nebiusClient: nebius);
 
       final res = await dispatcher.dispatch(
         toolName: 'web_search',

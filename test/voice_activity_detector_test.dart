@@ -42,8 +42,11 @@ void main() {
       expect(speechResult.isSpeech, isTrue);
     });
 
-    test('acoustic echo ducking suppresses mic while assistant speaks, unless loud barge-in', () {
-      final vad = VoiceActivityDetector(bargeInThreshold: 8000.0, bargeInConsecutiveFrames: 2);
+    test(
+        'acoustic echo ducking suppresses mic while assistant speaks, unless loud barge-in',
+        () {
+      final vad = VoiceActivityDetector(
+          bargeInThreshold: 8000.0, bargeInConsecutiveFrames: 2);
 
       vad.onPlaybackStarted();
 

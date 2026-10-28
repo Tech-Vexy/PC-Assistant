@@ -32,7 +32,9 @@ void main() {
       expect(encoded['url'], equals('http://192.168.1.42:3000'));
     });
 
-    test('probeServer returns server details when /api/discovery responds with valid JSON', () async {
+    test(
+        'probeServer returns server details when /api/discovery responds with valid JSON',
+        () async {
       final mockClient = MockClient((req) async {
         if (req.url.path == '/api/discovery') {
           return http.Response(
@@ -60,7 +62,8 @@ void main() {
       expect(server.url, equals('http://192.168.1.99:3000'));
     });
 
-    test('probeServer falls back to /health if /api/discovery is unavailable', () async {
+    test('probeServer falls back to /health if /api/discovery is unavailable',
+        () async {
       final mockClient = MockClient((req) async {
         if (req.url.path == '/api/discovery') {
           return http.Response('Not Found', 404);
@@ -78,7 +81,8 @@ void main() {
       expect(server!.url, equals('http://192.168.1.88:3000'));
     });
 
-    test('probeServer returns null when host is completely unreachable', () async {
+    test('probeServer returns null when host is completely unreachable',
+        () async {
       final mockClient = MockClient((req) async {
         throw Exception('Connection refused');
       });
@@ -111,7 +115,8 @@ void main() {
         return http.Response('Not Found', 404);
       });
 
-      final bridge = PcBridgeClient(serverUrl: 'http://localhost:3000', httpClient: mockClient);
+      final bridge = PcBridgeClient(
+          serverUrl: 'http://localhost:3000', httpClient: mockClient);
       final list = await bridge.getPendingApprovals();
 
       expect(list.length, equals(1));
@@ -119,12 +124,14 @@ void main() {
       expect(list.first['tool'], equals('run_command'));
     });
 
-    test('resolveApproval sends approval decision with correct payload', () async {
+    test('resolveApproval sends approval decision with correct payload',
+        () async {
       String? recordedId;
       Map<String, dynamic>? recordedBody;
 
       final mockClient = MockClient((req) async {
-        if (req.url.path.startsWith('/api/approvals/') && req.url.path.endsWith('/decision')) {
+        if (req.url.path.startsWith('/api/approvals/') &&
+            req.url.path.endsWith('/decision')) {
           recordedId = req.url.pathSegments[2];
           recordedBody = jsonDecode(req.body) as Map<String, dynamic>;
           return http.Response(jsonEncode({'ok': true}), 200);
@@ -132,7 +139,8 @@ void main() {
         return http.Response('Not Found', 404);
       });
 
-      final bridge = PcBridgeClient(serverUrl: 'http://localhost:3000', httpClient: mockClient);
+      final bridge = PcBridgeClient(
+          serverUrl: 'http://localhost:3000', httpClient: mockClient);
       final res = await bridge.resolveApproval(
         approvalId: 'appr-xyz-789',
         approved: true,
@@ -142,7 +150,8 @@ void main() {
       expect(res, isTrue);
       expect(recordedId, equals('appr-xyz-789'));
       expect(recordedBody?['approved'], isTrue);
-      expect(recordedBody?['note'], equals('Approved via fingerprint on phone'));
+      expect(
+          recordedBody?['note'], equals('Approved via fingerprint on phone'));
     });
   });
 }

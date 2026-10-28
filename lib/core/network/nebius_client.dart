@@ -31,7 +31,7 @@ class NebiusClient {
     this.nanoModel = defaultNanoModel,
     String? model,
     http.Client? httpClient,
-  })  : _httpClient = httpClient ?? http.Client();
+  }) : _httpClient = httpClient ?? http.Client();
 
   /// Resolves the model identifier based on task complexity or explicit override
   String resolveModel({
@@ -92,7 +92,8 @@ class NebiusClient {
     int maxTokens = 2048,
     Map<String, dynamic>? responseFormat,
   }) async {
-    final selectedModel = resolveModel(complexity: complexity, explicitModel: model);
+    final selectedModel =
+        resolveModel(complexity: complexity, explicitModel: model);
     final url = Uri.parse('$endpoint/chat/completions');
 
     final payload = {
@@ -113,7 +114,8 @@ class NebiusClient {
     );
 
     if (response.statusCode != 200) {
-      throw Exception('Nebius API error [${response.statusCode}]: ${response.body}');
+      throw Exception(
+          'Nebius API error [${response.statusCode}]: ${response.body}');
     }
 
     final data = jsonDecode(response.body) as Map<String, dynamic>;
@@ -178,7 +180,9 @@ ${platformContext != null ? 'Platform Context: $platformContext' : ''}
       cleanJson = cleanJson.trim();
 
       final parsed = jsonDecode(cleanJson) as Map<String, dynamic>;
-      final steps = (parsed['steps'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ?? [];
+      final steps =
+          (parsed['steps'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ??
+              [];
       return steps;
     } catch (_) {
       // Fallback single-step task
@@ -225,7 +229,8 @@ Conversation:
     );
 
     try {
-      String clean = result.replaceAll('```json', '').replaceAll('```', '').trim();
+      String clean =
+          result.replaceAll('```json', '').replaceAll('```', '').trim();
       final parsed = jsonDecode(clean) as Map<String, dynamic>;
       if (parsed['should_remember'] == true) {
         return parsed;

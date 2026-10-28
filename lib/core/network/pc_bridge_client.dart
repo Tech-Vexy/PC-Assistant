@@ -22,10 +22,12 @@ class PcBridgeClient {
   /// Checks the health and resource metrics of the PC Assistant server
   Future<Map<String, dynamic>> checkHealth() async {
     try {
-      final res = await _httpClient.get(
-        Uri.parse('$serverUrl/health'),
-        headers: _headers,
-      ).timeout(const Duration(seconds: 4));
+      final res = await _httpClient
+          .get(
+            Uri.parse('$serverUrl/health'),
+            headers: _headers,
+          )
+          .timeout(const Duration(seconds: 4));
 
       if (res.statusCode == 200) {
         return {
@@ -54,14 +56,16 @@ class PcBridgeClient {
     required Map<String, dynamic> args,
   }) async {
     try {
-      final res = await _httpClient.post(
-        Uri.parse('$serverUrl/test-tool'),
-        headers: _headers,
-        body: jsonEncode({
-          'tool': tool,
-          'args': args,
-        }),
-      ).timeout(const Duration(seconds: 30));
+      final res = await _httpClient
+          .post(
+            Uri.parse('$serverUrl/test-tool'),
+            headers: _headers,
+            body: jsonEncode({
+              'tool': tool,
+              'args': args,
+            }),
+          )
+          .timeout(const Duration(seconds: 30));
 
       if (res.statusCode == 200) {
         return jsonDecode(res.body) as Map<String, dynamic>;
@@ -81,10 +85,12 @@ class PcBridgeClient {
   /// Fetches currently pending dangerous tool approvals from the PC Assistant server
   Future<List<Map<String, dynamic>>> fetchPendingApprovals() async {
     try {
-      final res = await _httpClient.get(
-        Uri.parse('$serverUrl/api/approvals'),
-        headers: _headers,
-      ).timeout(const Duration(seconds: 4));
+      final res = await _httpClient
+          .get(
+            Uri.parse('$serverUrl/api/approvals'),
+            headers: _headers,
+          )
+          .timeout(const Duration(seconds: 4));
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
@@ -117,7 +123,8 @@ class PcBridgeClient {
         return;
       }
 
-      await for (final line in response.stream.toStringStream().transform(const LineSplitter())) {
+      await for (final line
+          in response.stream.toStringStream().transform(const LineSplitter())) {
         final trimmed = line.trim();
         if (trimmed.startsWith('data:')) {
           final jsonStr = trimmed.substring(5).trim();
@@ -147,26 +154,30 @@ class PcBridgeClient {
     String note = 'via Device Assistant companion',
   }) async {
     try {
-      final res = await _httpClient.post(
-        Uri.parse('$serverUrl/api/approvals/$approvalId/decision'),
-        headers: _headers,
-        body: jsonEncode({
-          'approved': approved,
-          'note': note,
-        }),
-      ).timeout(const Duration(seconds: 5));
+      final res = await _httpClient
+          .post(
+            Uri.parse('$serverUrl/api/approvals/$approvalId/decision'),
+            headers: _headers,
+            body: jsonEncode({
+              'approved': approved,
+              'note': note,
+            }),
+          )
+          .timeout(const Duration(seconds: 5));
 
       if (res.statusCode == 200) return true;
 
       // Fallback: try POST /api/approvals/:id directly
-      final fallbackRes = await _httpClient.post(
-        Uri.parse('$serverUrl/api/approvals/$approvalId'),
-        headers: _headers,
-        body: jsonEncode({
-          'approved': approved,
-          'note': note,
-        }),
-      ).timeout(const Duration(seconds: 5));
+      final fallbackRes = await _httpClient
+          .post(
+            Uri.parse('$serverUrl/api/approvals/$approvalId'),
+            headers: _headers,
+            body: jsonEncode({
+              'approved': approved,
+              'note': note,
+            }),
+          )
+          .timeout(const Duration(seconds: 5));
 
       return fallbackRes.statusCode == 200;
     } catch (_) {
@@ -177,13 +188,18 @@ class PcBridgeClient {
   /// Pulls memories from the PC Assistant DuckDB store and merges into local encrypted SQLite
   Future<Map<String, dynamic>> syncMemories(LocalDatabase localDb) async {
     try {
-      final res = await _httpClient.get(
-        Uri.parse('$serverUrl/api/store/memory'),
-        headers: _headers,
-      ).timeout(const Duration(seconds: 8));
+      final res = await _httpClient
+          .get(
+            Uri.parse('$serverUrl/api/store/memory'),
+            headers: _headers,
+          )
+          .timeout(const Duration(seconds: 8));
 
       if (res.statusCode != 200) {
-        return {'status': 'error', 'error': 'Server responded ${res.statusCode}'};
+        return {
+          'status': 'error',
+          'error': 'Server responded ${res.statusCode}'
+        };
       }
 
       final data = jsonDecode(res.body) as Map<String, dynamic>;
@@ -216,13 +232,18 @@ class PcBridgeClient {
   /// Pulls workflows from the PC Assistant DuckDB store and merges into local encrypted SQLite
   Future<Map<String, dynamic>> syncWorkflows(LocalDatabase localDb) async {
     try {
-      final res = await _httpClient.get(
-        Uri.parse('$serverUrl/api/store/workflows'),
-        headers: _headers,
-      ).timeout(const Duration(seconds: 8));
+      final res = await _httpClient
+          .get(
+            Uri.parse('$serverUrl/api/store/workflows'),
+            headers: _headers,
+          )
+          .timeout(const Duration(seconds: 8));
 
       if (res.statusCode != 200) {
-        return {'status': 'error', 'error': 'Server responded ${res.statusCode}'};
+        return {
+          'status': 'error',
+          'error': 'Server responded ${res.statusCode}'
+        };
       }
 
       final data = jsonDecode(res.body) as Map<String, dynamic>;
@@ -240,7 +261,8 @@ class PcBridgeClient {
             steps = stepsRaw.cast<Map<String, dynamic>>();
           } else if (stepsRaw is String) {
             try {
-              steps = (jsonDecode(stepsRaw) as List).cast<Map<String, dynamic>>();
+              steps =
+                  (jsonDecode(stepsRaw) as List).cast<Map<String, dynamic>>();
             } catch (_) {}
           }
 
@@ -275,11 +297,15 @@ class PcBridgeClient {
 
       final response = await client.send(request);
       if (response.statusCode != 200) {
-        yield {'type': 'error', 'error': 'Failed to connect: HTTP ${response.statusCode}'};
+        yield {
+          'type': 'error',
+          'error': 'Failed to connect: HTTP ${response.statusCode}'
+        };
         return;
       }
 
-      await for (final line in response.stream.toStringStream().transform(const LineSplitter())) {
+      await for (final line
+          in response.stream.toStringStream().transform(const LineSplitter())) {
         final trimmed = line.trim();
         if (trimmed.startsWith('data:')) {
           final payload = trimmed.substring(5).trim();
@@ -303,10 +329,12 @@ class PcBridgeClient {
   /// Lists pending dangerous tool approval requests from the PC server.
   Future<List<Map<String, dynamic>>> getPendingApprovals() async {
     try {
-      final res = await _httpClient.get(
-        Uri.parse('$serverUrl/api/approvals'),
-        headers: _headers,
-      ).timeout(const Duration(seconds: 4));
+      final res = await _httpClient
+          .get(
+            Uri.parse('$serverUrl/api/approvals'),
+            headers: _headers,
+          )
+          .timeout(const Duration(seconds: 4));
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;

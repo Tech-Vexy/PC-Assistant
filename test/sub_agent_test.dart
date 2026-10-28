@@ -36,7 +36,8 @@ void main() {
       }
     });
 
-    test('Spawning sub-agent saves record and runs within constraints', () async {
+    test('Spawning sub-agent saves record and runs within constraints',
+        () async {
       final res = await dispatcher.dispatch(
         toolName: 'spawn_agent',
         args: {
@@ -91,7 +92,8 @@ void main() {
       expect(res['error'], contains('depth limit exceeded'));
     });
 
-    test('Listing, messaging, and cancelling sub-agents works as expected', () async {
+    test('Listing, messaging, and cancelling sub-agents works as expected',
+        () async {
       final spawnRes = await dispatcher.dispatch(
         toolName: 'spawn_agent',
         args: {

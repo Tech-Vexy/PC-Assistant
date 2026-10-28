@@ -40,11 +40,17 @@ void main() {
       expect(res['mode'], equals('unified_standalone_client'));
     });
 
-    test('Memory tools (remember, recall, list, forget, undo_last) work end-to-end', () async {
+    test(
+        'Memory tools (remember, recall, list, forget, undo_last) work end-to-end',
+        () async {
       // 1. Remember
       final remRes = await dispatcher.dispatch(
         toolName: 'remember',
-        args: {'key': 'office_address', 'value': '456 Tech Ave', 'category': 'location'},
+        args: {
+          'key': 'office_address',
+          'value': '456 Tech Ave',
+          'category': 'location'
+        },
       );
       expect(remRes['status'], equals('saved'));
 

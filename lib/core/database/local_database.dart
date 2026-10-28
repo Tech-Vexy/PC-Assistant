@@ -13,7 +13,8 @@ class LocalDatabase {
   bool get isInitialized => _isInitialized;
 
   /// Initializes the SQLite database file in the application support directory (or custom directory)
-  Future<void> initialize({String? passphrase, Directory? baseDirectory}) async {
+  Future<void> initialize(
+      {String? passphrase, Directory? baseDirectory}) async {
     if (_isInitialized) return;
 
     final dir = baseDirectory ?? await getApplicationSupportDirectory();
@@ -173,7 +174,8 @@ class LocalDatabase {
   List<Map<String, dynamic>> listMemories({String? category}) {
     ResultSet result;
     if (category != null) {
-      final stmt = _db!.prepare('SELECT * FROM memories WHERE category = ? ORDER BY updated_at DESC');
+      final stmt = _db!.prepare(
+          'SELECT * FROM memories WHERE category = ? ORDER BY updated_at DESC');
       result = stmt.select([category]);
       stmt.close();
     } else {
@@ -216,7 +218,8 @@ class LocalDatabase {
   }
 
   List<Map<String, dynamic>> getRecentAudits({int limit = 50}) {
-    final stmt = _db!.prepare('SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT ?');
+    final stmt = _db!
+        .prepare('SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT ?');
     final result = stmt.select([limit]);
     stmt.close();
     return result.map((row) => Map<String, dynamic>.from(row)).toList();
@@ -235,7 +238,8 @@ class LocalDatabase {
       INSERT INTO undo_journal (session_id, tool_name, description, reversal_json, applied, created_at)
       VALUES (?, ?, ?, ?, 0, ?);
     ''');
-    stmt.execute([sessionId, toolName, description, jsonEncode(reversalData), now]);
+    stmt.execute(
+        [sessionId, toolName, description, jsonEncode(reversalData), now]);
     final id = _db!.lastInsertRowId;
     stmt.close();
     return id;
@@ -252,14 +256,16 @@ class LocalDatabase {
   }
 
   void markUndoApplied(int id) {
-    final stmt = _db!.prepare('UPDATE undo_journal SET applied = 1 WHERE id = ?');
+    final stmt =
+        _db!.prepare('UPDATE undo_journal SET applied = 1 WHERE id = ?');
     stmt.execute([id]);
     stmt.close();
   }
 
   // --- WORKFLOW OPERATIONS ---
 
-  void saveWorkflow(String name, {String? description, required List<Map<String, dynamic>> steps}) {
+  void saveWorkflow(String name,
+      {String? description, required List<Map<String, dynamic>> steps}) {
     final now = DateTime.now().millisecondsSinceEpoch;
     final stmt = _db!.prepare('''
       INSERT INTO workflows (name, description, steps_json, created_at)
@@ -289,7 +295,8 @@ class LocalDatabase {
   }
 
   List<Map<String, dynamic>> listWorkflows() {
-    final result = _db!.select('SELECT * FROM workflows ORDER BY created_at DESC');
+    final result =
+        _db!.select('SELECT * FROM workflows ORDER BY created_at DESC');
     return result.map((row) {
       final map = Map<String, dynamic>.from(row);
       try {
@@ -332,7 +339,8 @@ class LocalDatabase {
   }
 
   List<Map<String, dynamic>> listScheduledWorkflows() {
-    final result = _db!.select('SELECT * FROM scheduled_workflows ORDER BY next_run_at ASC');
+    final result = _db!
+        .select('SELECT * FROM scheduled_workflows ORDER BY next_run_at ASC');
     return result.map((row) => Map<String, dynamic>.from(row)).toList();
   }
 
@@ -407,7 +415,8 @@ class LocalDatabase {
     return null;
   }
 
-  void updatePlanStatus(String planId, String status, {List<Map<String, dynamic>>? steps}) {
+  void updatePlanStatus(String planId, String status,
+      {List<Map<String, dynamic>>? steps}) {
     final now = DateTime.now().millisecondsSinceEpoch;
     if (steps != null) {
       final stmt = _db!.prepare('''
@@ -416,7 +425,8 @@ class LocalDatabase {
       stmt.execute([status, jsonEncode(steps), now, planId]);
       stmt.close();
     } else {
-      final stmt = _db!.prepare('UPDATE plans SET status = ?, updated_at = ? WHERE plan_id = ?');
+      final stmt = _db!.prepare(
+          'UPDATE plans SET status = ?, updated_at = ? WHERE plan_id = ?');
       stmt.execute([status, now, planId]);
       stmt.close();
     }
@@ -439,18 +449,22 @@ class LocalDatabase {
 
   Set<String> loadCustomProtectedPackages() {
     final result = _db!.select('SELECT package_name FROM sensitive_packages');
-    return result.map((r) => (r['package_name'] as String).toLowerCase()).toSet();
+    return result
+        .map((r) => (r['package_name'] as String).toLowerCase())
+        .toSet();
   }
 
   void saveProtectedPackage(String packageName) {
     final now = DateTime.now().millisecondsSinceEpoch;
-    final stmt = _db!.prepare('INSERT OR IGNORE INTO sensitive_packages (package_name, added_at) VALUES (?, ?)');
+    final stmt = _db!.prepare(
+        'INSERT OR IGNORE INTO sensitive_packages (package_name, added_at) VALUES (?, ?)');
     stmt.execute([packageName.toLowerCase(), now]);
     stmt.close();
   }
 
   void removeProtectedPackage(String packageName) {
-    final stmt = _db!.prepare('DELETE FROM sensitive_packages WHERE package_name = ?');
+    final stmt =
+        _db!.prepare('DELETE FROM sensitive_packages WHERE package_name = ?');
     stmt.execute([packageName.toLowerCase()]);
     stmt.close();
   }
@@ -517,7 +531,8 @@ class LocalDatabase {
     if (existing == null) return;
 
     final updatedSteps = stepsTaken ?? (existing['steps_taken'] as int? ?? 0);
-    final resultJson = result != null ? jsonEncode(result) : existing['result_json'];
+    final resultJson =
+        result != null ? jsonEncode(result) : existing['result_json'];
     final finalError = error ?? existing['error'];
 
     final stmt = _db!.prepare('''
@@ -553,11 +568,13 @@ class LocalDatabase {
   List<Map<String, dynamic>> listAgents({String? status, int limit = 50}) {
     ResultSet res;
     if (status != null) {
-      final stmt = _db!.prepare('SELECT * FROM agents WHERE status = ? ORDER BY updated_at DESC LIMIT ?');
+      final stmt = _db!.prepare(
+          'SELECT * FROM agents WHERE status = ? ORDER BY updated_at DESC LIMIT ?');
       res = stmt.select([status, limit]);
       stmt.close();
     } else {
-      final stmt = _db!.prepare('SELECT * FROM agents ORDER BY updated_at DESC LIMIT ?');
+      final stmt =
+          _db!.prepare('SELECT * FROM agents ORDER BY updated_at DESC LIMIT ?');
       res = stmt.select([limit]);
       stmt.close();
     }
@@ -579,7 +596,8 @@ class LocalDatabase {
   }
 
   bool cancelAgent(String agentId) {
-    final stmt = _db!.prepare("UPDATE agents SET status = 'cancelled', updated_at = ? WHERE agent_id = ?");
+    final stmt = _db!.prepare(
+        "UPDATE agents SET status = 'cancelled', updated_at = ? WHERE agent_id = ?");
     stmt.execute([DateTime.now().millisecondsSinceEpoch, agentId]);
     final updated = _db!.updatedRows > 0;
     stmt.close();
@@ -597,7 +615,8 @@ class LocalDatabase {
   }
 
   List<Map<String, dynamic>> getAgentMessages(String agentId) {
-    final stmt = _db!.prepare('SELECT * FROM agent_messages WHERE agent_id = ? ORDER BY timestamp ASC');
+    final stmt = _db!.prepare(
+        'SELECT * FROM agent_messages WHERE agent_id = ? ORDER BY timestamp ASC');
     final res = stmt.select([agentId]);
     stmt.close();
     return res.map((r) => Map<String, dynamic>.from(r)).toList();

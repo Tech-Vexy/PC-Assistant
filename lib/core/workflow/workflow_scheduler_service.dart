@@ -11,7 +11,8 @@ class WorkflowSchedulerService {
   Timer? _ticker;
   bool _isRunning = false;
 
-  final _executionController = StreamController<Map<String, dynamic>>.broadcast();
+  final _executionController =
+      StreamController<Map<String, dynamic>>.broadcast();
 
   WorkflowSchedulerService({
     required LocalDatabase database,
@@ -20,7 +21,8 @@ class WorkflowSchedulerService {
         _dispatcher = dispatcher;
 
   bool get isRunning => _isRunning;
-  Stream<Map<String, dynamic>> get executionStream => _executionController.stream;
+  Stream<Map<String, dynamic>> get executionStream =>
+      _executionController.stream;
 
   /// Starts the scheduler tick loop (evaluates every 5 seconds)
   void start({Duration interval = const Duration(seconds: 5)}) {
@@ -45,7 +47,8 @@ class WorkflowSchedulerService {
   }) {
     final workflow = _database.getWorkflow(workflowName);
     if (workflow == null) {
-      throw ArgumentError('Workflow "$workflowName" does not exist in database.');
+      throw ArgumentError(
+          'Workflow "$workflowName" does not exist in database.');
     }
 
     final id = customId ?? 'sched_${workflowName}_${Random().nextInt(999999)}';
@@ -95,7 +98,8 @@ class WorkflowSchedulerService {
             toolName: 'run_workflow',
             args: {'name': workflowName},
           );
-          if (execResult['status'] == 'error' || execResult['success'] == false) {
+          if (execResult['status'] == 'error' ||
+              execResult['success'] == false) {
             status = 'failed';
           }
         } catch (e) {

@@ -2,7 +2,8 @@
 /// inspected, automated, or screenshotted by Device Assistant while
 /// cloud inference is active.
 class SensitiveAppGuard {
-  static const int categoryFinance = 3; // Android ApplicationInfo.CATEGORY_FINANCE
+  static const int categoryFinance =
+      3; // Android ApplicationInfo.CATEGORY_FINANCE
 
   /// Default package blacklist covering Banking, FinTech, SIM Toolkit,
   /// 2FA, Crypto Wallets, and Password Managers.
@@ -96,7 +97,8 @@ class SensitiveAppGuard {
     if (isFlagSecure) {
       return const SecurityDecision(
         isBlocked: true,
-        reason: 'Window has FLAG_SECURE enabled. Screen capture and reading blocked.',
+        reason:
+            'Window has FLAG_SECURE enabled. Screen capture and reading blocked.',
       );
     }
 
@@ -107,10 +109,13 @@ class SensitiveAppGuard {
     final pkg = packageName.trim().toLowerCase();
 
     // 2. SIM Toolkit check (exact or substring heuristic)
-    if (pkg.contains('.stk') || pkg.endsWith('.stk') || pkg.contains('simtoolkit')) {
+    if (pkg.contains('.stk') ||
+        pkg.endsWith('.stk') ||
+        pkg.contains('simtoolkit')) {
       return SecurityDecision(
         isBlocked: true,
-        reason: 'SIM Toolkit ($pkg) is protected. Device Assistant cannot view or automate SIM operations.',
+        reason:
+            'SIM Toolkit ($pkg) is protected. Device Assistant cannot view or automate SIM operations.',
       );
     }
 
@@ -118,7 +123,8 @@ class SensitiveAppGuard {
     if (defaultBlacklist.contains(pkg)) {
       return SecurityDecision(
         isBlocked: true,
-        reason: 'Package $pkg is in the sensitive security blacklist (Banking/FinTech/2FA/Wallet).',
+        reason:
+            'Package $pkg is in the sensitive security blacklist (Banking/FinTech/2FA/Wallet).',
       );
     }
 

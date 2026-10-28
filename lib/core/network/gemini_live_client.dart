@@ -41,7 +41,8 @@ class GeminiLiveClient {
     required this.apiKey,
     this.model = defaultModel,
     this.toolDeclarations = const [],
-    this.systemInstruction = 'You are Device Assistant, a helpful cross-platform companion.',
+    this.systemInstruction =
+        'You are Device Assistant, a helpful cross-platform companion.',
   });
 
   /// Stream of raw 24kHz PCM16 audio chunks returned by Gemini
@@ -249,7 +250,8 @@ class GeminiLiveClient {
         if (functionCalls != null) {
           for (final call in functionCalls) {
             if (call is Map<String, dynamic>) {
-              final id = call['id'] as String? ?? 'call_${DateTime.now().millisecondsSinceEpoch}';
+              final id = call['id'] as String? ??
+                  'call_${DateTime.now().millisecondsSinceEpoch}';
               final name = call['name'] as String;
               final args = (call['args'] as Map<String, dynamic>?) ?? {};
 
@@ -291,10 +293,20 @@ class GeminiLiveClient {
 
   void dispose() {
     disconnect();
-    if (!_audioOutputController.isClosed) _audioOutputController.close();
-    if (!_toolCallController.isClosed) _toolCallController.close();
-    if (!_transcriptController.isClosed) _transcriptController.close();
-    if (!_connectionStateController.isClosed) _connectionStateController.close();
-    if (!_interruptionController.isClosed) _interruptionController.close();
+    if (!_audioOutputController.isClosed) {
+      _audioOutputController.close();
+    }
+    if (!_toolCallController.isClosed) {
+      _toolCallController.close();
+    }
+    if (!_transcriptController.isClosed) {
+      _transcriptController.close();
+    }
+    if (!_connectionStateController.isClosed) {
+      _connectionStateController.close();
+    }
+    if (!_interruptionController.isClosed) {
+      _interruptionController.close();
+    }
   }
 }

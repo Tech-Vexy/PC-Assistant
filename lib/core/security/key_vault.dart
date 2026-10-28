@@ -117,7 +117,8 @@ class KeyVault {
 
   /// Saves whether continuous background hotword detection is enabled
   Future<void> setHotwordEnabled(bool enabled) async {
-    await _storage.write(key: _hotwordEnabledKey, value: enabled ? 'true' : 'false');
+    await _storage.write(
+        key: _hotwordEnabledKey, value: enabled ? 'true' : 'false');
   }
 
   /// Retrieves whether continuous background hotword detection is enabled (default true)

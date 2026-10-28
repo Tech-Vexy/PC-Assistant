@@ -65,13 +65,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
         await widget.keyVault.setNebiusApiKey(_nebiusCtrl.text.trim());
       }
       if (_nebiusEndpointCtrl.text.trim().isNotEmpty) {
-        await widget.keyVault.setNebiusEndpoint(_nebiusEndpointCtrl.text.trim());
+        await widget.keyVault
+            .setNebiusEndpoint(_nebiusEndpointCtrl.text.trim());
       }
       if (_nebiusSuperModelCtrl.text.trim().isNotEmpty) {
-        await widget.keyVault.setNebiusSuperModel(_nebiusSuperModelCtrl.text.trim());
+        await widget.keyVault
+            .setNebiusSuperModel(_nebiusSuperModelCtrl.text.trim());
       }
       if (_nebiusNanoModelCtrl.text.trim().isNotEmpty) {
-        await widget.keyVault.setNebiusNanoModel(_nebiusNanoModelCtrl.text.trim());
+        await widget.keyVault
+            .setNebiusNanoModel(_nebiusNanoModelCtrl.text.trim());
       }
       await widget.keyVault.setPcServerUrl(_pcUrlCtrl.text.trim());
       await widget.keyVault.setHotwordEnabled(_hotwordEnabled);
@@ -114,7 +117,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _pcHealthResult = {'connected': false, 'error': e.toString()});
+        setState(() =>
+            _pcHealthResult = {'connected': false, 'error': e.toString()});
       }
     } finally {
       if (mounted) setState(() => _isTestingPc = false);
@@ -127,20 +131,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _discoveredServers = [];
     });
     try {
-      final servers = await _discoveryService.discoverServers(timeout: const Duration(seconds: 2));
+      final servers = await _discoveryService.discoverServers(
+          timeout: const Duration(seconds: 2));
       if (mounted) {
         setState(() => _discoveredServers = servers);
         if (servers.isEmpty) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('No PC Assistant servers found via UDP broadcast. Ensure PC server is running on the same network.'),
+              content: Text(
+                  'No PC Assistant servers found via UDP broadcast. Ensure PC server is running on the same network.'),
             ),
           );
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               backgroundColor: Colors.green,
-              content: Text('Discovered ${servers.length} PC Assistant server(s) on Wi-Fi.'),
+              content: Text(
+                  'Discovered ${servers.length} PC Assistant server(s) on Wi-Fi.'),
             ),
           );
         }
@@ -148,7 +155,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(backgroundColor: Colors.red, content: Text('Scan error: $e')),
+          SnackBar(
+              backgroundColor: Colors.red, content: Text('Scan error: $e')),
         );
       }
     } finally {
@@ -173,7 +181,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           'You will need to reconfigure them to use voice and planning features.',
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () async {
@@ -182,7 +191,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               await _loadCurrentValues();
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(backgroundColor: Colors.red, content: Text('All API keys cleared.')),
+                  const SnackBar(
+                      backgroundColor: Colors.red,
+                      content: Text('All API keys cleared.')),
                 );
               }
             },
@@ -214,7 +225,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _isSaving
               ? const Padding(
                   padding: EdgeInsets.all(16),
-                  child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+                  child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2)),
                 )
               : IconButton(
                   icon: const Icon(Icons.save),
@@ -227,7 +241,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         padding: const EdgeInsets.all(16),
         children: [
           // --- API Keys Section ---
-          _buildSectionHeader(Icons.key, 'API Keys', 'Stored in hardware-backed keystore'),
+          _buildSectionHeader(
+              Icons.key, 'API Keys', 'Stored in hardware-backed keystore'),
           const SizedBox(height: 12),
           _buildSecureField(
             controller: _geminiCtrl,
@@ -249,7 +264,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               labelText: 'Nebius API Endpoint',
               hintText: 'https://api.studio.nebius.ai/v1',
               prefixIcon: const Icon(Icons.link),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             ),
           ),
           const SizedBox(height: 14),
@@ -258,7 +274,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             decoration: BoxDecoration(
               color: Colors.indigo.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.indigoAccent.withValues(alpha: 0.3)),
+              border:
+                  Border.all(color: Colors.indigoAccent.withValues(alpha: 0.3)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -269,7 +286,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     SizedBox(width: 8),
                     Text(
                       'Smart Model Routing',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.indigoAccent),
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                          color: Colors.indigoAccent),
                     ),
                   ],
                 ),
@@ -289,7 +309,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               labelText: 'Complex Tasks Model (Super VL)',
               hintText: 'nvidia/nemotron-3-super-vl',
               prefixIcon: const Icon(Icons.psychology_alt),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             ),
           ),
           const SizedBox(height: 12),
@@ -299,14 +320,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
               labelText: 'Simple Tasks Model (Nano)',
               hintText: 'nvidia/nemotron-3-nano',
               prefixIcon: const Icon(Icons.flash_on),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             ),
           ),
 
           const SizedBox(height: 28),
 
           // --- Voice Wake-up & Hotword Section ---
-          _buildSectionHeader(Icons.record_voice_over, 'Voice Wake-up & Hotword', 'Always-on on-device voice trigger (Google Hotword style)'),
+          _buildSectionHeader(
+              Icons.record_voice_over,
+              'Voice Wake-up & Hotword',
+              'Always-on on-device voice trigger (Google Hotword style)'),
           const SizedBox(height: 12),
           Card(
             child: Padding(
@@ -316,8 +341,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
-                    title: const Text('Always-On Hotword Detection', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                    subtitle: const Text('Listens continuously in background for wake words without draining battery', style: TextStyle(fontSize: 12)),
+                    title: const Text('Always-On Hotword Detection',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 14)),
+                    subtitle: const Text(
+                        'Listens continuously in background for wake words without draining battery',
+                        style: TextStyle(fontSize: 12)),
                     value: _hotwordEnabled,
                     onChanged: (val) => setState(() => _hotwordEnabled = val),
                   ),
@@ -328,10 +357,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       controller: _hotwordPhraseCtrl,
                       decoration: InputDecoration(
                         labelText: 'Primary Wake Phrase',
-                        hintText: 'e.g. hey assistant, ok google, computer, jarvis',
+                        hintText:
+                            'e.g. hey assistant, ok google, computer, jarvis',
                         prefixIcon: const Icon(Icons.mic_none),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        helperText: 'Spotted locally on-device. You can also say commands directly: "Hey Assistant, open YouTube".',
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                        helperText:
+                            'Spotted locally on-device. You can also say commands directly: "Hey Assistant, open YouTube".',
                         helperMaxLines: 2,
                       ),
                     ),
@@ -345,10 +377,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         'device assistant',
                         'computer',
                         'jarvis',
-                      ].map((preset) => ActionChip(
-                        label: Text(preset, style: const TextStyle(fontSize: 11)),
-                        onPressed: () => setState(() => _hotwordPhraseCtrl.text = preset),
-                      )).toList(),
+                      ]
+                          .map((preset) => ActionChip(
+                                label: Text(preset,
+                                    style: const TextStyle(fontSize: 11)),
+                                onPressed: () => setState(
+                                    () => _hotwordPhraseCtrl.text = preset),
+                              ))
+                          .toList(),
                     ),
                   ],
                 ],
@@ -359,7 +395,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 28),
 
           // --- PC Bridge Section ---
-          _buildSectionHeader(Icons.computer, 'PC Bridge (Cross-Device)', 'Link to desktop PC Assistant for delegation'),
+          _buildSectionHeader(Icons.computer, 'PC Bridge (Cross-Device)',
+              'Link to desktop PC Assistant for delegation'),
           const SizedBox(height: 12),
           TextField(
             controller: _pcUrlCtrl,
@@ -367,7 +404,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               labelText: 'PC Assistant Server URL',
               hintText: 'http://192.168.x.x:3000 or http://localhost:3000',
               prefixIcon: const Icon(Icons.dns),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              border:
+                  OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             ),
           ),
           const SizedBox(height: 12),
@@ -377,14 +415,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
             children: [
               OutlinedButton.icon(
                 icon: _isScanningPc
-                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2))
                     : const Icon(Icons.radar, size: 18),
                 label: const Text('Auto-Discover (Wi-Fi)'),
                 onPressed: _isScanningPc ? null : _scanForPcServers,
               ),
               ElevatedButton.icon(
                 icon: _isTestingPc
-                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2))
                     : const Icon(Icons.wifi_tethering, size: 18),
                 label: const Text('Test Connection'),
                 onPressed: _isTestingPc ? null : _testPcConnection,
@@ -398,7 +442,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               decoration: BoxDecoration(
                 color: Colors.indigo.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.indigoAccent.withValues(alpha: 0.3)),
+                border: Border.all(
+                    color: Colors.indigoAccent.withValues(alpha: 0.3)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -407,7 +452,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     children: [
                       Icon(Icons.devices, size: 18, color: Colors.indigoAccent),
                       SizedBox(width: 8),
-                      Text('Discovered PC Servers', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                      Text('Discovered PC Servers',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 13)),
                     ],
                   ),
                   const SizedBox(height: 8),
@@ -416,7 +463,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         contentPadding: EdgeInsets.zero,
                         leading: const Icon(Icons.laptop),
                         title: Text('${s.hostname} (${s.platform})'),
-                        subtitle: Text(s.url, style: const TextStyle(fontSize: 12)),
+                        subtitle:
+                            Text(s.url, style: const TextStyle(fontSize: 12)),
                         trailing: ElevatedButton(
                           onPressed: () => _selectDiscoveredServer(s),
                           child: const Text('Connect'),
@@ -436,15 +484,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     : Colors.red.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                  color: _pcHealthResult!['connected'] == true ? Colors.green : Colors.red,
+                  color: _pcHealthResult!['connected'] == true
+                      ? Colors.green
+                      : Colors.red,
                 ),
               ),
               child: Row(
                 children: [
                   Icon(
-                    _pcHealthResult!['connected'] == true ? Icons.check_circle : Icons.error_outline,
+                    _pcHealthResult!['connected'] == true
+                        ? Icons.check_circle
+                        : Icons.error_outline,
                     size: 18,
-                    color: _pcHealthResult!['connected'] == true ? Colors.green : Colors.red,
+                    color: _pcHealthResult!['connected'] == true
+                        ? Colors.green
+                        : Colors.red,
                   ),
                   const SizedBox(width: 8),
                   Expanded(
@@ -454,7 +508,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           : 'Failed: ${_pcHealthResult!['error'] ?? 'Unreachable'}',
                       style: TextStyle(
                         fontSize: 12,
-                        color: _pcHealthResult!['connected'] == true ? Colors.green : Colors.red,
+                        color: _pcHealthResult!['connected'] == true
+                            ? Colors.green
+                            : Colors.red,
                       ),
                     ),
                   ),
@@ -466,17 +522,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 28),
 
           // --- About Section ---
-          _buildSectionHeader(Icons.info_outline, 'About', 'System and database information'),
+          _buildSectionHeader(
+              Icons.info_outline, 'About', 'System and database information'),
           const SizedBox(height: 12),
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
                 children: [
-                  _buildInfoRow('Platform', '${Platform.operatingSystem} ${Platform.operatingSystemVersion}'),
-                  _buildInfoRow('Dart Version', Platform.version.split(' ').first),
-                  _buildInfoRow('Processors', '${Platform.numberOfProcessors} cores'),
-                  _buildInfoRow('Database', widget.database.isInitialized ? 'Initialized (Encrypted)' : 'Not initialized'),
+                  _buildInfoRow('Platform',
+                      '${Platform.operatingSystem} ${Platform.operatingSystemVersion}'),
+                  _buildInfoRow(
+                      'Dart Version', Platform.version.split(' ').first),
+                  _buildInfoRow(
+                      'Processors', '${Platform.numberOfProcessors} cores'),
+                  _buildInfoRow(
+                      'Database',
+                      widget.database.isInitialized
+                          ? 'Initialized (Encrypted)'
+                          : 'Not initialized'),
                   _buildInfoRow('App Version', '1.0.0+1'),
                 ],
               ),
@@ -486,7 +550,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 28),
 
           // --- Danger Zone ---
-          _buildSectionHeader(Icons.warning_amber, 'Danger Zone', 'Irreversible actions', color: Colors.red),
+          _buildSectionHeader(
+              Icons.warning_amber, 'Danger Zone', 'Irreversible actions',
+              color: Colors.red),
           const SizedBox(height: 12),
           Card(
             color: Colors.red.withValues(alpha: 0.05),
@@ -501,9 +567,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ListTile(
                     leading: const Icon(Icons.key_off, color: Colors.redAccent),
                     title: const Text('Clear All API Keys'),
-                    subtitle: const Text('Removes all credentials from the hardware keystore', style: TextStyle(fontSize: 12)),
+                    subtitle: const Text(
+                        'Removes all credentials from the hardware keystore',
+                        style: TextStyle(fontSize: 12)),
                     trailing: OutlinedButton(
-                      style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
+                      style:
+                          OutlinedButton.styleFrom(foregroundColor: Colors.red),
                       onPressed: _confirmClearKeys,
                       child: const Text('Clear'),
                     ),
@@ -519,7 +588,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _buildSectionHeader(IconData icon, String title, String subtitle, {Color? color}) {
+  Widget _buildSectionHeader(IconData icon, String title, String subtitle,
+      {Color? color}) {
     return Row(
       children: [
         Icon(icon, color: color ?? Colors.indigoAccent, size: 22),
@@ -527,8 +597,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: color)),
-            Text(subtitle, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+            Text(title,
+                style: TextStyle(
+                    fontWeight: FontWeight.bold, fontSize: 16, color: color)),
+            Text(subtitle,
+                style: const TextStyle(fontSize: 11, color: Colors.grey)),
           ],
         ),
       ],
@@ -565,7 +638,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label, style: const TextStyle(color: Colors.grey, fontSize: 13)),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13)),
+          Text(value,
+              style:
+                  const TextStyle(fontWeight: FontWeight.w500, fontSize: 13)),
         ],
       ),
     );

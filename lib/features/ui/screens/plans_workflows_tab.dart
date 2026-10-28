@@ -17,7 +17,8 @@ class PlansWorkflowsTab extends StatefulWidget {
   State<PlansWorkflowsTab> createState() => _PlansWorkflowsTabState();
 }
 
-class _PlansWorkflowsTabState extends State<PlansWorkflowsTab> with SingleTickerProviderStateMixin {
+class _PlansWorkflowsTabState extends State<PlansWorkflowsTab>
+    with SingleTickerProviderStateMixin {
   late TabController _tabController;
   List<Map<String, dynamic>> _plans = [];
   List<Map<String, dynamic>> _workflows = [];
@@ -72,7 +73,8 @@ class _PlansWorkflowsTabState extends State<PlansWorkflowsTab> with SingleTicker
       final success = res['status'] == 'completed';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          backgroundColor: success ? Colors.green.shade800 : Colors.red.shade800,
+          backgroundColor:
+              success ? Colors.green.shade800 : Colors.red.shade800,
           content: Text(
             success
                 ? 'Plan $planId completed successfully!'
@@ -104,9 +106,12 @@ class _PlansWorkflowsTabState extends State<PlansWorkflowsTab> with SingleTicker
       final success = res['status'] == 'completed';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          backgroundColor: success ? Colors.green.shade800 : Colors.red.shade800,
+          backgroundColor:
+              success ? Colors.green.shade800 : Colors.red.shade800,
           content: Text(
-            success ? 'Workflow "$name" executed.' : 'Workflow "$name" stopped: ${res['error'] ?? 'Execution halted'}',
+            success
+                ? 'Workflow "$name" executed.'
+                : 'Workflow "$name" stopped: ${res['error'] ?? 'Execution halted'}',
           ),
         ),
       );
@@ -134,7 +139,8 @@ class _PlansWorkflowsTabState extends State<PlansWorkflowsTab> with SingleTicker
       final count = res['synced_count'] ?? 0;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          backgroundColor: success ? Colors.green.shade800 : Colors.red.shade800,
+          backgroundColor:
+              success ? Colors.green.shade800 : Colors.red.shade800,
           content: Text(
             success
                 ? 'Synced $count workflows from PC Assistant.'
@@ -197,11 +203,13 @@ class _PlansWorkflowsTabState extends State<PlansWorkflowsTab> with SingleTicker
             TextButton(
               style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
               onPressed: () {
-                widget.database.deleteScheduledWorkflow(existing['id'] as String);
+                widget.database
+                    .deleteScheduledWorkflow(existing['id'] as String);
                 Navigator.pop(ctx);
                 _loadData();
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Cancelled schedule for "$workflowName"')),
+                  SnackBar(
+                      content: Text('Cancelled schedule for "$workflowName"')),
                 );
               },
               child: const Text('Cancel Schedule'),
@@ -214,7 +222,8 @@ class _PlansWorkflowsTabState extends State<PlansWorkflowsTab> with SingleTicker
             onPressed: () {
               final seconds = int.tryParse(intervalCtrl.text.trim()) ?? 3600;
               final now = DateTime.now().millisecondsSinceEpoch;
-              final id = existing['id'] as String? ?? 'sched_${workflowName}_${now % 100000}';
+              final id = existing['id'] as String? ??
+                  'sched_${workflowName}_${now % 100000}';
               widget.database.saveScheduledWorkflow(
                 id: id,
                 workflowName: workflowName,
@@ -226,7 +235,8 @@ class _PlansWorkflowsTabState extends State<PlansWorkflowsTab> with SingleTicker
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   backgroundColor: Colors.teal,
-                  content: Text('Workflow "$workflowName" scheduled every $seconds seconds.'),
+                  content: Text(
+                      'Workflow "$workflowName" scheduled every $seconds seconds.'),
                 ),
               );
             },
@@ -240,7 +250,8 @@ class _PlansWorkflowsTabState extends State<PlansWorkflowsTab> with SingleTicker
   void _showAddWorkflowDialog() {
     final nameCtrl = TextEditingController();
     final descCtrl = TextEditingController();
-    final stepsCtrl = TextEditingController(text: '[\n  {\n    "tool": "system_status",\n    "args": {}\n  }\n]');
+    final stepsCtrl = TextEditingController(
+        text: '[\n  {\n    "tool": "system_status",\n    "args": {}\n  }\n]');
 
     showDialog(
       context: context,
@@ -252,12 +263,16 @@ class _PlansWorkflowsTabState extends State<PlansWorkflowsTab> with SingleTicker
             children: [
               TextField(
                 controller: nameCtrl,
-                decoration: const InputDecoration(labelText: 'Workflow Name', hintText: 'e.g. morning_routine'),
+                decoration: const InputDecoration(
+                    labelText: 'Workflow Name',
+                    hintText: 'e.g. morning_routine'),
               ),
               const SizedBox(height: 8),
               TextField(
                 controller: descCtrl,
-                decoration: const InputDecoration(labelText: 'Description', hintText: 'Checks status and summarizes context'),
+                decoration: const InputDecoration(
+                    labelText: 'Description',
+                    hintText: 'Checks status and summarizes context'),
               ),
               const SizedBox(height: 8),
               TextField(
@@ -273,11 +288,13 @@ class _PlansWorkflowsTabState extends State<PlansWorkflowsTab> with SingleTicker
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () {
               try {
-                final steps = (jsonDecode(stepsCtrl.text) as List).cast<Map<String, dynamic>>();
+                final steps = (jsonDecode(stepsCtrl.text) as List)
+                    .cast<Map<String, dynamic>>();
                 widget.database.saveWorkflow(
                   nameCtrl.text.trim(),
                   description: descCtrl.text.trim(),
@@ -287,7 +304,9 @@ class _PlansWorkflowsTabState extends State<PlansWorkflowsTab> with SingleTicker
                 _loadData();
               } catch (e) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(backgroundColor: Colors.red, content: Text('Invalid JSON steps: $e')),
+                  SnackBar(
+                      backgroundColor: Colors.red,
+                      content: Text('Invalid JSON steps: $e')),
                 );
               }
             },
@@ -300,8 +319,10 @@ class _PlansWorkflowsTabState extends State<PlansWorkflowsTab> with SingleTicker
 
   void _showAddSubAgentDialog() {
     final roleCtrl = TextEditingController(text: 'Device Automator');
-    final instructionsCtrl = TextEditingController(text: 'Check system status and report health');
-    final toolsCtrl = TextEditingController(text: 'system_status, remember, recall');
+    final instructionsCtrl =
+        TextEditingController(text: 'Check system status and report health');
+    final toolsCtrl =
+        TextEditingController(text: 'system_status, remember, recall');
 
     showDialog(
       context: context,
@@ -313,13 +334,16 @@ class _PlansWorkflowsTabState extends State<PlansWorkflowsTab> with SingleTicker
             children: [
               TextField(
                 controller: roleCtrl,
-                decoration: const InputDecoration(labelText: 'Sub-Agent Role', hintText: 'e.g. Research Assistant'),
+                decoration: const InputDecoration(
+                    labelText: 'Sub-Agent Role',
+                    hintText: 'e.g. Research Assistant'),
               ),
               const SizedBox(height: 8),
               TextField(
                 controller: instructionsCtrl,
                 maxLines: 3,
-                decoration: const InputDecoration(labelText: 'Actionable Instructions'),
+                decoration:
+                    const InputDecoration(labelText: 'Actionable Instructions'),
               ),
               const SizedBox(height: 8),
               TextField(
@@ -333,12 +357,17 @@ class _PlansWorkflowsTabState extends State<PlansWorkflowsTab> with SingleTicker
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () async {
               final role = roleCtrl.text.trim();
               final instructions = instructionsCtrl.text.trim();
-              final tools = toolsCtrl.text.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+              final tools = toolsCtrl.text
+                  .split(',')
+                  .map((e) => e.trim())
+                  .where((e) => e.isNotEmpty)
+                  .toList();
 
               if (role.isEmpty || instructions.isEmpty) return;
 
@@ -356,7 +385,9 @@ class _PlansWorkflowsTabState extends State<PlansWorkflowsTab> with SingleTicker
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    backgroundColor: res.containsKey('error') ? Colors.red.shade800 : Colors.indigo,
+                    backgroundColor: res.containsKey('error')
+                        ? Colors.red.shade800
+                        : Colors.indigo,
                     content: Text(res.containsKey('error')
                         ? 'Failed to spawn sub-agent: ${res['error']}'
                         : 'Sub-agent "${res['agent_id']}" spawned.'),
@@ -383,8 +414,12 @@ class _PlansWorkflowsTabState extends State<PlansWorkflowsTab> with SingleTicker
             indicatorColor: Colors.indigoAccent,
             tabs: const [
               Tab(icon: Icon(Icons.alt_route, size: 18), text: 'Task Plans'),
-              Tab(icon: Icon(Icons.account_tree_outlined, size: 18), text: 'Workflows'),
-              Tab(icon: Icon(Icons.smart_toy_outlined, size: 18), text: 'Sub-Agents'),
+              Tab(
+                  icon: Icon(Icons.account_tree_outlined, size: 18),
+                  text: 'Workflows'),
+              Tab(
+                  icon: Icon(Icons.smart_toy_outlined, size: 18),
+                  text: 'Sub-Agents'),
             ],
           ),
         ),
@@ -400,11 +435,13 @@ class _PlansWorkflowsTabState extends State<PlansWorkflowsTab> with SingleTicker
                     children: [
                       const Icon(Icons.alt_route, size: 48, color: Colors.grey),
                       const SizedBox(height: 12),
-                      const Text('No Task Plans Generated Yet', style: TextStyle(fontWeight: FontWeight.bold)),
+                      const Text('No Task Plans Generated Yet',
+                          style: TextStyle(fontWeight: FontWeight.bold)),
                       const SizedBox(height: 4),
                       Text(
                         'Voice queries requiring multi-step reasoning are planned by Nemotron.',
-                        style: TextStyle(color: Colors.grey.shade400, fontSize: 12),
+                        style: TextStyle(
+                            color: Colors.grey.shade400, fontSize: 12),
                       ),
                     ],
                   ),
@@ -426,24 +463,38 @@ class _PlansWorkflowsTabState extends State<PlansWorkflowsTab> with SingleTicker
                         leading: CircleAvatar(
                           backgroundColor: status == 'completed'
                               ? Colors.green.shade900
-                              : (status == 'failed' ? Colors.red.shade900 : Colors.indigo.shade900),
+                              : (status == 'failed'
+                                  ? Colors.red.shade900
+                                  : Colors.indigo.shade900),
                           child: Icon(
                             status == 'completed'
                                 ? Icons.check
-                                : (status == 'failed' ? Icons.close : Icons.schedule),
+                                : (status == 'failed'
+                                    ? Icons.close
+                                    : Icons.schedule),
                             color: Colors.white,
                             size: 18,
                           ),
                         ),
-                        title: Text(goal, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                        subtitle: Text('Status: $status | ${steps.length} steps | ID: $planId',
-                            style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                        title: Text(goal,
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 14)),
+                        subtitle: Text(
+                            'Status: $status | ${steps.length} steps | ID: $planId',
+                            style: const TextStyle(
+                                fontSize: 11, color: Colors.grey)),
                         trailing: ElevatedButton.icon(
                           icon: isBusy
-                              ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                              ? const SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2))
                               : const Icon(Icons.play_arrow, size: 16),
-                          label: Text(status == 'completed' ? 'Rerun' : 'Execute'),
-                          onPressed: _isExecuting ? null : () => _runPlan(planId),
+                          label:
+                              Text(status == 'completed' ? 'Rerun' : 'Execute'),
+                          onPressed:
+                              _isExecuting ? null : () => _runPlan(planId),
                         ),
                         children: [
                           const Divider(height: 1),
@@ -459,11 +510,17 @@ class _PlansWorkflowsTabState extends State<PlansWorkflowsTab> with SingleTicker
 
                               return ListTile(
                                 dense: true,
-                                leading: Text('${sIdx + 1}.', style: const TextStyle(fontWeight: FontWeight.bold)),
-                                title: Text(tool, style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
-                                subtitle: purpose.isNotEmpty ? Text(purpose) : null,
+                                leading: Text('${sIdx + 1}.',
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.bold)),
+                                title: Text(tool,
+                                    style: const TextStyle(
+                                        fontFamily: 'monospace', fontSize: 12)),
+                                subtitle:
+                                    purpose.isNotEmpty ? Text(purpose) : null,
                                 trailing: Chip(
-                                  label: Text(stepStatus, style: const TextStyle(fontSize: 10)),
+                                  label: Text(stepStatus,
+                                      style: const TextStyle(fontSize: 10)),
                                   padding: EdgeInsets.zero,
                                   backgroundColor: stepStatus == 'success'
                                       ? Colors.green.withValues(alpha: 0.2)
@@ -484,13 +541,16 @@ class _PlansWorkflowsTabState extends State<PlansWorkflowsTab> with SingleTicker
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(Icons.account_tree_outlined, size: 48, color: Colors.grey),
+                      const Icon(Icons.account_tree_outlined,
+                          size: 48, color: Colors.grey),
                       const SizedBox(height: 12),
-                      const Text('No Saved Workflows', style: TextStyle(fontWeight: FontWeight.bold)),
+                      const Text('No Saved Workflows',
+                          style: TextStyle(fontWeight: FontWeight.bold)),
                       const SizedBox(height: 4),
                       Text(
                         'Create automated multi-step procedures or tell the assistant: "Save workflow..."',
-                        style: TextStyle(color: Colors.grey.shade400, fontSize: 12),
+                        style: TextStyle(
+                            color: Colors.grey.shade400, fontSize: 12),
                       ),
                     ],
                   ),
@@ -516,25 +576,36 @@ class _PlansWorkflowsTabState extends State<PlansWorkflowsTab> with SingleTicker
                       child: ListTile(
                         leading: const CircleAvatar(
                           backgroundColor: Colors.indigoAccent,
-                          child: Icon(Icons.flash_on, color: Colors.white, size: 20),
+                          child: Icon(Icons.flash_on,
+                              color: Colors.white, size: 20),
                         ),
-                        title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                        title: Text(name,
+                            style:
+                                const TextStyle(fontWeight: FontWeight.bold)),
                         subtitle: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(desc.isNotEmpty ? desc : '${steps.length} automated steps'),
+                            Text(desc.isNotEmpty
+                                ? desc
+                                : '${steps.length} automated steps'),
                             if (isScheduled) ...[
                               const SizedBox(height: 4),
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 2),
                                 decoration: BoxDecoration(
-                                  color: Colors.amberAccent.withValues(alpha: 0.15),
+                                  color: Colors.amberAccent
+                                      .withValues(alpha: 0.15),
                                   borderRadius: BorderRadius.circular(4),
-                                  border: Border.all(color: Colors.amberAccent, width: 0.5),
+                                  border: Border.all(
+                                      color: Colors.amberAccent, width: 0.5),
                                 ),
                                 child: Text(
                                   '⏰ Scheduled: Every ${sched['interval_seconds']}s',
-                                  style: const TextStyle(fontSize: 10, color: Colors.amberAccent, fontWeight: FontWeight.bold),
+                                  style: const TextStyle(
+                                      fontSize: 10,
+                                      color: Colors.amberAccent,
+                                      fontWeight: FontWeight.bold),
                                 ),
                               ),
                             ],
@@ -546,20 +617,32 @@ class _PlansWorkflowsTabState extends State<PlansWorkflowsTab> with SingleTicker
                             IconButton(
                               icon: Icon(
                                 Icons.schedule,
-                                color: isScheduled ? Colors.amberAccent : Colors.grey,
+                                color: isScheduled
+                                    ? Colors.amberAccent
+                                    : Colors.grey,
                                 size: 20,
                               ),
-                              tooltip: isScheduled ? 'Edit Schedule' : 'Schedule Recurring',
+                              tooltip: isScheduled
+                                  ? 'Edit Schedule'
+                                  : 'Schedule Recurring',
                               onPressed: () => _showScheduleDialog(name),
                             ),
                             IconButton(
                               icon: isBusy
-                                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                                  : const Icon(Icons.play_circle_fill, color: Colors.greenAccent, size: 28),
-                              onPressed: _isExecuting ? null : () => _runWorkflow(name),
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2))
+                                  : const Icon(Icons.play_circle_fill,
+                                      color: Colors.greenAccent, size: 28),
+                              onPressed: _isExecuting
+                                  ? null
+                                  : () => _runWorkflow(name),
                             ),
                             IconButton(
-                              icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
+                              icon: const Icon(Icons.delete_outline,
+                                  color: Colors.redAccent, size: 20),
                               onPressed: () => _deleteWorkflow(name),
                             ),
                           ],
@@ -575,13 +658,16 @@ class _PlansWorkflowsTabState extends State<PlansWorkflowsTab> with SingleTicker
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(Icons.smart_toy_outlined, size: 48, color: Colors.grey),
+                      const Icon(Icons.smart_toy_outlined,
+                          size: 48, color: Colors.grey),
                       const SizedBox(height: 12),
-                      const Text('No Sub-Agents Active', style: TextStyle(fontWeight: FontWeight.bold)),
+                      const Text('No Sub-Agents Active',
+                          style: TextStyle(fontWeight: FontWeight.bold)),
                       const SizedBox(height: 4),
                       Text(
                         'Autonomous sub-agents spawned for background reasoning appear here.',
-                        style: TextStyle(color: Colors.grey.shade400, fontSize: 12),
+                        style: TextStyle(
+                            color: Colors.grey.shade400, fontSize: 12),
                       ),
                     ],
                   ),
@@ -598,7 +684,8 @@ class _PlansWorkflowsTabState extends State<PlansWorkflowsTab> with SingleTicker
                     final depth = agent['depth'] as int? ?? 1;
                     final stepsTaken = agent['steps_taken'] as int? ?? 0;
                     final maxSteps = agent['max_steps'] as int? ?? 10;
-                    final allowedTools = (agent['allowed_tools'] as List<dynamic>?) ?? [];
+                    final allowedTools =
+                        (agent['allowed_tools'] as List<dynamic>?) ?? [];
                     final result = agent['result'] as Map<String, dynamic>?;
 
                     final isRunning = status == 'running';
@@ -619,9 +706,12 @@ class _PlansWorkflowsTabState extends State<PlansWorkflowsTab> with SingleTicker
                             Row(
                               children: [
                                 CircleAvatar(
-                                  backgroundColor: statusColor.withValues(alpha: 0.2),
+                                  backgroundColor:
+                                      statusColor.withValues(alpha: 0.2),
                                   child: Icon(
-                                    isRunning ? Icons.autorenew : Icons.smart_toy,
+                                    isRunning
+                                        ? Icons.autorenew
+                                        : Icons.smart_toy,
                                     color: statusColor,
                                     size: 20,
                                   ),
@@ -629,24 +719,35 @@ class _PlansWorkflowsTabState extends State<PlansWorkflowsTab> with SingleTicker
                                 const SizedBox(width: 10),
                                 Expanded(
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
-                                      Text(role, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                                      Text(role,
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 14)),
                                       Text('ID: $agentId (Depth: $depth)',
-                                          style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                                          style: const TextStyle(
+                                              fontSize: 11,
+                                              color: Colors.grey)),
                                     ],
                                   ),
                                 ),
                                 Chip(
                                   label: Text(status.toUpperCase(),
-                                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: statusColor)),
-                                  backgroundColor: statusColor.withValues(alpha: 0.15),
+                                      style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          color: statusColor)),
+                                  backgroundColor:
+                                      statusColor.withValues(alpha: 0.15),
                                   padding: EdgeInsets.zero,
                                 ),
                                 if (isRunning) ...[
                                   const SizedBox(width: 8),
                                   IconButton(
-                                    icon: const Icon(Icons.cancel_outlined, color: Colors.redAccent, size: 20),
+                                    icon: const Icon(Icons.cancel_outlined,
+                                        color: Colors.redAccent, size: 20),
                                     onPressed: () => _cancelAgent(agentId),
                                     tooltip: 'Cancel Sub-Agent',
                                   ),
@@ -654,16 +755,19 @@ class _PlansWorkflowsTabState extends State<PlansWorkflowsTab> with SingleTicker
                               ],
                             ),
                             const SizedBox(height: 8),
-                            Text(instructions, style: const TextStyle(fontSize: 12)),
+                            Text(instructions,
+                                style: const TextStyle(fontSize: 12)),
                             const SizedBox(height: 8),
                             Row(
                               children: [
                                 Text('Steps: $stepsTaken / $maxSteps',
-                                    style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                                    style: const TextStyle(
+                                        fontSize: 11, color: Colors.grey)),
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: LinearProgressIndicator(
-                                    value: (stepsTaken / maxSteps).clamp(0.0, 1.0),
+                                    value:
+                                        (stepsTaken / maxSteps).clamp(0.0, 1.0),
                                     backgroundColor: Colors.grey.shade800,
                                     color: statusColor,
                                   ),
@@ -675,7 +779,9 @@ class _PlansWorkflowsTabState extends State<PlansWorkflowsTab> with SingleTicker
                               spacing: 6,
                               children: allowedTools
                                   .map((t) => Chip(
-                                        label: Text(t.toString(), style: const TextStyle(fontSize: 10)),
+                                        label: Text(t.toString(),
+                                            style:
+                                                const TextStyle(fontSize: 10)),
                                         padding: EdgeInsets.zero,
                                         visualDensity: VisualDensity.compact,
                                       ))
@@ -691,7 +797,10 @@ class _PlansWorkflowsTabState extends State<PlansWorkflowsTab> with SingleTicker
                                 ),
                                 child: Text(
                                   'Result: ${result['summary'] ?? result.toString()}',
-                                  style: const TextStyle(fontFamily: 'monospace', fontSize: 11, color: Colors.greenAccent),
+                                  style: const TextStyle(
+                                      fontFamily: 'monospace',
+                                      fontSize: 11,
+                                      color: Colors.greenAccent),
                                 ),
                               ),
                             ],
@@ -717,7 +826,8 @@ class _PlansWorkflowsTabState extends State<PlansWorkflowsTab> with SingleTicker
                         ? const SizedBox(
                             width: 20,
                             height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white),
                           )
                         : const Icon(Icons.sync),
                   ),

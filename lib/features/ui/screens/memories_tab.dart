@@ -94,7 +94,8 @@ class _MemoriesTabState extends State<MemoriesTab> {
             ),
             ElevatedButton(
               onPressed: () {
-                if (keyCtrl.text.trim().isNotEmpty && valCtrl.text.trim().isNotEmpty) {
+                if (keyCtrl.text.trim().isNotEmpty &&
+                    valCtrl.text.trim().isNotEmpty) {
                   widget.database.remember(
                     keyCtrl.text.trim(),
                     valCtrl.text.trim(),
@@ -132,7 +133,8 @@ class _MemoriesTabState extends State<MemoriesTab> {
         final synced = result['synced_count'] ?? 0;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            backgroundColor: result['status'] == 'success' ? Colors.green : Colors.red,
+            backgroundColor:
+                result['status'] == 'success' ? Colors.green : Colors.red,
             content: Text(
               result['status'] == 'success'
                   ? 'Synced $synced memories from PC Assistant.'
@@ -144,7 +146,8 @@ class _MemoriesTabState extends State<MemoriesTab> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(backgroundColor: Colors.red, content: Text('Sync error: $e')),
+          SnackBar(
+              backgroundColor: Colors.red, content: Text('Sync error: $e')),
         );
       }
     } finally {
@@ -178,7 +181,8 @@ class _MemoriesTabState extends State<MemoriesTab> {
                       hintText: 'Search memories...',
                       prefixIcon: const Icon(Icons.search, size: 20),
                       isDense: true,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10)),
                     ),
                   ),
                 ),
@@ -186,7 +190,12 @@ class _MemoriesTabState extends State<MemoriesTab> {
                 DropdownButton<String>(
                   value: _selectedCategory ?? 'all',
                   underline: const SizedBox(),
-                  items: _categories.map((c) => DropdownMenuItem(value: c, child: Text(c.toUpperCase(), style: const TextStyle(fontSize: 12)))).toList(),
+                  items: _categories
+                      .map((c) => DropdownMenuItem(
+                          value: c,
+                          child: Text(c.toUpperCase(),
+                              style: const TextStyle(fontSize: 12))))
+                      .toList(),
                   onChanged: (val) {
                     setState(() {
                       _selectedCategory = val;
@@ -205,14 +214,17 @@ class _MemoriesTabState extends State<MemoriesTab> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.psychology_outlined, size: 48, color: Colors.grey.shade600),
+                        Icon(Icons.psychology_outlined,
+                            size: 48, color: Colors.grey.shade600),
                         const SizedBox(height: 8),
-                        Text('No memories saved in this category.', style: TextStyle(color: Colors.grey.shade500)),
+                        Text('No memories saved in this category.',
+                            style: TextStyle(color: Colors.grey.shade500)),
                       ],
                     ),
                   )
                 : ListView.separated(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     itemCount: filtered.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 6),
                     itemBuilder: (ctx, idx) {
@@ -220,12 +232,14 @@ class _MemoriesTabState extends State<MemoriesTab> {
                       final cat = item['category'] as String? ?? 'general';
                       final key = item['key'] as String;
                       final val = item['value'] as String;
-                      final updated = DateTime.fromMillisecondsSinceEpoch(item['updated_at'] as int);
+                      final updated = DateTime.fromMillisecondsSinceEpoch(
+                          item['updated_at'] as int);
 
                       return Card(
                         child: ListTile(
                           leading: CircleAvatar(
-                            backgroundColor: Colors.indigo.withValues(alpha: 0.2),
+                            backgroundColor:
+                                Colors.indigo.withValues(alpha: 0.2),
                             child: Icon(
                               cat == 'location'
                                   ? Icons.location_on_outlined
@@ -240,15 +254,20 @@ class _MemoriesTabState extends State<MemoriesTab> {
                           ),
                           title: Row(
                             children: [
-                              Text(key, style: const TextStyle(fontWeight: FontWeight.bold)),
+                              Text(key,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold)),
                               const SizedBox(width: 8),
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 2),
                                 decoration: BoxDecoration(
                                   color: Colors.white10,
                                   borderRadius: BorderRadius.circular(8),
                                 ),
-                                child: Text(cat, style: const TextStyle(fontSize: 10, color: Colors.grey)),
+                                child: Text(cat,
+                                    style: const TextStyle(
+                                        fontSize: 10, color: Colors.grey)),
                               ),
                             ],
                           ),
@@ -260,7 +279,8 @@ class _MemoriesTabState extends State<MemoriesTab> {
                               const SizedBox(height: 2),
                               Text(
                                 'Updated ${updated.toLocal().toString().split('.').first}',
-                                style: const TextStyle(fontSize: 10, color: Colors.grey),
+                                style: const TextStyle(
+                                    fontSize: 10, color: Colors.grey),
                               ),
                             ],
                           ),
@@ -272,7 +292,8 @@ class _MemoriesTabState extends State<MemoriesTab> {
                                 onPressed: () => _showAddMemoryDialog(item),
                               ),
                               IconButton(
-                                icon: const Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
+                                icon: const Icon(Icons.delete_outline,
+                                    size: 18, color: Colors.redAccent),
                                 onPressed: () => _deleteMemory(key),
                               ),
                             ],
@@ -298,7 +319,8 @@ class _MemoriesTabState extends State<MemoriesTab> {
                     ? const SizedBox(
                         width: 20,
                         height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white),
                       )
                     : const Icon(Icons.sync),
               ),

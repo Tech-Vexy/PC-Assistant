@@ -6,7 +6,8 @@ import 'package:device_assistant/core/network/nebius_client.dart';
 
 void main() {
   group('NebiusClient Smart Routing Tests', () {
-    test('chatCompletion with TaskComplexity.simple routes to Nemotron-3-nano', () async {
+    test('chatCompletion with TaskComplexity.simple routes to Nemotron-3-nano',
+        () async {
       final mockClient = MockClient((request) async {
         expect(request.url.path, endsWith('/chat/completions'));
         expect(request.headers['Authorization'], equals('Bearer test_key'));
@@ -35,7 +36,9 @@ void main() {
       expect(reply, equals('Fast reply from Nemotron 3 nano'));
     });
 
-    test('chatCompletion with TaskComplexity.complex routes to Nemotron-3-super-vl', () async {
+    test(
+        'chatCompletion with TaskComplexity.complex routes to Nemotron-3-super-vl',
+        () async {
       final mockClient = MockClient((request) async {
         final body = jsonDecode(request.body) as Map<String, dynamic>;
         expect(body['model'], equals('nvidia/nemotron-3-super-vl'));
@@ -53,7 +56,10 @@ void main() {
       final client = NebiusClient(apiKey: 'test_key', httpClient: mockClient);
       final reply = await client.chatCompletion(
         messages: [
-          {'role': 'user', 'content': 'Decompose and strategize an end-to-end multi-step plan'}
+          {
+            'role': 'user',
+            'content': 'Decompose and strategize an end-to-end multi-step plan'
+          }
         ],
         complexity: TaskComplexity.complex,
       );
@@ -61,7 +67,9 @@ void main() {
       expect(reply, equals('Deep reasoning from Nemotron 3 super vl'));
     });
 
-    test('planTask automatically routes request with model=nvidia/nemotron-3-super-vl', () async {
+    test(
+        'planTask automatically routes request with model=nvidia/nemotron-3-super-vl',
+        () async {
       final planResponse = {
         'choices': [
           {
@@ -107,7 +115,9 @@ void main() {
       expect(steps.last['tool'], equals('remember'));
     });
 
-    test('extractMemory automatically routes request with model=nvidia/nemotron-3-nano', () async {
+    test(
+        'extractMemory automatically routes request with model=nvidia/nemotron-3-nano',
+        () async {
       final memoryResponse = {
         'choices': [
           {
@@ -132,7 +142,8 @@ void main() {
       });
 
       final client = NebiusClient(apiKey: 'test_key', httpClient: mockClient);
-      final mem = await client.extractMemory('I always drink Earl Grey tea with honey in the morning');
+      final mem = await client.extractMemory(
+          'I always drink Earl Grey tea with honey in the morning');
 
       expect(mem, isNotNull);
       expect(mem!['should_remember'], isTrue);
@@ -142,32 +153,38 @@ void main() {
 
     test('classifyTask correctly categorizes simple vs complex workloads', () {
       expect(
-        NebiusClient.classifyTask(taskDescription: 'What is the capital of Kenya?'),
+        NebiusClient.classifyTask(
+            taskDescription: 'What is the capital of Kenya?'),
         equals(TaskComplexity.simple),
       );
 
       expect(
-        NebiusClient.classifyTask(taskDescription: 'Plan a multi-step routine to back up files'),
+        NebiusClient.classifyTask(
+            taskDescription: 'Plan a multi-step routine to back up files'),
         equals(TaskComplexity.complex),
       );
 
       expect(
-        NebiusClient.classifyTask(taskDescription: 'Decompose goal into ordered steps'),
+        NebiusClient.classifyTask(
+            taskDescription: 'Decompose goal into ordered steps'),
         equals(TaskComplexity.complex),
       );
 
       expect(
-        NebiusClient.classifyTask(taskDescription: 'Quick note', requiresMultiStep: true),
+        NebiusClient.classifyTask(
+            taskDescription: 'Quick note', requiresMultiStep: true),
         equals(TaskComplexity.complex),
       );
 
       expect(
-        NebiusClient.classifyTask(taskDescription: 'Automate tasks', toolCount: 6),
+        NebiusClient.classifyTask(
+            taskDescription: 'Automate tasks', toolCount: 6),
         equals(TaskComplexity.complex),
       );
     });
 
-    test('custom model identifiers override defaults in smart router', () async {
+    test('custom model identifiers override defaults in smart router',
+        () async {
       final mockClient = MockClient((request) async {
         final body = jsonDecode(request.body) as Map<String, dynamic>;
         expect(body['model'], equals('custom/super-model'));
@@ -181,12 +198,17 @@ void main() {
         httpClient: mockClient,
       );
 
-      expect(client.resolveModel(complexity: TaskComplexity.complex), equals('custom/super-model'));
-      expect(client.resolveModel(complexity: TaskComplexity.simple), equals('custom/nano-model'));
-      expect(client.resolveModel(explicitModel: 'explicit/override'), equals('explicit/override'));
+      expect(client.resolveModel(complexity: TaskComplexity.complex),
+          equals('custom/super-model'));
+      expect(client.resolveModel(complexity: TaskComplexity.simple),
+          equals('custom/nano-model'));
+      expect(client.resolveModel(explicitModel: 'explicit/override'),
+          equals('explicit/override'));
 
       final res = await client.chatCompletion(
-        messages: [{'role': 'user', 'content': 'test'}],
+        messages: [
+          {'role': 'user', 'content': 'test'}
+        ],
         complexity: TaskComplexity.complex,
       );
       expect(res, equals('ok'));

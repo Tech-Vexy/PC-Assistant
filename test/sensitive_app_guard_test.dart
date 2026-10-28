@@ -23,7 +23,8 @@ void main() {
       final qcomUim = guard.evaluate(packageName: 'com.qualcomm.qti.uim');
       expect(qcomUim.isBlocked, isTrue);
 
-      final samsungStk = guard.evaluate(packageName: 'com.samsung.android.app.telephonyui.stk');
+      final samsungStk = guard.evaluate(
+          packageName: 'com.samsung.android.app.telephonyui.stk');
       expect(samsungStk.isBlocked, isTrue);
     });
 
@@ -34,7 +35,8 @@ void main() {
       final revolut = guard.evaluate(packageName: 'com.revolut.revolut');
       expect(revolut.isBlocked, isTrue);
 
-      final paypal = guard.evaluate(packageName: 'com.paypal.android.p2pmobile');
+      final paypal =
+          guard.evaluate(packageName: 'com.paypal.android.p2pmobile');
       expect(paypal.isBlocked, isTrue);
 
       final metamask = guard.evaluate(packageName: 'io.metamask');
@@ -45,7 +47,8 @@ void main() {
       final bitwarden = guard.evaluate(packageName: 'com.x8bit.bitwarden');
       expect(bitwarden.isBlocked, isTrue);
 
-      final googleAuth = guard.evaluate(packageName: 'com.google.android.apps.authenticator2');
+      final googleAuth =
+          guard.evaluate(packageName: 'com.google.android.apps.authenticator2');
       expect(googleAuth.isBlocked, isTrue);
     });
 
@@ -71,7 +74,8 @@ void main() {
       final chrome = guard.evaluate(packageName: 'com.android.chrome');
       expect(chrome.isBlocked, isFalse);
 
-      final camera = guard.evaluate(packageName: 'com.google.android.GoogleCamera');
+      final camera =
+          guard.evaluate(packageName: 'com.google.android.GoogleCamera');
       expect(camera.isBlocked, isFalse);
 
       final calc = guard.evaluate(packageName: 'com.google.android.calculator');

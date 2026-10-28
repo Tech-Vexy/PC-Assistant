@@ -59,7 +59,9 @@ void main() {
       expect(scheduler.listSchedules().isEmpty, isTrue);
     });
 
-    test('checkAndExecuteDueWorkflows executes due workflows and updates next_run_at', () async {
+    test(
+        'checkAndExecuteDueWorkflows executes due workflows and updates next_run_at',
+        () async {
       db.saveWorkflow(
         'test_routine',
         description: 'Test routine',
@@ -89,7 +91,9 @@ void main() {
       expect(updated['next_run_at'], greaterThan(updated['last_run_at']));
     });
 
-    test('ToolDispatcher dispatches schedule_workflow, list_scheduled_workflows, cancel_scheduled_workflow', () async {
+    test(
+        'ToolDispatcher dispatches schedule_workflow, list_scheduled_workflows, cancel_scheduled_workflow',
+        () async {
       db.saveWorkflow(
         'auto_backup',
         description: 'Backup routine',

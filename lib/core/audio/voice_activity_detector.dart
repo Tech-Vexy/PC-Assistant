@@ -112,7 +112,8 @@ class VoiceActivityDetector {
   }
 
   /// Process an incoming PCM16 audio frame
-  VadProcessResult process(Uint8List frameBuffer, {bool isAssistantSpeaking = false}) {
+  VadProcessResult process(Uint8List frameBuffer,
+      {bool isAssistantSpeaking = false}) {
     final rms = calculateRms(frameBuffer);
     final zcr = calculateZcr(frameBuffer);
 
@@ -126,7 +127,9 @@ class VoiceActivityDetector {
       final playbackDuration = now - _playbackStartTime;
 
       // Allow 400ms grace period after playback starts to avoid false onset triggers
-      if (bargeInThreshold > 0 && playbackDuration > 400 && rms >= bargeInThreshold) {
+      if (bargeInThreshold > 0 &&
+          playbackDuration > 400 &&
+          rms >= bargeInThreshold) {
         _bargeInCount++;
         if (_bargeInCount >= bargeInConsecutiveFrames) {
           _bargeInCount = 0;

@@ -44,7 +44,10 @@ void main() {
     test('Workflow CRUD operations work properly', () {
       final steps = [
         {'tool': 'system_status', 'args': <String, dynamic>{}},
-        {'tool': 'recall', 'args': {'key': 'test_key'}},
+        {
+          'tool': 'recall',
+          'args': {'key': 'test_key'}
+        },
       ];
 
       db.saveWorkflow('test_wf', description: 'Test Routine', steps: steps);

@@ -37,7 +37,8 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+class _HomeScreenState extends State<HomeScreen>
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final AudioRecordingService _audioRecorder = AudioRecordingService();
   AudioPlaybackService? _audioPlayback;
   int _activeTabIndex = 0;
@@ -99,7 +100,9 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && Platform.isAndroid && _androidBridge != null) {
+    if (state == AppLifecycleState.resumed &&
+        Platform.isAndroid &&
+        _androidBridge != null) {
       _checkAndroidPermissions();
     }
   }
@@ -140,11 +143,14 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     if (Platform.isAndroid) {
       _androidBridge = AndroidBridge();
       _isAccessibilityEnabled = await _androidBridge!.isAccessibilityEnabled();
-      _isBatteryOptimizationIgnored = await _androidBridge!.isBatteryOptimizationIgnored();
+      _isBatteryOptimizationIgnored =
+          await _androidBridge!.isBatteryOptimizationIgnored();
       await _androidBridge!.startForegroundService();
-      await _androidBridge!.updateProtectedPackages(widget.guard.customProtectedPackages.toList());
+      await _androidBridge!.updateProtectedPackages(
+          widget.guard.customProtectedPackages.toList());
 
-      final notifGranted = await _androidBridge!.isNotificationPermissionGranted();
+      final notifGranted =
+          await _androidBridge!.isNotificationPermissionGranted();
       if (!notifGranted) {
         await _androidBridge!.requestNotificationPermission();
       }
@@ -179,11 +185,18 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       if (hotwordEnabled) {
         _isHotwordActive = true;
         await _androidBridge!.startHotwordListening(
-          hotwords: [_activeHotwordPhrase, 'hey assistant', 'ok google', 'device assistant', 'computer'],
+          hotwords: [
+            _activeHotwordPhrase,
+            'hey assistant',
+            'ok google',
+            'device assistant',
+            'computer'
+          ],
         );
       }
       _hotwordSub?.cancel();
-      _hotwordSub = _androidBridge!.hotwordStream.listen(_handleHotwordDetected);
+      _hotwordSub =
+          _androidBridge!.hotwordStream.listen(_handleHotwordDetected);
     } else if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
       _desktopDriver = DesktopDriver(onToggleVoice: _toggleConnection);
       await _desktopDriver!.initialize();
@@ -226,7 +239,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     _liveClient?.dispose();
     _liveClient = GeminiLiveClient(
       apiKey: apiKey,
-      toolDeclarations: ToolDefinitions.getAllDeclarations(isAndroid: Theme.of(context).platform == TargetPlatform.android),
+      toolDeclarations: ToolDefinitions.getAllDeclarations(
+          isAndroid: Theme.of(context).platform == TargetPlatform.android),
       systemInstruction: '''
 You are Device Assistant, an intelligent cross-platform agent running natively on the device.
 You have tool access to device controls, memory, task planning, and sub-agents.
@@ -269,7 +283,8 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
 
       setState(() {
         if (_toolHistory.isNotEmpty) {
-          _toolHistory[0]['status'] = result.containsKey('blocked') ? 'blocked' : 'done';
+          _toolHistory[0]['status'] =
+              result.containsKey('blocked') ? 'blocked' : 'done';
           _toolHistory[0]['result'] = result;
         }
       });
@@ -327,19 +342,32 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
       // Check if command is a direct local device shortcut
       if (lower.startsWith('open ')) {
         final app = cleanCommand.substring(5).trim();
-        _dispatcher?.dispatch(toolName: 'open_application', args: {'app_name': app});
-      } else if (lower == 'take a screenshot' || lower == 'take screenshot' || lower == 'screenshot' || lower == 'capture screen') {
+        _dispatcher
+            ?.dispatch(toolName: 'open_application', args: {'app_name': app});
+      } else if (lower == 'take a screenshot' ||
+          lower == 'take screenshot' ||
+          lower == 'screenshot' ||
+          lower == 'capture screen') {
         _dispatcher?.dispatch(toolName: 'capture_screen', args: {});
       } else if (lower == 'scroll down') {
         _dispatcher?.dispatch(toolName: 'scroll', args: {'forward': true});
       } else if (lower == 'scroll up') {
         _dispatcher?.dispatch(toolName: 'scroll', args: {'forward': false});
-      } else if (lower == 'go back' || lower == 'press back' || lower == 'back') {
-        _dispatcher?.dispatch(toolName: 'perform_navigation', args: {'action': 1});
-      } else if (lower == 'go home' || lower == 'press home' || lower == 'home') {
-        _dispatcher?.dispatch(toolName: 'perform_navigation', args: {'action': 2});
-      } else if (lower == 'show recents' || lower == 'recent apps' || lower == 'recents') {
-        _dispatcher?.dispatch(toolName: 'perform_navigation', args: {'action': 3});
+      } else if (lower == 'go back' ||
+          lower == 'press back' ||
+          lower == 'back') {
+        _dispatcher
+            ?.dispatch(toolName: 'perform_navigation', args: {'action': 1});
+      } else if (lower == 'go home' ||
+          lower == 'press home' ||
+          lower == 'home') {
+        _dispatcher
+            ?.dispatch(toolName: 'perform_navigation', args: {'action': 2});
+      } else if (lower == 'show recents' ||
+          lower == 'recent apps' ||
+          lower == 'recents') {
+        _dispatcher
+            ?.dispatch(toolName: 'perform_navigation', args: {'action': 3});
       } else {
         // Compound natural language request - forward directly as user turn to Gemini Live
         setState(() {
@@ -359,7 +387,13 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
       // Resume idle hotword detection if active
       if (Platform.isAndroid && _androidBridge != null && _isHotwordActive) {
         await _androidBridge!.startHotwordListening(
-          hotwords: [_activeHotwordPhrase, 'hey assistant', 'ok google', 'device assistant', 'computer'],
+          hotwords: [
+            _activeHotwordPhrase,
+            'hey assistant',
+            'ok google',
+            'device assistant',
+            'computer'
+          ],
         );
       }
     } else {
@@ -387,8 +421,12 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
     final geminiCtrl = TextEditingController();
     final nebiusCtrl = TextEditingController();
 
-    widget.keyVault.getGeminiApiKey().then((val) => geminiCtrl.text = val ?? '');
-    widget.keyVault.getNebiusApiKey().then((val) => nebiusCtrl.text = val ?? '');
+    widget.keyVault
+        .getGeminiApiKey()
+        .then((val) => geminiCtrl.text = val ?? '');
+    widget.keyVault
+        .getNebiusApiKey()
+        .then((val) => nebiusCtrl.text = val ?? '');
 
     showDialog(
       context: context,
@@ -439,7 +477,9 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
               if (mounted) {
                 _initClients();
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Keys securely saved to hardware keystore.')),
+                  const SnackBar(
+                      content:
+                          Text('Keys securely saved to hardware keystore.')),
                 );
               }
             },
@@ -457,7 +497,8 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: Colors.red.shade900,
-            content: Text('Sensitive app active (${_activePackage ?? "Protected"}). Screen capture shielded.'),
+            content: Text(
+                'Sensitive app active (${_activePackage ?? "Protected"}). Screen capture shielded.'),
           ),
         );
       }
@@ -470,7 +511,8 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
         _liveClient?.sendImageFrame(bytes);
         if (mounted) {
           setState(() {
-            _transcripts.add('[Visual screen frame captured and streamed to Gemini Live]');
+            _transcripts.add(
+                '[Visual screen frame captured and streamed to Gemini Live]');
           });
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -485,7 +527,8 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               backgroundColor: Colors.amber,
-              content: Text('Screen capture unavailable or blocked by Android FLAG_SECURE.'),
+              content: Text(
+                  'Screen capture unavailable or blocked by Android FLAG_SECURE.'),
             ),
           );
         }
@@ -494,7 +537,8 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Screen capture frame available on Android (API 30+).'),
+            content:
+                Text('Screen capture frame available on Android (API 30+).'),
           ),
         );
       }
@@ -546,10 +590,13 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          backgroundColor: approved ? Colors.green.shade800 : Colors.red.shade800,
+          backgroundColor:
+              approved ? Colors.green.shade800 : Colors.red.shade800,
           content: Text(
             approved
-                ? (ok ? 'Approved PC dangerous action' : 'Failed to approve action')
+                ? (ok
+                    ? 'Approved PC dangerous action'
+                    : 'Failed to approve action')
                 : (ok ? 'Denied PC dangerous action' : 'Failed to deny action'),
           ),
           duration: const Duration(seconds: 2),
@@ -571,7 +618,9 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
     } else {
       if (!_isConnected) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Connect to Gemini Live before streaming camera vision.')),
+          const SnackBar(
+              content: Text(
+                  'Connect to Gemini Live before streaming camera vision.')),
         );
         return;
       }
@@ -624,11 +673,13 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
     Widget bodyContent;
     switch (_activeTabIndex) {
       case 1:
-        bodyContent = MemoriesTab(database: widget.database, keyVault: widget.keyVault);
+        bodyContent =
+            MemoriesTab(database: widget.database, keyVault: widget.keyVault);
         break;
       case 2:
         bodyContent = _dispatcher != null
-            ? PlansWorkflowsTab(database: widget.database, dispatcher: _dispatcher!)
+            ? PlansWorkflowsTab(
+                database: widget.database, dispatcher: _dispatcher!)
             : const Center(child: CircularProgressIndicator());
         break;
       case 3:
@@ -643,380 +694,444 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
     }
 
     return PopScope(
-      canPop: !Platform.isAndroid,
-      onPopInvokedWithResult: (didPop, result) {
-        if (didPop) return;
-        if (Platform.isAndroid && _androidBridge != null) {
-          _androidBridge!.minimizeApp();
-        }
-      },
-      child: Scaffold(
-      appBar: AppBar(
-        title: Row(
-          children: [
-            const Icon(Icons.hub_outlined, color: Colors.indigoAccent),
-            const SizedBox(width: 8),
-            const Text('Device Assistant', style: TextStyle(fontWeight: FontWeight.bold)),
-            const Spacer(),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: _isConnected ? Colors.green.withValues(alpha: 0.15) : Colors.grey.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: _isConnected ? Colors.green : Colors.grey),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  CircleAvatar(
-                    radius: 4,
-                    backgroundColor: _isConnected ? Colors.green : Colors.grey,
+        canPop: !Platform.isAndroid,
+        onPopInvokedWithResult: (didPop, result) {
+          if (didPop) return;
+          if (Platform.isAndroid && _androidBridge != null) {
+            _androidBridge!.minimizeApp();
+          }
+        },
+        child: Scaffold(
+          appBar: AppBar(
+            title: Row(
+              children: [
+                const Icon(Icons.hub_outlined, color: Colors.indigoAccent),
+                const SizedBox(width: 8),
+                const Text('Device Assistant',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+                const Spacer(),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: _isConnected
+                        ? Colors.green.withValues(alpha: 0.15)
+                        : Colors.grey.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                        color: _isConnected ? Colors.green : Colors.grey),
                   ),
-                  const SizedBox(width: 6),
-                  Text(
-                    _isConnected ? 'Gemini Live Active' : 'Disconnected',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: _isConnected ? Colors.green : Colors.grey,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.settings_outlined),
-            tooltip: 'Settings & Keys',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => SettingsScreen(
-                    keyVault: widget.keyVault,
-                    database: widget.database,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircleAvatar(
+                        radius: 4,
+                        backgroundColor:
+                            _isConnected ? Colors.green : Colors.grey,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        _isConnected ? 'Gemini Live Active' : 'Disconnected',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: _isConnected ? Colors.green : Colors.grey,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ).then((_) => _initClients());
-            },
+              ],
+            ),
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.settings_outlined),
+                tooltip: 'Settings & Keys',
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => SettingsScreen(
+                        keyVault: widget.keyVault,
+                        database: widget.database,
+                      ),
+                    ),
+                  ).then((_) => _initClients());
+                },
+              ),
+            ],
           ),
-        ],
-      ),
-      body: bodyContent,
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _activeTabIndex,
-        onDestinationSelected: (idx) => setState(() => _activeTabIndex = idx),
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.mic_outlined),
-            selectedIcon: Icon(Icons.mic),
-            label: 'Voice',
+          body: bodyContent,
+          bottomNavigationBar: NavigationBar(
+            selectedIndex: _activeTabIndex,
+            onDestinationSelected: (idx) =>
+                setState(() => _activeTabIndex = idx),
+            destinations: const [
+              NavigationDestination(
+                icon: Icon(Icons.mic_outlined),
+                selectedIcon: Icon(Icons.mic),
+                label: 'Voice',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.psychology_outlined),
+                selectedIcon: Icon(Icons.psychology),
+                label: 'Memory',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.alt_route),
+                selectedIcon: Icon(Icons.alt_route),
+                label: 'Plans & Workflows',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.shield_outlined),
+                selectedIcon: Icon(Icons.shield),
+                label: 'Shield',
+              ),
+            ],
           ),
-          NavigationDestination(
-            icon: Icon(Icons.psychology_outlined),
-            selectedIcon: Icon(Icons.psychology),
-            label: 'Memory',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.alt_route),
-            selectedIcon: Icon(Icons.alt_route),
-            label: 'Plans & Workflows',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.shield_outlined),
-            selectedIcon: Icon(Icons.shield),
-            label: 'Shield',
-          ),
-        ],
-      ),
-    ));
+        ));
   }
 
   Widget _buildAssistantVoiceView(ThemeData theme) {
     return Column(
-        children: [
-          // Android Battery Optimization Exemption Banner
-          if (Platform.isAndroid && !_isBatteryOptimizationIgnored)
-            Container(
-              color: Colors.orange.shade900.withValues(alpha: 0.3),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
-                children: [
-                  const Icon(Icons.battery_alert, color: Colors.amberAccent, size: 20),
-                  const SizedBox(width: 8),
-                  const Expanded(
-                    child: Text(
-                      'Battery optimization active. Disable to allow always-on background voice and automations.',
-                      style: TextStyle(fontSize: 12, color: Colors.white),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () async {
-                      await _androidBridge?.requestIgnoreBatteryOptimization();
-                      final ignored = await _androidBridge?.isBatteryOptimizationIgnored() ?? false;
-                      setState(() => _isBatteryOptimizationIgnored = ignored);
-                    },
-                    child: const Text('Disable', style: TextStyle(color: Colors.amberAccent)),
-                  ),
-                ],
-              ),
-            ),
-
-          // Android Accessibility Required Banner
-          if (Platform.isAndroid && !_isAccessibilityEnabled)
-            Container(
-              color: Colors.red.shade900.withValues(alpha: 0.3),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
-                children: [
-                  const Icon(Icons.warning_amber_rounded, color: Colors.redAccent, size: 20),
-                  const SizedBox(width: 8),
-                  const Expanded(
-                    child: Text(
-                      'Accessibility Service disabled. Enable to allow mobile app automation.',
-                      style: TextStyle(fontSize: 12, color: Colors.white),
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () => _androidBridge?.openAccessibilitySettings(),
-                    child: const Text('Enable', style: TextStyle(color: Colors.redAccent)),
-                  ),
-                ],
-              ),
-            ),
-
-          // Security Shield Status Banner
+      children: [
+        // Android Battery Optimization Exemption Banner
+        if (Platform.isAndroid && !_isBatteryOptimizationIgnored)
           Container(
+            color: Colors.orange.shade900.withValues(alpha: 0.3),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            color: Colors.amber.withValues(alpha: 0.08),
             child: Row(
               children: [
-                const Icon(Icons.shield_outlined, color: Colors.amber, size: 20),
+                const Icon(Icons.battery_alert,
+                    color: Colors.amberAccent, size: 20),
                 const SizedBox(width: 8),
-                Expanded(
+                const Expanded(
                   child: Text(
-                    _activePackage != null
-                        ? 'Shield Active (Foreground: $_activePackage)'
-                        : 'Sensitive App Shield Active (SIM Toolkit, Banking, 2FA, FinTech Protected)',
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                    'Battery optimization active. Disable to allow always-on background voice and automations.',
+                    style: TextStyle(fontSize: 12, color: Colors.white),
                   ),
                 ),
-                Text(
-                  '${SensitiveAppGuard.defaultBlacklist.length} Apps Blocked',
-                  style: const TextStyle(fontSize: 11, color: Colors.grey),
+                TextButton(
+                  onPressed: () async {
+                    await _androidBridge?.requestIgnoreBatteryOptimization();
+                    final ignored =
+                        await _androidBridge?.isBatteryOptimizationIgnored() ??
+                            false;
+                    setState(() => _isBatteryOptimizationIgnored = ignored);
+                  },
+                  child: const Text('Disable',
+                      style: TextStyle(color: Colors.amberAccent)),
                 ),
               ],
             ),
           ),
 
-          // PC Dangerous Action Remote Approvals
-          if (_pendingPcApprovals.isNotEmpty)
-            _buildPcApprovalsSection(),
+        // Android Accessibility Required Banner
+        if (Platform.isAndroid && !_isAccessibilityEnabled)
+          Container(
+            color: Colors.red.shade900.withValues(alpha: 0.3),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              children: [
+                const Icon(Icons.warning_amber_rounded,
+                    color: Colors.redAccent, size: 20),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'Accessibility Service disabled. Enable to allow mobile app automation.',
+                    style: TextStyle(fontSize: 12, color: Colors.white),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => _androidBridge?.openAccessibilitySettings(),
+                  child: const Text('Enable',
+                      style: TextStyle(color: Colors.redAccent)),
+                ),
+              ],
+            ),
+          ),
 
-          // Central Live Voice Orb Area
-          Expanded(
-            flex: 4,
-            child: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  AnimatedBuilder(
-                    animation: _orbController,
-                    builder: (context, child) {
-                      final scale = _isConnected ? 1.0 + (_orbController.value * 0.12) : 1.0;
-                      return Transform.scale(
-                        scale: scale,
-                        child: Container(
-                          width: 140,
-                          height: 140,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            gradient: RadialGradient(
-                              colors: _isConnected
-                                  ? [Colors.cyanAccent, Colors.indigo, Colors.blueAccent]
-                                  : [Colors.grey.shade400, Colors.grey.shade700],
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: _isConnected
-                                    ? Colors.cyanAccent.withValues(alpha: 0.4)
-                                    : Colors.black12,
-                                blurRadius: _isConnected ? 30 : 10,
-                                spreadRadius: _isConnected ? 8 : 2,
-                              ),
-                            ],
-                          ),
-                          child: IconButton(
-                            iconSize: 48,
-                            icon: _isConnecting
-                                ? const CircularProgressIndicator(color: Colors.white)
-                                : Icon(
-                                    _isConnected ? Icons.mic : Icons.mic_none,
-                                    color: Colors.white,
-                                  ),
-                            onPressed: _toggleConnection,
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 20),
-                  Text(
-                    _isConnected ? 'Listening & Conversing with Gemini Live' : 'Tap Orb to Start Assistant',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Smart Routing: Nemotron 3 super vl & nano | Encrypted Local DB',
-                    style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey),
-                  ),
-                  if (Platform.isAndroid && _isHotwordActive && !_isConnected)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
+        // Security Shield Status Banner
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          color: Colors.amber.withValues(alpha: 0.08),
+          child: Row(
+            children: [
+              const Icon(Icons.shield_outlined, color: Colors.amber, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _activePackage != null
+                      ? 'Shield Active (Foreground: $_activePackage)'
+                      : 'Sensitive App Shield Active (SIM Toolkit, Banking, 2FA, FinTech Protected)',
+                  style: const TextStyle(
+                      fontSize: 12, fontWeight: FontWeight.w500),
+                ),
+              ),
+              Text(
+                '${SensitiveAppGuard.defaultBlacklist.length} Apps Blocked',
+                style: const TextStyle(fontSize: 11, color: Colors.grey),
+              ),
+            ],
+          ),
+        ),
+
+        // PC Dangerous Action Remote Approvals
+        if (_pendingPcApprovals.isNotEmpty) _buildPcApprovalsSection(),
+
+        // Central Live Voice Orb Area
+        Expanded(
+          flex: 4,
+          child: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                AnimatedBuilder(
+                  animation: _orbController,
+                  builder: (context, child) {
+                    final scale = _isConnected
+                        ? 1.0 + (_orbController.value * 0.12)
+                        : 1.0;
+                    return Transform.scale(
+                      scale: scale,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                        width: 140,
+                        height: 140,
                         decoration: BoxDecoration(
-                          color: Colors.indigo.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.3)),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.hearing, size: 14, color: Colors.cyanAccent),
-                            const SizedBox(width: 6),
-                            Text(
-                              'Hotword Active: Say "$_activeHotwordPhrase"',
-                              style: const TextStyle(fontSize: 11, color: Colors.cyanAccent, fontWeight: FontWeight.w500),
+                          shape: BoxShape.circle,
+                          gradient: RadialGradient(
+                            colors: _isConnected
+                                ? [
+                                    Colors.cyanAccent,
+                                    Colors.indigo,
+                                    Colors.blueAccent
+                                  ]
+                                : [Colors.grey.shade400, Colors.grey.shade700],
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: _isConnected
+                                  ? Colors.cyanAccent.withValues(alpha: 0.4)
+                                  : Colors.black12,
+                              blurRadius: _isConnected ? 30 : 10,
+                              spreadRadius: _isConnected ? 8 : 2,
                             ),
                           ],
                         ),
-                      ),
-                    ),
-                  const SizedBox(height: 14),
-                  Wrap(
-                    spacing: 8,
-                    alignment: WrapAlignment.center,
-                    children: [
-                      OutlinedButton.icon(
-                        icon: Icon(_isCameraStreaming ? Icons.videocam : Icons.videocam_outlined,
-                            size: 16, color: _isCameraStreaming ? Colors.tealAccent : null),
-                        label: Text(_isCameraStreaming ? 'Stop Camera' : 'Live Camera Vision',
-                            style: TextStyle(fontSize: 12, color: _isCameraStreaming ? Colors.tealAccent : null)),
-                        style: _isCameraStreaming
-                            ? OutlinedButton.styleFrom(side: const BorderSide(color: Colors.tealAccent))
-                            : null,
-                        onPressed: _toggleCameraStreaming,
-                      ),
-                      OutlinedButton.icon(
-                        icon: const Icon(Icons.screenshot_monitor_outlined, size: 16),
-                        label: const Text('Stream Screen Frame', style: TextStyle(fontSize: 12)),
-                        onPressed: _manualCaptureScreen,
-                      ),
-                      if (_transcripts.isNotEmpty)
-                        OutlinedButton.icon(
-                          icon: const Icon(Icons.clear_all, size: 16),
-                          label: const Text('Clear Log', style: TextStyle(fontSize: 12)),
-                          onPressed: () => setState(() => _transcripts.clear()),
-                        ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          const Divider(height: 1),
-
-          // Live Transcript & Action Stream
-          Expanded(
-            flex: 5,
-            child: Row(
-              children: [
-                // Transcript column
-                Expanded(
-                  flex: 3,
-                  child: Container(
-                    padding: const EdgeInsets.all(12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('Live Transcript', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                        const SizedBox(height: 8),
-                        Expanded(
-                          child: _transcripts.isEmpty
-                              ? const Center(
-                                  child: Text('Spoken responses will appear here.', style: TextStyle(color: Colors.grey)),
-                                )
-                              : ListView.builder(
-                                  itemCount: _transcripts.length,
-                                  itemBuilder: (ctx, idx) => Padding(
-                                    padding: const EdgeInsets.symmetric(vertical: 4),
-                                    child: Text(_transcripts[idx]),
-                                  ),
+                        child: IconButton(
+                          iconSize: 48,
+                          icon: _isConnecting
+                              ? const CircularProgressIndicator(
+                                  color: Colors.white)
+                              : Icon(
+                                  _isConnected ? Icons.mic : Icons.mic_none,
+                                  color: Colors.white,
                                 ),
+                          onPressed: _toggleConnection,
                         ),
-                      ],
-                    ),
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  _isConnected
+                      ? 'Listening & Conversing with Gemini Live'
+                      : 'Tap Orb to Start Assistant',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-
-                const VerticalDivider(width: 1),
-
-                // Tool Execution Feed
-                Expanded(
-                  flex: 2,
-                  child: Container(
-                    padding: const EdgeInsets.all(12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('Tool Execution & Audit', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                        const SizedBox(height: 8),
-                        Expanded(
-                          child: _toolHistory.isEmpty
-                              ? const Center(
-                                  child: Text('Tool calls will appear here.', style: TextStyle(color: Colors.grey)),
-                                )
-                              : ListView.builder(
-                                  itemCount: _toolHistory.length,
-                                  itemBuilder: (ctx, idx) {
-                                    final item = _toolHistory[idx];
-                                    final isBlocked = item['status'] == 'blocked';
-                                    return Card(
-                                      color: isBlocked ? Colors.red.withValues(alpha: 0.1) : null,
-                                      child: ListTile(
-                                        dense: true,
-                                        leading: Icon(
-                                          isBlocked ? Icons.block : Icons.build_outlined,
-                                          color: isBlocked ? Colors.red : Colors.indigo,
-                                          size: 18,
-                                        ),
-                                        title: Text(item['tool'] as String, style: const TextStyle(fontWeight: FontWeight.bold)),
-                                        subtitle: Text(
-                                          isBlocked ? 'Blocked by sensitive app guard' : 'Executed successfully',
-                                          style: TextStyle(
-                                            color: isBlocked ? Colors.red : Colors.green,
-                                            fontSize: 11,
-                                          ),
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                ),
-                        ),
-                      ],
+                const SizedBox(height: 6),
+                Text(
+                  'Smart Routing: Nemotron 3 super vl & nano | Encrypted Local DB',
+                  style:
+                      theme.textTheme.bodySmall?.copyWith(color: Colors.grey),
+                ),
+                if (Platform.isAndroid && _isHotwordActive && !_isConnected)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: Colors.indigo.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                            color: Colors.cyanAccent.withValues(alpha: 0.3)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.hearing,
+                              size: 14, color: Colors.cyanAccent),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Hotword Active: Say "$_activeHotwordPhrase"',
+                            style: const TextStyle(
+                                fontSize: 11,
+                                color: Colors.cyanAccent,
+                                fontWeight: FontWeight.w500),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
+                const SizedBox(height: 14),
+                Wrap(
+                  spacing: 8,
+                  alignment: WrapAlignment.center,
+                  children: [
+                    OutlinedButton.icon(
+                      icon: Icon(
+                          _isCameraStreaming
+                              ? Icons.videocam
+                              : Icons.videocam_outlined,
+                          size: 16,
+                          color: _isCameraStreaming ? Colors.tealAccent : null),
+                      label: Text(
+                          _isCameraStreaming
+                              ? 'Stop Camera'
+                              : 'Live Camera Vision',
+                          style: TextStyle(
+                              fontSize: 12,
+                              color: _isCameraStreaming
+                                  ? Colors.tealAccent
+                                  : null)),
+                      style: _isCameraStreaming
+                          ? OutlinedButton.styleFrom(
+                              side: const BorderSide(color: Colors.tealAccent))
+                          : null,
+                      onPressed: _toggleCameraStreaming,
+                    ),
+                    OutlinedButton.icon(
+                      icon: const Icon(Icons.screenshot_monitor_outlined,
+                          size: 16),
+                      label: const Text('Stream Screen Frame',
+                          style: TextStyle(fontSize: 12)),
+                      onPressed: _manualCaptureScreen,
+                    ),
+                    if (_transcripts.isNotEmpty)
+                      OutlinedButton.icon(
+                        icon: const Icon(Icons.clear_all, size: 16),
+                        label: const Text('Clear Log',
+                            style: TextStyle(fontSize: 12)),
+                        onPressed: () => setState(() => _transcripts.clear()),
+                      ),
+                  ],
                 ),
               ],
             ),
           ),
-        ],
-      );
+        ),
+
+        const Divider(height: 1),
+
+        // Live Transcript & Action Stream
+        Expanded(
+          flex: 5,
+          child: Row(
+            children: [
+              // Transcript column
+              Expanded(
+                flex: 3,
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Live Transcript',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 13)),
+                      const SizedBox(height: 8),
+                      Expanded(
+                        child: _transcripts.isEmpty
+                            ? const Center(
+                                child: Text(
+                                    'Spoken responses will appear here.',
+                                    style: TextStyle(color: Colors.grey)),
+                              )
+                            : ListView.builder(
+                                itemCount: _transcripts.length,
+                                itemBuilder: (ctx, idx) => Padding(
+                                  padding:
+                                      const EdgeInsets.symmetric(vertical: 4),
+                                  child: Text(_transcripts[idx]),
+                                ),
+                              ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const VerticalDivider(width: 1),
+
+              // Tool Execution Feed
+              Expanded(
+                flex: 2,
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Tool Execution & Audit',
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 13)),
+                      const SizedBox(height: 8),
+                      Expanded(
+                        child: _toolHistory.isEmpty
+                            ? const Center(
+                                child: Text('Tool calls will appear here.',
+                                    style: TextStyle(color: Colors.grey)),
+                              )
+                            : ListView.builder(
+                                itemCount: _toolHistory.length,
+                                itemBuilder: (ctx, idx) {
+                                  final item = _toolHistory[idx];
+                                  final isBlocked = item['status'] == 'blocked';
+                                  return Card(
+                                    color: isBlocked
+                                        ? Colors.red.withValues(alpha: 0.1)
+                                        : null,
+                                    child: ListTile(
+                                      dense: true,
+                                      leading: Icon(
+                                        isBlocked
+                                            ? Icons.block
+                                            : Icons.build_outlined,
+                                        color: isBlocked
+                                            ? Colors.red
+                                            : Colors.indigo,
+                                        size: 18,
+                                      ),
+                                      title: Text(item['tool'] as String,
+                                          style: const TextStyle(
+                                              fontWeight: FontWeight.bold)),
+                                      subtitle: Text(
+                                        isBlocked
+                                            ? 'Blocked by sensitive app guard'
+                                            : 'Executed successfully',
+                                        style: TextStyle(
+                                          color: isBlocked
+                                              ? Colors.red
+                                              : Colors.green,
+                                          fontSize: 11,
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _buildPcApprovalsSection() {
@@ -1045,7 +1160,10 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
               const Expanded(
                 child: Text(
                   'PC Action Confirmation Needed',
-                  style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 14),
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                      fontSize: 14),
                 ),
               ),
               Container(
@@ -1056,7 +1174,10 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
                 ),
                 child: Text(
                   '${_pendingPcApprovals.length} pending',
-                  style: const TextStyle(color: Colors.redAccent, fontSize: 11, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                      color: Colors.redAccent,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold),
                 ),
               ),
             ],
@@ -1079,28 +1200,41 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
                   Row(
                     children: [
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
                           color: Colors.amberAccent.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(
                           tool,
-                          style: const TextStyle(color: Colors.amberAccent, fontFamily: 'monospace', fontSize: 12, fontWeight: FontWeight.bold),
+                          style: const TextStyle(
+                              color: Colors.amberAccent,
+                              fontFamily: 'monospace',
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold),
                         ),
                       ),
                       const Spacer(),
                       Text(
                         id,
-                        style: const TextStyle(color: Colors.grey, fontSize: 10, fontFamily: 'monospace'),
+                        style: const TextStyle(
+                            color: Colors.grey,
+                            fontSize: 10,
+                            fontFamily: 'monospace'),
                       ),
                     ],
                   ),
                   if (args.isNotEmpty) ...[
                     const SizedBox(height: 6),
                     Text(
-                      args.entries.map((e) => '${e.key}: ${e.value}').join(', '),
-                      style: const TextStyle(color: Colors.white70, fontSize: 11, fontFamily: 'monospace'),
+                      args.entries
+                          .map((e) => '${e.key}: ${e.value}')
+                          .join(', '),
+                      style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 11,
+                          fontFamily: 'monospace'),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -1113,24 +1247,29 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
                         style: OutlinedButton.styleFrom(
                           foregroundColor: Colors.redAccent,
                           side: const BorderSide(color: Colors.redAccent),
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 4),
                           minimumSize: const Size(60, 32),
                         ),
                         onPressed: () => _resolvePcApproval(id, false),
                         icon: const Icon(Icons.close, size: 14),
-                        label: const Text('Deny', style: TextStyle(fontSize: 12)),
+                        label:
+                            const Text('Deny', style: TextStyle(fontSize: 12)),
                       ),
                       const SizedBox(width: 8),
                       ElevatedButton.icon(
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.green.shade700,
                           foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 4),
                           minimumSize: const Size(80, 32),
                         ),
                         onPressed: () => _resolvePcApproval(id, true),
                         icon: const Icon(Icons.check, size: 14),
-                        label: const Text('Approve', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                        label: const Text('Approve',
+                            style: TextStyle(
+                                fontSize: 12, fontWeight: FontWeight.bold)),
                       ),
                     ],
                   ),

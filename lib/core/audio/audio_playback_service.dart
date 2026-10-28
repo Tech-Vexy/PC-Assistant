@@ -43,7 +43,17 @@ class AudioPlaybackService {
     try {
       _desktopPlaybackProcess = await Process.start(
         'ffplay',
-        ['-f', 's16le', '-ar', '24000', '-ac', '1', '-nodisp', '-autoexit', '-'],
+        [
+          '-f',
+          's16le',
+          '-ar',
+          '24000',
+          '-ac',
+          '1',
+          '-nodisp',
+          '-autoexit',
+          '-'
+        ],
         mode: ProcessStartMode.normal,
       );
     } catch (_) {

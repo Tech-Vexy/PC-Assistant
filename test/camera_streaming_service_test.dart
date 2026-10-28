@@ -28,7 +28,8 @@ void main() {
       service.dispose();
     });
 
-    test('suppresses frames when SensitiveAppGuard detects sensitive package', () async {
+    test('suppresses frames when SensitiveAppGuard detects sensitive package',
+        () async {
       final guard = SensitiveAppGuard();
       final service = CameraStreamingService(guard: guard);
 

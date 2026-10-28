@@ -70,7 +70,8 @@ class AudioRecordingService {
             return;
           }
 
-          final vadRes = _vad.process(chunk, isAssistantSpeaking: _isAssistantSpeaking);
+          final vadRes =
+              _vad.process(chunk, isAssistantSpeaking: _isAssistantSpeaking);
           onSpeechStatusChanged?.call(vadRes.isSpeech, vadRes.rms);
 
           if (vadRes.shouldBargeIn) {

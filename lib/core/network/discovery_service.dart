@@ -33,7 +33,8 @@ class DiscoveredPcServer {
       platform: json['platform'] as String? ?? 'unknown',
       port: (json['port'] as num?)?.toInt() ?? 3000,
       ip: json['ip'] as String? ?? '127.0.0.1',
-      url: json['url'] as String? ?? 'http://${json['ip'] ?? '127.0.0.1'}:${json['port'] ?? 3000}',
+      url: json['url'] as String? ??
+          'http://${json['ip'] ?? '127.0.0.1'}:${json['port'] ?? 3000}',
     );
   }
 
@@ -57,7 +58,8 @@ class DiscoveryService {
 
   final http.Client _httpClient;
 
-  DiscoveryService({http.Client? httpClient}) : _httpClient = httpClient ?? http.Client();
+  DiscoveryService({http.Client? httpClient})
+      : _httpClient = httpClient ?? http.Client();
 
   /// Scans the local network via UDP broadcast on port 35500.
   /// Returns a deduplicated list of discovered PC Assistant instances.
@@ -115,9 +117,11 @@ class DiscoveryService {
     final cleanUrl = baseUrl.replaceAll(RegExp(r'/+$'), '');
     try {
       // Try /api/discovery first
-      final discRes = await _httpClient.get(
-        Uri.parse('$cleanUrl/api/discovery'),
-      ).timeout(const Duration(seconds: 3));
+      final discRes = await _httpClient
+          .get(
+            Uri.parse('$cleanUrl/api/discovery'),
+          )
+          .timeout(const Duration(seconds: 3));
 
       if (discRes.statusCode == 200) {
         final json = jsonDecode(discRes.body) as Map<String, dynamic>;
@@ -129,9 +133,11 @@ class DiscoveryService {
 
     // Fallback: try /health
     try {
-      final healthRes = await _httpClient.get(
-        Uri.parse('$cleanUrl/health'),
-      ).timeout(const Duration(seconds: 3));
+      final healthRes = await _httpClient
+          .get(
+            Uri.parse('$cleanUrl/health'),
+          )
+          .timeout(const Duration(seconds: 3));
 
       if (healthRes.statusCode == 200) {
         final parsedUri = Uri.parse(cleanUrl);

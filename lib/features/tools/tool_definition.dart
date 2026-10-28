@@ -1,10 +1,12 @@
 /// Unified tool definitions for Gemini Live function calling
 class ToolDefinitions {
-  static List<Map<String, dynamic>> getAllDeclarations({required bool isAndroid}) {
+  static List<Map<String, dynamic>> getAllDeclarations(
+      {required bool isAndroid}) {
     return [
       {
         'name': 'system_status',
-        'description': 'Retrieves device system metrics (battery, memory, platform, active app)',
+        'description':
+            'Retrieves device system metrics (battery, memory, platform, active app)',
         'parameters': {
           'type': 'object',
           'properties': {},
@@ -12,13 +14,15 @@ class ToolDefinitions {
       },
       {
         'name': 'remember',
-        'description': 'Saves a persistent user preference, fact, or location to encrypted memory',
+        'description':
+            'Saves a persistent user preference, fact, or location to encrypted memory',
         'parameters': {
           'type': 'object',
           'properties': {
             'key': {
               'type': 'string',
-              'description': 'Short identifier (e.g. coffee_preference, home_address)',
+              'description':
+                  'Short identifier (e.g. coffee_preference, home_address)',
             },
             'value': {
               'type': 'string',
@@ -26,7 +30,8 @@ class ToolDefinitions {
             },
             'category': {
               'type': 'string',
-              'description': 'Category: preference, location, workflow, or general',
+              'description':
+                  'Category: preference, location, workflow, or general',
             },
           },
           'required': ['key', 'value'],
@@ -34,7 +39,8 @@ class ToolDefinitions {
       },
       {
         'name': 'recall',
-        'description': 'Recalls a saved fact or preference from encrypted memory by key',
+        'description':
+            'Recalls a saved fact or preference from encrypted memory by key',
         'parameters': {
           'type': 'object',
           'properties': {
@@ -48,20 +54,23 @@ class ToolDefinitions {
       },
       {
         'name': 'list_memories',
-        'description': 'Lists saved user preferences, locations, and facts from encrypted memory',
+        'description':
+            'Lists saved user preferences, locations, and facts from encrypted memory',
         'parameters': {
           'type': 'object',
           'properties': {
             'category': {
               'type': 'string',
-              'description': 'Optional filter category: preference, location, workflow, general',
+              'description':
+                  'Optional filter category: preference, location, workflow, general',
             },
           },
         },
       },
       {
         'name': 'forget',
-        'description': 'Removes a saved preference, fact, or location from encrypted memory by key',
+        'description':
+            'Removes a saved preference, fact, or location from encrypted memory by key',
         'parameters': {
           'type': 'object',
           'properties': {
@@ -75,7 +84,8 @@ class ToolDefinitions {
       },
       {
         'name': 'undo_last',
-        'description': 'Reverses the last automated modification made by the assistant',
+        'description':
+            'Reverses the last automated modification made by the assistant',
         'parameters': {
           'type': 'object',
           'properties': {},
@@ -83,7 +93,8 @@ class ToolDefinitions {
       },
       {
         'name': 'plan_task',
-        'description': 'Decomposes a complex multi-step user task into an executable plan using Nemotron',
+        'description':
+            'Decomposes a complex multi-step user task into an executable plan using Nemotron',
         'parameters': {
           'type': 'object',
           'properties': {
@@ -97,7 +108,8 @@ class ToolDefinitions {
       },
       {
         'name': 'execute_plan',
-        'description': 'Executes an existing plan decomposed by plan_task or a plan ID',
+        'description':
+            'Executes an existing plan decomposed by plan_task or a plan ID',
         'parameters': {
           'type': 'object',
           'properties': {
@@ -111,7 +123,8 @@ class ToolDefinitions {
       },
       {
         'name': 'list_plans',
-        'description': 'Lists all current and recent task plans with their execution status',
+        'description':
+            'Lists all current and recent task plans with their execution status',
         'parameters': {
           'type': 'object',
           'properties': {},
@@ -119,7 +132,8 @@ class ToolDefinitions {
       },
       {
         'name': 'save_workflow',
-        'description': 'Saves a recurring multi-step procedure/workflow by name',
+        'description':
+            'Saves a recurring multi-step procedure/workflow by name',
         'parameters': {
           'type': 'object',
           'properties': {
@@ -133,7 +147,8 @@ class ToolDefinitions {
             },
             'steps': {
               'type': 'array',
-              'description': 'List of steps to execute, each with tool and args',
+              'description':
+                  'List of steps to execute, each with tool and args',
               'items': {'type': 'object'},
             },
           },
@@ -178,7 +193,8 @@ class ToolDefinitions {
       },
       {
         'name': 'schedule_workflow',
-        'description': 'Schedules a saved workflow to run periodically on a recurring interval',
+        'description':
+            'Schedules a saved workflow to run periodically on a recurring interval',
         'parameters': {
           'type': 'object',
           'properties': {
@@ -188,7 +204,8 @@ class ToolDefinitions {
             },
             'interval_seconds': {
               'type': 'number',
-              'description': 'Execution interval in seconds (minimum 10 seconds)',
+              'description':
+                  'Execution interval in seconds (minimum 10 seconds)',
             },
           },
           'required': ['workflow_name', 'interval_seconds'],
@@ -196,7 +213,8 @@ class ToolDefinitions {
       },
       {
         'name': 'list_scheduled_workflows',
-        'description': 'Lists all scheduled and recurring workflows with their next execution times',
+        'description':
+            'Lists all scheduled and recurring workflows with their next execution times',
         'parameters': {
           'type': 'object',
           'properties': {},
@@ -204,7 +222,8 @@ class ToolDefinitions {
       },
       {
         'name': 'cancel_scheduled_workflow',
-        'description': 'Cancels a recurring scheduled workflow by its schedule ID',
+        'description':
+            'Cancels a recurring scheduled workflow by its schedule ID',
         'parameters': {
           'type': 'object',
           'properties': {
@@ -232,13 +251,15 @@ class ToolDefinitions {
       },
       {
         'name': 'inspect_screen',
-        'description': 'Captures visual screen state or UI hierarchy to answer user queries',
+        'description':
+            'Captures visual screen state or UI hierarchy to answer user queries',
         'parameters': {
           'type': 'object',
           'properties': {
             'query': {
               'type': 'string',
-              'description': 'What information the user wants to identify from the screen',
+              'description':
+                  'What information the user wants to identify from the screen',
             },
           },
         },
@@ -246,7 +267,8 @@ class ToolDefinitions {
       if (!isAndroid) ...[
         {
           'name': 'run_shell_command',
-          'description': 'Executes a desktop terminal command (PowerShell on Windows, Bash on Linux)',
+          'description':
+              'Executes a desktop terminal command (PowerShell on Windows, Bash on Linux)',
           'parameters': {
             'type': 'object',
             'properties': {
@@ -261,13 +283,15 @@ class ToolDefinitions {
       ] else ...[
         {
           'name': 'click_element',
-          'description': 'Clicks a visible UI element on mobile by its visible label',
+          'description':
+              'Clicks a visible UI element on mobile by its visible label',
           'parameters': {
             'type': 'object',
             'properties': {
               'text': {
                 'type': 'string',
-                'description': 'The exact visible text of the button or item to click',
+                'description':
+                    'The exact visible text of the button or item to click',
               },
             },
             'required': ['text'],
@@ -285,23 +309,37 @@ class ToolDefinitions {
               },
               'x': {'type': 'number', 'description': 'X coordinate for tap'},
               'y': {'type': 'number', 'description': 'Y coordinate for tap'},
-              'startX': {'type': 'number', 'description': 'Start X coordinate for swipe'},
-              'startY': {'type': 'number', 'description': 'Start Y coordinate for swipe'},
-              'endX': {'type': 'number', 'description': 'End X coordinate for swipe'},
-              'endY': {'type': 'number', 'description': 'End Y coordinate for swipe'},
+              'startX': {
+                'type': 'number',
+                'description': 'Start X coordinate for swipe'
+              },
+              'startY': {
+                'type': 'number',
+                'description': 'Start Y coordinate for swipe'
+              },
+              'endX': {
+                'type': 'number',
+                'description': 'End X coordinate for swipe'
+              },
+              'endY': {
+                'type': 'number',
+                'description': 'End Y coordinate for swipe'
+              },
             },
             'required': ['type'],
           },
         },
         {
           'name': 'navigate',
-          'description': 'Performs Android system navigation (back, home, recents, notifications)',
+          'description':
+              'Performs Android system navigation (back, home, recents, notifications)',
           'parameters': {
             'type': 'object',
             'properties': {
               'action': {
                 'type': 'string',
-                'description': 'Action: "back", "home", "recents", "notifications"',
+                'description':
+                    'Action: "back", "home", "recents", "notifications"',
               },
             },
             'required': ['action'],
@@ -309,29 +347,41 @@ class ToolDefinitions {
         },
         {
           'name': 'input_text',
-          'description': 'Types or inputs text into the currently focused or targeted editable field',
+          'description':
+              'Types or inputs text into the currently focused or targeted editable field',
           'parameters': {
             'type': 'object',
             'properties': {
-              'text': {'type': 'string', 'description': 'The text string to type'},
-              'view_id': {'type': 'string', 'description': 'Optional resource ID of the target input'},
+              'text': {
+                'type': 'string',
+                'description': 'The text string to type'
+              },
+              'view_id': {
+                'type': 'string',
+                'description': 'Optional resource ID of the target input'
+              },
             },
             'required': ['text'],
           },
         },
         {
           'name': 'scroll_screen',
-          'description': 'Scrolls the active window forward (down) or backward (up)',
+          'description':
+              'Scrolls the active window forward (down) or backward (up)',
           'parameters': {
             'type': 'object',
             'properties': {
-              'direction': {'type': 'string', 'description': '"down" or "up" (default "down")'},
+              'direction': {
+                'type': 'string',
+                'description': '"down" or "up" (default "down")'
+              },
             },
           },
         },
         {
           'name': 'capture_screen',
-          'description': 'Captures a real-time visual frame of the screen for multimodal reasoning',
+          'description':
+              'Captures a real-time visual frame of the screen for multimodal reasoning',
           'parameters': {
             'type': 'object',
             'properties': {},
@@ -340,7 +390,8 @@ class ToolDefinitions {
       ],
       {
         'name': 'web_search',
-        'description': 'Searches the web or synthesizes real-time knowledge to answer factual and current questions',
+        'description':
+            'Searches the web or synthesizes real-time knowledge to answer factual and current questions',
         'parameters': {
           'type': 'object',
           'properties': {
@@ -354,7 +405,8 @@ class ToolDefinitions {
       },
       {
         'name': 'pc_status',
-        'description': 'Checks the connection status and health of the linked PC Assistant desktop server',
+        'description':
+            'Checks the connection status and health of the linked PC Assistant desktop server',
         'parameters': {
           'type': 'object',
           'properties': {},
@@ -362,7 +414,8 @@ class ToolDefinitions {
       },
       {
         'name': 'sync_memories',
-        'description': 'Synchronizes memories between this device and the linked PC Assistant server',
+        'description':
+            'Synchronizes memories between this device and the linked PC Assistant server',
         'parameters': {
           'type': 'object',
           'properties': {},
@@ -370,7 +423,8 @@ class ToolDefinitions {
       },
       {
         'name': 'sync_workflows',
-        'description': 'Synchronizes workflows between this device and the linked PC Assistant server',
+        'description':
+            'Synchronizes workflows between this device and the linked PC Assistant server',
         'parameters': {
           'type': 'object',
           'properties': {},
@@ -378,7 +432,8 @@ class ToolDefinitions {
       },
       {
         'name': 'delegate_to_pc',
-        'description': 'Delegates execution of a desktop tool to the linked PC Assistant server (e.g. computer_use, terminal, media)',
+        'description':
+            'Delegates execution of a desktop tool to the linked PC Assistant server (e.g. computer_use, terminal, media)',
         'parameters': {
           'type': 'object',
           'properties': {
@@ -396,26 +451,31 @@ class ToolDefinitions {
       },
       {
         'name': 'spawn_agent',
-        'description': 'Dynamically spawns a specialized sub-agent with a dedicated role, scoped allowed tools, and autonomous loop',
+        'description':
+            'Dynamically spawns a specialized sub-agent with a dedicated role, scoped allowed tools, and autonomous loop',
         'parameters': {
           'type': 'object',
           'properties': {
             'role': {
               'type': 'string',
-              'description': 'Sub-agent role title (e.g. "Research Assistant", "Device Automator")',
+              'description':
+                  'Sub-agent role title (e.g. "Research Assistant", "Device Automator")',
             },
             'instructions': {
               'type': 'string',
-              'description': 'Clear, actionable instructions and goals for the sub-agent to accomplish',
+              'description':
+                  'Clear, actionable instructions and goals for the sub-agent to accomplish',
             },
             'allowed_tools': {
               'type': 'array',
               'items': {'type': 'string'},
-              'description': 'Explicit allowlist of tool names permitted for this sub-agent (deny-by-default)',
+              'description':
+                  'Explicit allowlist of tool names permitted for this sub-agent (deny-by-default)',
             },
             'max_steps': {
               'type': 'integer',
-              'description': 'Maximum reasoning/action steps before concluding (default 10)',
+              'description':
+                  'Maximum reasoning/action steps before concluding (default 10)',
             },
             'timeout_ms': {
               'type': 'integer',
@@ -427,20 +487,23 @@ class ToolDefinitions {
       },
       {
         'name': 'list_agents',
-        'description': 'Lists all active or recent sub-agents with their status and step progress',
+        'description':
+            'Lists all active or recent sub-agents with their status and step progress',
         'parameters': {
           'type': 'object',
           'properties': {
             'status': {
               'type': 'string',
-              'description': 'Optional filter: "running", "completed", "failed", "cancelled"',
+              'description':
+                  'Optional filter: "running", "completed", "failed", "cancelled"',
             },
           },
         },
       },
       {
         'name': 'agent_status',
-        'description': 'Retrieves detailed execution status, history, and results for a specific sub-agent',
+        'description':
+            'Retrieves detailed execution status, history, and results for a specific sub-agent',
         'parameters': {
           'type': 'object',
           'properties': {
@@ -468,7 +531,8 @@ class ToolDefinitions {
       },
       {
         'name': 'send_to_agent',
-        'description': 'Sends a follow-up message or instruction to an active sub-agent',
+        'description':
+            'Sends a follow-up message or instruction to an active sub-agent',
         'parameters': {
           'type': 'object',
           'properties': {

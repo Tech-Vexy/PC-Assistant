@@ -4,18 +4,21 @@ import 'package:flutter/services.dart';
 
 /// Dart interface to the native Android Accessibility & Foreground services
 class AndroidBridge {
-  static const MethodChannel _channel = MethodChannel('com.deviceassistant/bridge');
+  static const MethodChannel _channel =
+      MethodChannel('com.deviceassistant/bridge');
 
   static final _activePackageController = StreamController<String>.broadcast();
   static final _shieldAlertController = StreamController<String>.broadcast();
   static final _trayActionController = StreamController<String>.broadcast();
-  static final _hotwordController = StreamController<Map<String, String?>>.broadcast();
+  static final _hotwordController =
+      StreamController<Map<String, String?>>.broadcast();
 
   static bool _handlerInitialized = false;
 
   final bool _isAndroid;
 
-  AndroidBridge({bool? isAndroid}) : _isAndroid = isAndroid ?? Platform.isAndroid {
+  AndroidBridge({bool? isAndroid})
+      : _isAndroid = isAndroid ?? Platform.isAndroid {
     _initHandler();
   }
 
@@ -70,7 +73,8 @@ class AndroidBridge {
   Future<bool> isAccessibilityEnabled() async {
     if (!_isAndroid) return false;
     try {
-      final bool? enabled = await _channel.invokeMethod<bool>('isAccessibilityEnabled');
+      final bool? enabled =
+          await _channel.invokeMethod<bool>('isAccessibilityEnabled');
       return enabled ?? false;
     } catch (_) {
       return false;
@@ -97,14 +101,16 @@ class AndroidBridge {
   Future<void> updateProtectedPackages(List<String> packages) async {
     if (!_isAndroid) return;
     try {
-      await _channel.invokeMethod('updateProtectedPackages', {'packages': packages});
+      await _channel
+          .invokeMethod('updateProtectedPackages', {'packages': packages});
     } catch (_) {}
   }
 
   /// Injects a touch tap at screen coordinates (x, y)
   Future<bool> injectTap(double x, double y) async {
     if (!_isAndroid) return false;
-    final bool? result = await _channel.invokeMethod<bool>('injectTap', {'x': x, 'y': y});
+    final bool? result =
+        await _channel.invokeMethod<bool>('injectTap', {'x': x, 'y': y});
     return result ?? false;
   }
 
@@ -131,7 +137,8 @@ class AndroidBridge {
   /// Actions: 1 = BACK, 2 = HOME, 3 = RECENTS, 4 = NOTIFICATIONS
   Future<bool> performNavigation(int action) async {
     if (!_isAndroid) return false;
-    final bool? result = await _channel.invokeMethod<bool>('performNavigation', {'action': action});
+    final bool? result = await _channel
+        .invokeMethod<bool>('performNavigation', {'action': action});
     return result ?? false;
   }
 
@@ -139,7 +146,8 @@ class AndroidBridge {
   Future<List<Map<String, dynamic>>> dumpWindowHierarchy() async {
     if (!_isAndroid) return [];
     try {
-      final List<dynamic>? raw = await _channel.invokeMethod<List<dynamic>>('dumpWindowHierarchy');
+      final List<dynamic>? raw =
+          await _channel.invokeMethod<List<dynamic>>('dumpWindowHierarchy');
       if (raw == null) return [];
       return raw.map((item) => Map<String, dynamic>.from(item as Map)).toList();
     } catch (_) {
@@ -169,7 +177,8 @@ class AndroidBridge {
   Future<bool> isBatteryOptimizationIgnored() async {
     if (!_isAndroid) return true;
     try {
-      final bool? isIgnored = await _channel.invokeMethod<bool>('isBatteryOptimizationIgnored');
+      final bool? isIgnored =
+          await _channel.invokeMethod<bool>('isBatteryOptimizationIgnored');
       return isIgnored ?? false;
     } catch (_) {
       return false;
@@ -196,7 +205,8 @@ class AndroidBridge {
   Future<bool> isNotificationPermissionGranted() async {
     if (!_isAndroid) return true;
     try {
-      final bool? granted = await _channel.invokeMethod<bool>('isNotificationPermissionGranted');
+      final bool? granted =
+          await _channel.invokeMethod<bool>('isNotificationPermissionGranted');
       return granted ?? true;
     } catch (_) {
       return true;
@@ -215,7 +225,8 @@ class AndroidBridge {
   Future<bool> isMicrophonePermissionGranted() async {
     if (!_isAndroid) return true;
     try {
-      final bool? granted = await _channel.invokeMethod<bool>('isMicrophonePermissionGranted');
+      final bool? granted =
+          await _channel.invokeMethod<bool>('isMicrophonePermissionGranted');
       return granted ?? true;
     } catch (_) {
       return true;
@@ -234,7 +245,8 @@ class AndroidBridge {
   Future<bool> launchApp(String packageName) async {
     if (!_isAndroid) return false;
     try {
-      final bool? success = await _channel.invokeMethod<bool>('launchApp', {'packageName': packageName});
+      final bool? success = await _channel
+          .invokeMethod<bool>('launchApp', {'packageName': packageName});
       return success ?? false;
     } catch (_) {
       return false;
@@ -242,7 +254,8 @@ class AndroidBridge {
   }
 
   /// Updates the top bar tray notification and Quick Settings tile status
-  Future<void> updateTrayStatus({required bool isActive, String? statusText}) async {
+  Future<void> updateTrayStatus(
+      {required bool isActive, String? statusText}) async {
     if (!_isAndroid) return;
     try {
       await _channel.invokeMethod('updateTrayStatus', {
@@ -273,7 +286,8 @@ class AndroidBridge {
   Future<Uint8List?> takeScreenCapture() async {
     if (!_isAndroid) return null;
     try {
-      final dynamic raw = await _channel.invokeMethod<dynamic>('takeScreenCapture');
+      final dynamic raw =
+          await _channel.invokeMethod<dynamic>('takeScreenCapture');
       if (raw is Uint8List) {
         return raw;
       } else if (raw is List) {
@@ -303,7 +317,8 @@ class AndroidBridge {
   Future<bool> scroll({bool forward = true}) async {
     if (!_isAndroid) return false;
     try {
-      final bool? success = await _channel.invokeMethod<bool>('scroll', {'forward': forward});
+      final bool? success =
+          await _channel.invokeMethod<bool>('scroll', {'forward': forward});
       return success ?? false;
     } catch (_) {
       return false;
@@ -314,7 +329,8 @@ class AndroidBridge {
   Future<bool> startHotwordListening({List<String>? hotwords}) async {
     if (!_isAndroid) return false;
     try {
-      final bool? result = await _channel.invokeMethod<bool>('startHotwordListening', {
+      final bool? result =
+          await _channel.invokeMethod<bool>('startHotwordListening', {
         if (hotwords != null) 'hotwords': hotwords,
       });
       return result ?? false;
@@ -335,7 +351,8 @@ class AndroidBridge {
   Future<bool> isHotwordListening() async {
     if (!_isAndroid) return false;
     try {
-      final bool? result = await _channel.invokeMethod<bool>('isHotwordListening');
+      final bool? result =
+          await _channel.invokeMethod<bool>('isHotwordListening');
       return result ?? false;
     } catch (_) {
       return false;

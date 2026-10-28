@@ -99,43 +99,56 @@ void main() {
       expect(enabled, isTrue);
 
       await bridge.openAccessibilitySettings();
-      expect(log.any((call) => call.method == 'openAccessibilitySettings'), isTrue);
+      expect(log.any((call) => call.method == 'openAccessibilitySettings'),
+          isTrue);
 
-      final clickSuccess = await bridge.clickByText('Submit', viewId: 'btn_submit');
+      final clickSuccess =
+          await bridge.clickByText('Submit', viewId: 'btn_submit');
       expect(clickSuccess, isTrue);
-      expect(log.any((call) =>
-          call.method == 'clickByText' &&
-          call.arguments['text'] == 'Submit' &&
-          call.arguments['viewId'] == 'btn_submit'), isTrue);
+      expect(
+          log.any((call) =>
+              call.method == 'clickByText' &&
+              call.arguments['text'] == 'Submit' &&
+              call.arguments['viewId'] == 'btn_submit'),
+          isTrue);
 
       final clickFail = await bridge.clickByText('Cancel');
       expect(clickFail, isFalse);
     });
 
-    test('Gesture and navigation methods invoke correct platform calls', () async {
+    test('Gesture and navigation methods invoke correct platform calls',
+        () async {
       final bridge = AndroidBridge(isAndroid: true);
 
       final tapSuccess = await bridge.injectTap(150.0, 300.0);
       expect(tapSuccess, isTrue);
-      expect(log.any((call) =>
-          call.method == 'injectTap' &&
-          call.arguments['x'] == 150.0 &&
-          call.arguments['y'] == 300.0), isTrue);
+      expect(
+          log.any((call) =>
+              call.method == 'injectTap' &&
+              call.arguments['x'] == 150.0 &&
+              call.arguments['y'] == 300.0),
+          isTrue);
 
-      final swipeSuccess = await bridge.injectSwipe(100.0, 500.0, 100.0, 200.0, durationMs: 250);
+      final swipeSuccess =
+          await bridge.injectSwipe(100.0, 500.0, 100.0, 200.0, durationMs: 250);
       expect(swipeSuccess, isTrue);
-      expect(log.any((call) =>
-          call.method == 'injectSwipe' &&
-          call.arguments['durationMs'] == 250), isTrue);
+      expect(
+          log.any((call) =>
+              call.method == 'injectSwipe' &&
+              call.arguments['durationMs'] == 250),
+          isTrue);
 
       final navSuccess = await bridge.performNavigation(2); // HOME
       expect(navSuccess, isTrue);
-      expect(log.any((call) =>
-          call.method == 'performNavigation' &&
-          call.arguments['action'] == 2), isTrue);
+      expect(
+          log.any((call) =>
+              call.method == 'performNavigation' &&
+              call.arguments['action'] == 2),
+          isTrue);
     });
 
-    test('Window hierarchy and active package inspection work properly', () async {
+    test('Window hierarchy and active package inspection work properly',
+        () async {
       final bridge = AndroidBridge(isAndroid: true);
 
       final hierarchy = await bridge.dumpWindowHierarchy();
@@ -147,23 +160,29 @@ void main() {
       expect(activePkg, 'com.example.app');
     });
 
-    test('Foreground service, tray, and battery optimization methods', () async {
+    test('Foreground service, tray, and battery optimization methods',
+        () async {
       final bridge = AndroidBridge(isAndroid: true);
 
       await bridge.startForegroundService();
-      expect(log.any((call) => call.method == 'startForegroundService'), isTrue);
+      expect(
+          log.any((call) => call.method == 'startForegroundService'), isTrue);
 
       await bridge.updateTrayStatus(isActive: true, statusText: 'Listening...');
-      expect(log.any((call) =>
-          call.method == 'updateTrayStatus' &&
-          call.arguments['isActive'] == true &&
-          call.arguments['statusText'] == 'Listening...'), isTrue);
+      expect(
+          log.any((call) =>
+              call.method == 'updateTrayStatus' &&
+              call.arguments['isActive'] == true &&
+              call.arguments['statusText'] == 'Listening...'),
+          isTrue);
 
       final batteryIgnored = await bridge.isBatteryOptimizationIgnored();
       expect(batteryIgnored, isTrue);
 
       await bridge.requestIgnoreBatteryOptimization();
-      expect(log.any((call) => call.method == 'requestIgnoreBatteryOptimization'), isTrue);
+      expect(
+          log.any((call) => call.method == 'requestIgnoreBatteryOptimization'),
+          isTrue);
 
       final launched = await bridge.launchApp('com.android.calculator');
       expect(launched, isTrue);
@@ -194,20 +213,27 @@ void main() {
     test('Input text, scroll, and updateProtectedPackages methods', () async {
       final bridge = AndroidBridge(isAndroid: true);
 
-      final inputSuccess = await bridge.inputText('Hello World', viewId: 'input_field');
+      final inputSuccess =
+          await bridge.inputText('Hello World', viewId: 'input_field');
       expect(inputSuccess, isTrue);
-      expect(log.any((call) =>
-          call.method == 'inputText' &&
-          call.arguments['text'] == 'Hello World' &&
-          call.arguments['viewId'] == 'input_field'), isTrue);
+      expect(
+          log.any((call) =>
+              call.method == 'inputText' &&
+              call.arguments['text'] == 'Hello World' &&
+              call.arguments['viewId'] == 'input_field'),
+          isTrue);
 
       final scrollSuccess = await bridge.scroll(forward: true);
       expect(scrollSuccess, isTrue);
 
-      await bridge.updateProtectedPackages(['com.custom.secret', 'com.banking.app']);
-      expect(log.any((call) =>
-          call.method == 'updateProtectedPackages' &&
-          (call.arguments['packages'] as List).contains('com.custom.secret')), isTrue);
+      await bridge
+          .updateProtectedPackages(['com.custom.secret', 'com.banking.app']);
+      expect(
+          log.any((call) =>
+              call.method == 'updateProtectedPackages' &&
+              (call.arguments['packages'] as List)
+                  .contains('com.custom.secret')),
+          isTrue);
 
       await bridge.minimizeApp();
       expect(log.any((call) => call.method == 'minimizeApp'), isTrue);
@@ -216,19 +242,24 @@ void main() {
       expect(notifGranted, isTrue);
 
       await bridge.requestNotificationPermission();
-      expect(log.any((call) => call.method == 'requestNotificationPermission'), isTrue);
+      expect(log.any((call) => call.method == 'requestNotificationPermission'),
+          isTrue);
 
       final micGranted = await bridge.isMicrophonePermissionGranted();
       expect(micGranted, isTrue);
 
       await bridge.requestMicrophonePermission();
-      expect(log.any((call) => call.method == 'requestMicrophonePermission'), isTrue);
+      expect(log.any((call) => call.method == 'requestMicrophonePermission'),
+          isTrue);
 
-      final hotwordStarted = await bridge.startHotwordListening(hotwords: ['hey assistant', 'ok google']);
+      final hotwordStarted = await bridge
+          .startHotwordListening(hotwords: ['hey assistant', 'ok google']);
       expect(hotwordStarted, isTrue);
-      expect(log.any((call) =>
-          call.method == 'startHotwordListening' &&
-          (call.arguments['hotwords'] as List).contains('hey assistant')), isTrue);
+      expect(
+          log.any((call) =>
+              call.method == 'startHotwordListening' &&
+              (call.arguments['hotwords'] as List).contains('hey assistant')),
+          isTrue);
 
       final isListening = await bridge.isHotwordListening();
       expect(isListening, isTrue);
@@ -237,7 +268,9 @@ void main() {
       expect(log.any((call) => call.method == 'stopHotwordListening'), isTrue);
     });
 
-    test('Streams receive native callbacks for active package, shield alert, and tray actions', () async {
+    test(
+        'Streams receive native callbacks for active package, shield alert, and tray actions',
+        () async {
       final bridge = AndroidBridge(isAndroid: true);
 
       final activePackageFuture = bridge.activePackageStream.first;
@@ -253,7 +286,8 @@ void main() {
         }),
       );
       await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .handlePlatformMessage(channel.name, packageMessage, (ByteData? reply) {});
+          .handlePlatformMessage(
+              channel.name, packageMessage, (ByteData? reply) {});
 
       final trayMessage = channel.codec.encodeMethodCall(
         const MethodCall('onTrayAction', {
@@ -261,7 +295,8 @@ void main() {
         }),
       );
       await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .handlePlatformMessage(channel.name, trayMessage, (ByteData? reply) {});
+          .handlePlatformMessage(
+              channel.name, trayMessage, (ByteData? reply) {});
 
       final hotwordMessage = channel.codec.encodeMethodCall(
         const MethodCall('onHotwordDetected', {
@@ -270,7 +305,8 @@ void main() {
         }),
       );
       await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-          .handlePlatformMessage(channel.name, hotwordMessage, (ByteData? reply) {});
+          .handlePlatformMessage(
+              channel.name, hotwordMessage, (ByteData? reply) {});
 
       expect(await activePackageFuture, 'com.android.stk');
       expect(await shieldAlertFuture, 'com.android.stk');

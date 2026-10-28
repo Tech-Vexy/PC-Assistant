@@ -25,7 +25,8 @@ void main() {
       }
     });
 
-    test('Screen capture is halted when sensitive app is in foreground', () async {
+    test('Screen capture is halted when sensitive app is in foreground',
+        () async {
       Uint8List? streamedFrame;
 
       final dispatcher = ToolDispatcher(
@@ -47,7 +48,9 @@ void main() {
       expect(streamedFrame, isNull);
     });
 
-    test('Screen perception returns status and desktop notice when not on Android', () async {
+    test(
+        'Screen perception returns status and desktop notice when not on Android',
+        () async {
       final dispatcher = ToolDispatcher(
         db: db,
         guard: guard,
