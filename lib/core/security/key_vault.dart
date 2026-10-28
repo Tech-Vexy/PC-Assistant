@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math';
 import 'package:crypto/crypto.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -42,7 +43,21 @@ class KeyVault {
 
   /// Retrieves the Google Gemini API Key
   Future<String?> getGeminiApiKey() async {
-    return await _storage.read(key: _geminiKey);
+    final stored = await _storage.read(key: _geminiKey);
+    if (stored != null && stored.isNotEmpty) {
+      return stored;
+    }
+    try {
+      final env = Platform.environment['GEMINI_API_KEY'];
+      if (env != null && env.isNotEmpty) {
+        return env;
+      }
+    } catch (_) {}
+    const defineVal = String.fromEnvironment('GEMINI_API_KEY');
+    if (defineVal.isNotEmpty) {
+      return defineVal;
+    }
+    return null;
   }
 
   /// Saves the Nebius Token Factory API Key
@@ -52,7 +67,21 @@ class KeyVault {
 
   /// Retrieves the Nebius Token Factory API Key
   Future<String?> getNebiusApiKey() async {
-    return await _storage.read(key: _nebiusKey);
+    final stored = await _storage.read(key: _nebiusKey);
+    if (stored != null && stored.isNotEmpty) {
+      return stored;
+    }
+    try {
+      final env = Platform.environment['NEBIUS_API_KEY'];
+      if (env != null && env.isNotEmpty) {
+        return env;
+      }
+    } catch (_) {}
+    const defineVal = String.fromEnvironment('NEBIUS_API_KEY');
+    if (defineVal.isNotEmpty) {
+      return defineVal;
+    }
+    return null;
   }
 
   /// Saves the Nebius Token Factory API Base Endpoint
