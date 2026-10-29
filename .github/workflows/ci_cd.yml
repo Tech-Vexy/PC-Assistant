@@ -107,10 +107,10 @@ jobs:
         run: flutter pub get
 
       - name: Build Android Release APK
-        run: flutter build apk --release --dart-define=GEMINI_API_KEY="$GEMINI_API_KEY" --dart-define=NEBIUS_API_KEY="$NEBIUS_API_KEY"
+        run: flutter build apk --release --target-platform android-arm,android-arm64 --dart-define=GEMINI_API_KEY="$GEMINI_API_KEY" --dart-define=NEBIUS_API_KEY="$NEBIUS_API_KEY"
 
       - name: Build Android Release Bundle (AAB)
-        run: flutter build appbundle --release --dart-define=GEMINI_API_KEY="$GEMINI_API_KEY" --dart-define=NEBIUS_API_KEY="$NEBIUS_API_KEY"
+        run: flutter build appbundle --release --target-platform android-arm,android-arm64 --dart-define=GEMINI_API_KEY="$GEMINI_API_KEY" --dart-define=NEBIUS_API_KEY="$NEBIUS_API_KEY"
 
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
