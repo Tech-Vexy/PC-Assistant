@@ -162,6 +162,12 @@ class HotwordDetector(
             val lower = rawMatch.trim().lowercase()
 
             for (hw in activeHotwords) {
+                if (hw == "*" || hw.isEmpty()) {
+                    lastTriggerTimestamp = now
+                    onHotwordTriggered("stt", rawMatch.trim())
+                    return
+                }
+
                 if (lower.startsWith(hw) || lower.contains(hw)) {
                     lastTriggerTimestamp = now
 

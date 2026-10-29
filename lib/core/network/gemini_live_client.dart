@@ -19,15 +19,17 @@ class GeminiToolCallEvent {
 /// Client for Google's Gemini Multimodal Live API over bidirectional WebSocket.
 class GeminiLiveClient {
   static const String liveHost = 'generativelanguage.googleapis.com';
-  static const String defaultModel = 'models/gemini-2.0-flash-exp';
+  static const String defaultModel = 'models/gemini-3.8-live';
 
   final String apiKey;
   final String model;
   final List<Map<String, dynamic>> toolDeclarations;
   final String systemInstruction;
+  final WebSocketChannel Function(Uri uri)? channelFactory;
 
   WebSocketChannel? _channel;
   StreamSubscription? _subscription;
+  Completer<void>? _setupCompleter;
 
   final _audioOutputController = StreamController<Uint8List>.broadcast();
   final _toolCallController = StreamController<GeminiToolCallEvent>.broadcast();
@@ -39,11 +41,12 @@ class GeminiLiveClient {
 
   GeminiLiveClient({
     required this.apiKey,
-    this.model = defaultModel,
+    String model = defaultModel,
     this.toolDeclarations = const [],
     this.systemInstruction =
         'You are Device Assistant, a helpful cross-platform companion.',
-  });
+    this.channelFactory,
+  }) : model = model.startsWith('models/') ? model : 'models/$model';
 
   /// Stream of raw 24kHz PCM16 audio chunks returned by Gemini
   Stream<Uint8List> get audioOutputStream => _audioOutputController.stream;
@@ -61,28 +64,50 @@ class GeminiLiveClient {
   Stream<bool> get connectionStateStream => _connectionStateController.stream;
 
   bool get isConnected => _isConnected;
+  bool get isReady =>
+      _isConnected && _setupCompleter != null && _setupCompleter!.isCompleted;
 
-  /// Connects to the Gemini Live WebSocket endpoint and sends the setup payload
-  Future<void> connect() async {
+  /// Connects to the Gemini Live WebSocket endpoint and sends the setup payload.
+  /// Awaits session confirmation (`setupComplete`) before returning.
+  Future<void> connect({Duration timeout = const Duration(seconds: 15)}) async {
     if (_isConnected) return;
 
     final uri = Uri.parse(
-      'wss://$liveHost/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=$apiKey',
+      'wss://$liveHost/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=$apiKey',
     );
 
-    _channel = WebSocketChannel.connect(uri);
+    _setupCompleter = Completer<void>();
+    _channel = channelFactory != null
+        ? channelFactory!(uri)
+        : WebSocketChannel.connect(uri);
 
     _subscription = _channel!.stream.listen(
       _handleServerMessage,
       onError: (error) {
+        if (_setupCompleter != null && !_setupCompleter!.isCompleted) {
+          _setupCompleter!.completeError(error);
+        }
         _handleDisconnect();
       },
       onDone: () {
+        if (_setupCompleter != null && !_setupCompleter!.isCompleted) {
+          _setupCompleter!.completeError(
+            StateError('WebSocket closed before setup completed.'),
+          );
+        }
         _handleDisconnect();
       },
     );
 
     _sendSetupMessage();
+
+    try {
+      await _setupCompleter!.future.timeout(timeout);
+    } catch (e) {
+      await disconnect();
+      rethrow;
+    }
+
     _isConnected = true;
     _connectionStateController.add(true);
   }
@@ -118,7 +143,11 @@ class GeminiLiveClient {
 
   /// Sends a real-time chunk of 24kHz or 16kHz PCM audio bytes
   void sendAudioChunk(Uint8List pcmBytes, {int sampleRate = 24000}) {
-    if (!_isConnected || _channel == null) return;
+    if (!_isConnected ||
+        _channel == null ||
+        !(_setupCompleter?.isCompleted ?? false)) {
+      return;
+    }
 
     final payload = {
       'realtimeInput': {
@@ -136,7 +165,11 @@ class GeminiLiveClient {
 
   /// Sends a text message / user prompt turn over the live bidirectional session
   void sendTextMessage(String text) {
-    if (!_isConnected || _channel == null) return;
+    if (!_isConnected ||
+        _channel == null ||
+        !(_setupCompleter?.isCompleted ?? false)) {
+      return;
+    }
 
     final payload = {
       'clientContent': {
@@ -157,7 +190,11 @@ class GeminiLiveClient {
 
   /// Sends a JPEG screen capture or camera frame
   void sendImageFrame(Uint8List jpegBytes) {
-    if (!_isConnected || _channel == null) return;
+    if (!_isConnected ||
+        _channel == null ||
+        !(_setupCompleter?.isCompleted ?? false)) {
+      return;
+    }
 
     final payload = {
       'realtimeInput': {
@@ -176,15 +213,21 @@ class GeminiLiveClient {
   /// Responds to a tool call request with execution results
   void sendToolResponse({
     required String callId,
+    String? name,
     required Map<String, dynamic> result,
   }) {
-    if (!_isConnected || _channel == null) return;
+    if (!_isConnected ||
+        _channel == null ||
+        !(_setupCompleter?.isCompleted ?? false)) {
+      return;
+    }
 
     final payload = {
       'toolResponse': {
         'functionResponses': [
           {
             'id': callId,
+            if (name != null) 'name': name,
             'response': {'output': result},
           }
         ]
@@ -197,6 +240,36 @@ class GeminiLiveClient {
   void _handleServerMessage(dynamic rawMessage) {
     try {
       final data = jsonDecode(rawMessage as String) as Map<String, dynamic>;
+
+      // 0. Handle setup completion
+      if (data.containsKey('setupComplete')) {
+        if (_setupCompleter != null && !_setupCompleter!.isCompleted) {
+          _setupCompleter!.complete();
+        }
+        return;
+      }
+
+      // Handle server error message
+      if (data.containsKey('error')) {
+        final err = data['error'];
+        final errMsg = (err is Map && err['message'] != null)
+            ? err['message'].toString()
+            : err.toString();
+        if (_setupCompleter != null && !_setupCompleter!.isCompleted) {
+          _setupCompleter!.completeError(StateError(errMsg));
+        }
+        if (!_transcriptController.isClosed) {
+          _transcriptController.add('[Gemini Live Error: $errMsg]');
+        }
+        _handleDisconnect();
+        return;
+      }
+
+      // Handle server goAway notice
+      if (data.containsKey('goAway')) {
+        _handleDisconnect();
+        return;
+      }
 
       // 1. Process Server Content (Audio / Text / Interruption)
       if (data.containsKey('serverContent')) {
@@ -275,6 +348,11 @@ class GeminiLiveClient {
 
   void _handleDisconnect() {
     _isConnected = false;
+    if (_setupCompleter != null && !_setupCompleter!.isCompleted) {
+      _setupCompleter!.completeError(
+        StateError('Disconnected before setup completed.'),
+      );
+    }
     if (!_connectionStateController.isClosed) {
       _connectionStateController.add(false);
     }
@@ -286,6 +364,9 @@ class GeminiLiveClient {
     _subscription = null;
     await _channel?.sink.close();
     _channel = null;
+    if (_setupCompleter != null && !_setupCompleter!.isCompleted) {
+      _setupCompleter!.completeError(StateError('Client disconnected.'));
+    }
     if (!_connectionStateController.isClosed) {
       _connectionStateController.add(false);
     }

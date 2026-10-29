@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import '../../../core/agent/dartantic_agent.dart';
@@ -20,6 +21,7 @@ import 'memories_tab.dart';
 import 'plans_workflows_tab.dart';
 import 'security_shield_tab.dart';
 import 'settings_screen.dart';
+import 'chat_tab.dart';
 
 class HomeScreen extends StatefulWidget {
   final KeyVault keyVault;
@@ -40,6 +42,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final AudioRecordingService _audioRecorder = AudioRecordingService();
+  final TextEditingController _voiceQuickInputCtrl = TextEditingController();
   AudioPlaybackService? _audioPlayback;
   int _activeTabIndex = 0;
 
@@ -52,11 +55,13 @@ class _HomeScreenState extends State<HomeScreen>
 
   bool _isConnecting = false;
   bool _isConnected = false;
+  bool _isLocalSttActive = false;
   String? _activePackage;
   bool _isAccessibilityEnabled = false;
   bool _isBatteryOptimizationIgnored = true;
   final List<String> _transcripts = [];
   final List<Map<String, dynamic>> _toolHistory = [];
+  final List<ChatMessage> _chatMessages = [];
 
   StreamSubscription? _transcriptSub;
   StreamSubscription? _toolCallSub;
@@ -176,6 +181,10 @@ class _HomeScreenState extends State<HomeScreen>
         } else if (action == 'exit') {
           _liveClient?.disconnect();
           _audioRecorder.stopStreaming();
+          if (_isLocalSttActive && Platform.isAndroid && _androidBridge != null) {
+            _androidBridge!.stopHotwordListening();
+            if (mounted) setState(() => _isLocalSttActive = false);
+          }
         }
       });
 
@@ -253,17 +262,36 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
     );
 
     _transcriptSub = _liveClient!.transcriptStream.listen((text) {
-      setState(() {
-        _transcripts.add(text);
-      });
+      if (text.isEmpty) return;
+      if (mounted) {
+        setState(() {
+          if (_chatMessages.isNotEmpty &&
+              !_chatMessages.last.isUser &&
+              !_chatMessages.last.isError &&
+              _chatMessages.last.toolData == null) {
+            _chatMessages.last.text += text;
+          } else {
+            _chatMessages.add(
+              ChatMessage(
+                id: 'assistant_${DateTime.now().millisecondsSinceEpoch}',
+                isUser: false,
+                text: text,
+                timestamp: DateTime.now(),
+              ),
+            );
+          }
+        });
+      }
     });
 
     _audioOutputSub = _liveClient!.audioOutputStream.listen((chunk) {
+      _audioRecorder.notifyPlaybackStarted();
       _audioPlayback?.playChunk(chunk);
     });
 
     _interruptionSub = _liveClient!.interruptionStream.listen((_) {
       _audioPlayback?.flush();
+      _audioRecorder.notifyPlaybackEnded();
     });
 
     _toolCallSub = _liveClient!.toolCallStream.listen((event) async {
@@ -287,20 +315,43 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
               result.containsKey('blocked') ? 'blocked' : 'done';
           _toolHistory[0]['result'] = result;
         }
+        _chatMessages.add(
+          ChatMessage(
+            id: 'tool_${DateTime.now().millisecondsSinceEpoch}',
+            isUser: false,
+            text: 'Executed tool: ${event.name}',
+            timestamp: DateTime.now(),
+            toolData: {
+              'tool': event.name,
+              'args': event.arguments,
+              'status': result.containsKey('blocked') ? 'blocked' : 'done',
+              'result': result,
+            },
+          ),
+        );
       });
 
       _liveClient!.sendToolResponse(
         callId: event.callId,
+        name: event.name,
         result: result,
       );
     });
 
     _connSub = _liveClient!.connectionStateStream.listen((connected) {
-      setState(() {
-        _isConnected = connected;
-        _isConnecting = false;
-      });
-      _androidBridge?.updateTrayStatus(isActive: connected);
+      if (mounted) {
+        setState(() {
+          _isConnected = connected;
+          _isConnecting = false;
+          if (connected) {
+            _isLocalSttActive = false;
+          }
+        });
+        _androidBridge?.updateTrayStatus(isActive: connected);
+      }
+      if (!connected && _audioRecorder.isRecording) {
+        _audioRecorder.stopStreaming();
+      }
     });
   }
 
@@ -320,7 +371,9 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
               Expanded(
                 child: Text(
                   command != null && command.isNotEmpty
-                      ? 'Heard: "$hotword, $command"'
+                      ? (hotword == '*'
+                          ? 'Local STT: "$command"'
+                          : 'Heard: "$hotword, $command"')
                       : 'Hotword: "$hotword" detected! Listening...',
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
@@ -329,10 +382,6 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
           ),
         ),
       );
-    }
-
-    if (!_isConnected) {
-      await _toggleConnection();
     }
 
     if (command != null && command.isNotEmpty) {
@@ -370,14 +419,279 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
             ?.dispatch(toolName: 'perform_navigation', args: {'action': 3});
       } else {
         // Compound natural language request - forward directly as user turn to Gemini Live
+        _handleUserTextInput(cleanCommand);
+      }
+    }
+  }
+
+  Future<void> _handleUserTextInput(String input) async {
+    final cleanCommand = input.trim();
+    if (cleanCommand.isEmpty) return;
+
+    if (mounted) {
+      setState(() {
+        _chatMessages.add(
+          ChatMessage(
+            id: 'user_${DateTime.now().millisecondsSinceEpoch}',
+            isUser: true,
+            text: cleanCommand,
+            timestamp: DateTime.now(),
+          ),
+        );
+      });
+    }
+
+    final lower = cleanCommand.toLowerCase();
+
+    // Check if command is a direct local device shortcut
+    if (lower.startsWith('open ')) {
+      final app = cleanCommand.substring(5).trim();
+      final res = await _dispatcher?.dispatch(
+          toolName: 'open_application', args: {'app_name': app});
+      _recordToolResult('open_application', {'app_name': app}, res ?? {});
+      return;
+    } else if (lower == 'take a screenshot' ||
+        lower == 'take screenshot' ||
+        lower == 'screenshot' ||
+        lower == 'capture screen') {
+      final res =
+          await _dispatcher?.dispatch(toolName: 'capture_screen', args: {});
+      _recordToolResult('capture_screen', {}, res ?? {});
+      return;
+    } else if (lower == 'scroll down') {
+      final res = await _dispatcher
+          ?.dispatch(toolName: 'scroll', args: {'forward': true});
+      _recordToolResult('scroll', {'forward': true}, res ?? {});
+      return;
+    } else if (lower == 'scroll up') {
+      final res = await _dispatcher
+          ?.dispatch(toolName: 'scroll', args: {'forward': false});
+      _recordToolResult('scroll', {'forward': false}, res ?? {});
+      return;
+    } else if (lower == 'go back' || lower == 'press back' || lower == 'back') {
+      final res = await _dispatcher
+          ?.dispatch(toolName: 'perform_navigation', args: {'action': 1});
+      _recordToolResult('perform_navigation', {'action': 1}, res ?? {});
+      return;
+    } else if (lower == 'go home' || lower == 'press home' || lower == 'home') {
+      final res = await _dispatcher
+          ?.dispatch(toolName: 'perform_navigation', args: {'action': 2});
+      _recordToolResult('perform_navigation', {'action': 2}, res ?? {});
+      return;
+    } else if (lower == 'show recents' ||
+        lower == 'recent apps' ||
+        lower == 'recents') {
+      final res = await _dispatcher
+          ?.dispatch(toolName: 'perform_navigation', args: {'action': 3});
+      _recordToolResult('perform_navigation', {'action': 3}, res ?? {});
+      return;
+    } else if (lower == 'system status' || lower == 'status') {
+      final res =
+          await _dispatcher?.dispatch(toolName: 'system_status', args: {});
+      _recordToolResult('system_status', {}, res ?? {});
+      return;
+    } else if (lower == 'list memories' || lower == 'memories') {
+      final res =
+          await _dispatcher?.dispatch(toolName: 'list_memories', args: {});
+      _recordToolResult('list_memories', {}, res ?? {});
+      return;
+    }
+
+    // Forward natural language query to Gemini Live if connected
+    if (_isConnected) {
+      _liveClient?.sendTextMessage(cleanCommand);
+      return;
+    }
+
+    // If Local STT is actively listening, route directly to Nemotron fallback
+    if (_isLocalSttActive) {
+      await _processCommandWithNemotronFallback(cleanCommand);
+      return;
+    }
+
+    // Try connecting to Gemini Live if key is present
+    final geminiKey = await widget.keyVault.getGeminiApiKey();
+    if (geminiKey != null && geminiKey.isNotEmpty) {
+      setState(() => _isConnecting = true);
+      try {
+        _setupGeminiClient(geminiKey);
+        await _liveClient?.connect();
+        _liveClient?.sendTextMessage(cleanCommand);
+        return;
+      } catch (_) {
+        if (mounted) {
+          setState(() {
+            _isConnecting = false;
+            _isConnected = false;
+          });
+        }
+      }
+    }
+
+    // Fall back to Nemotron models on Nebius Token Factory
+    await _processCommandWithNemotronFallback(cleanCommand);
+  }
+
+  Future<void> _processCommandWithNemotronFallback(String command) async {
+    final clean = command.trim();
+    if (clean.isEmpty) return;
+
+    final nebiusKey = await widget.keyVault.getNebiusApiKey();
+    if (nebiusKey == null || nebiusKey.isEmpty) {
+      if (mounted) {
         setState(() {
-          _transcripts.add('User: $cleanCommand');
+          _chatMessages.add(
+            ChatMessage(
+              id: 'err_${DateTime.now().millisecondsSinceEpoch}',
+              isUser: false,
+              text:
+                  'Nemotron fallback unavailable: No Nebius API key configured in Settings.',
+              timestamp: DateTime.now(),
+              isError: true,
+            ),
+          );
         });
-        Future.delayed(const Duration(milliseconds: 700), () {
-          _liveClient?.sendTextMessage(cleanCommand);
+      }
+      return;
+    }
+
+    _nebiusClient ??= NebiusClient(apiKey: nebiusKey);
+
+    final pendingMsgId = 'nemotron_${DateTime.now().millisecondsSinceEpoch}';
+    if (mounted) {
+      setState(() {
+        _chatMessages.add(
+          ChatMessage(
+            id: pendingMsgId,
+            isUser: false,
+            text: 'Processing with Nemotron fallback...',
+            timestamp: DateTime.now(),
+          ),
+        );
+      });
+    }
+
+    try {
+      final complexity = NebiusClient.classifyTask(taskDescription: clean);
+
+      const systemPrompt = '''
+You are Device Assistant running as an on-device agent.
+When a user asks to perform an action on the device, reply ONLY with a JSON object:
+{"action": "tool_call", "tool": "<tool_name>", "args": {<arguments>}}
+
+Available tools:
+- system_status: {}
+- open_application: {"app_name": "string"}
+- capture_screen: {}
+- inspect_screen: {"query": "string"}
+- remember: {"key": "string", "value": "string"}
+- recall: {"key": "string"}
+- list_memories: {}
+- forget: {"key": "string"}
+- plan_task: {"goal": "string"}
+- execute_plan: {"plan_id": "string"}
+- list_plans: {}
+- save_workflow: {"name": "string", "steps": [...]}
+- run_workflow: {"name": "string"}
+- list_workflows: {}
+- web_search: {"query": "string"}
+- scroll: {"forward": true/false}
+- perform_navigation: {"action": 1 for back, 2 for home, 3 for recents}
+
+If the user query is a general question or conversational request, reply directly with the answer in natural language.
+''';
+
+      final response = await _nebiusClient!.chatCompletion(
+        messages: [
+          {'role': 'system', 'content': systemPrompt},
+          {'role': 'user', 'content': clean},
+        ],
+        complexity: complexity,
+      );
+
+      final trimmed = response.trim();
+      if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+        try {
+          final parsed = jsonDecode(trimmed) as Map<String, dynamic>;
+          if (parsed['action'] == 'tool_call' && parsed['tool'] != null) {
+            final toolName = parsed['tool'] as String;
+            final toolArgs = (parsed['args'] as Map<String, dynamic>?) ?? {};
+
+            final result = await _dispatcher?.dispatch(
+                  toolName: toolName,
+                  args: toolArgs,
+                ) ??
+                {};
+
+            _recordToolResult(toolName, toolArgs, result);
+
+            if (mounted) {
+              setState(() {
+                final idx =
+                    _chatMessages.indexWhere((m) => m.id == pendingMsgId);
+                if (idx != -1) {
+                  _chatMessages[idx].text =
+                      'Executed $toolName via Nemotron (${complexity.name})';
+                }
+              });
+            }
+            return;
+          }
+        } catch (_) {}
+      }
+
+      if (mounted) {
+        setState(() {
+          final idx = _chatMessages.indexWhere((m) => m.id == pendingMsgId);
+          if (idx != -1) {
+            _chatMessages[idx].text = trimmed;
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          final idx = _chatMessages.indexWhere((m) => m.id == pendingMsgId);
+          if (idx != -1) {
+            _chatMessages[idx] = ChatMessage(
+              id: pendingMsgId,
+              isUser: false,
+              text: 'Nemotron Fallback Error: $e',
+              timestamp: DateTime.now(),
+              isError: true,
+            );
+          }
         });
       }
     }
+  }
+
+  void _recordToolResult(
+      String tool, Map<String, dynamic> args, Map<String, dynamic> result) {
+    if (!mounted) return;
+    setState(() {
+      _toolHistory.insert(0, {
+        'tool': tool,
+        'args': args,
+        'status': result.containsKey('blocked') ? 'blocked' : 'done',
+        'result': result,
+        'time': DateTime.now(),
+      });
+      _chatMessages.add(
+        ChatMessage(
+          id: 'tool_${DateTime.now().millisecondsSinceEpoch}',
+          isUser: false,
+          text: 'Executed tool: $tool',
+          timestamp: DateTime.now(),
+          toolData: {
+            'tool': tool,
+            'args': args,
+            'status': result.containsKey('blocked') ? 'blocked' : 'done',
+            'result': result,
+          },
+        ),
+      );
+    });
   }
 
   Future<void> _toggleConnection() async {
@@ -396,24 +710,102 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
           ],
         );
       }
-    } else {
-      // Pause idle hotword detector before capturing audio stream for Gemini Live
+      return;
+    }
+
+    if (_isLocalSttActive) {
       if (Platform.isAndroid && _androidBridge != null) {
         await _androidBridge!.stopHotwordListening();
+        if (_isHotwordActive) {
+          await _androidBridge!.startHotwordListening(
+            hotwords: [
+              _activeHotwordPhrase,
+              'hey assistant',
+              'ok google',
+              'device assistant',
+              'computer'
+            ],
+          );
+        }
       }
-      final geminiKey = await widget.keyVault.getGeminiApiKey();
-      if (geminiKey == null || geminiKey.isEmpty) {
-        _showKeyDialog();
-        return;
+      if (mounted) {
+        setState(() => _isLocalSttActive = false);
       }
+      return;
+    }
+
+    // Pause idle hotword detector before capturing audio stream
+    if (Platform.isAndroid && _androidBridge != null) {
+      await _androidBridge!.stopHotwordListening();
+    }
+
+    final geminiKey = await widget.keyVault.getGeminiApiKey();
+    if (geminiKey != null && geminiKey.isNotEmpty) {
       setState(() => _isConnecting = true);
-      _setupGeminiClient(geminiKey);
-      await _liveClient?.connect();
-      await _audioRecorder.startStreaming(
-        onAudioChunk: (chunk) {
-          _liveClient?.sendAudioChunk(chunk);
-        },
-      );
+      try {
+        _setupGeminiClient(geminiKey);
+        await _liveClient?.connect();
+        await _audioRecorder.startStreaming(
+          onAudioChunk: (chunk) {
+            _liveClient?.sendAudioChunk(chunk);
+          },
+        );
+        return;
+      } catch (e) {
+        if (mounted) {
+          setState(() {
+            _isConnecting = false;
+            _isConnected = false;
+          });
+          // Fall back to Local STT on Android
+          if (Platform.isAndroid && _androidBridge != null) {
+            final ok =
+                await _androidBridge!.startHotwordListening(hotwords: ['*']);
+            if (!mounted) return;
+            if (ok) {
+              setState(() => _isLocalSttActive = true);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                      'Gemini Live connection failed ($e). Switched to Local STT (Nemotron).'),
+                  backgroundColor: Colors.teal.shade800,
+                ),
+              );
+              return;
+            }
+          }
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to connect to Gemini Live: $e'),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
+        }
+      }
+    } else {
+      // Gemini key missing: activate Local STT fallback on Android
+      if (Platform.isAndroid && _androidBridge != null) {
+        final ok =
+            await _androidBridge!.startHotwordListening(hotwords: ['*']);
+        if (ok) {
+          if (mounted) {
+            setState(() {
+              _isLocalSttActive = true;
+              _isConnecting = false;
+            });
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                    'Gemini API key not configured. Activated Local STT fallback (routing to Nemotron).'),
+                backgroundColor: Colors.teal,
+              ),
+            );
+          }
+          return;
+        }
+      }
+      _showKeyDialog();
     }
   }
 
@@ -660,6 +1052,7 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
     _cameraStreaming.dispose();
     _workflowScheduler?.dispose();
     _audioRecorder.dispose();
+    _voiceQuickInputCtrl.dispose();
     _audioPlayback?.dispose();
     _liveClient?.dispose();
     _desktopDriver?.dispose();
@@ -673,16 +1066,28 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
     Widget bodyContent;
     switch (_activeTabIndex) {
       case 1:
+        bodyContent = ChatTab(
+          messages: _chatMessages,
+          onSendMessage: _handleUserTextInput,
+          isLiveConnected: _isConnected || _isLocalSttActive,
+          onToggleLive: _toggleConnection,
+          onClearChat: () => setState(() => _chatMessages.clear()),
+          onDispatchTool: (tool, args) async {
+            await _dispatcher?.dispatch(toolName: tool, args: args);
+          },
+        );
+        break;
+      case 2:
         bodyContent =
             MemoriesTab(database: widget.database, keyVault: widget.keyVault);
         break;
-      case 2:
+      case 3:
         bodyContent = _dispatcher != null
             ? PlansWorkflowsTab(
                 database: widget.database, dispatcher: _dispatcher!)
             : const Center(child: CircularProgressIndicator());
         break;
-      case 3:
+      case 4:
         bodyContent = SecurityShieldTab(
           database: widget.database,
           guard: widget.guard,
@@ -716,25 +1121,42 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
                   decoration: BoxDecoration(
                     color: _isConnected
                         ? Colors.green.withValues(alpha: 0.15)
-                        : Colors.grey.withValues(alpha: 0.15),
+                        : _isLocalSttActive
+                            ? Colors.teal.withValues(alpha: 0.15)
+                            : Colors.grey.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
-                        color: _isConnected ? Colors.green : Colors.grey),
+                        color: _isConnected
+                            ? Colors.green
+                            : _isLocalSttActive
+                                ? Colors.teal
+                                : Colors.grey),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       CircleAvatar(
                         radius: 4,
-                        backgroundColor:
-                            _isConnected ? Colors.green : Colors.grey,
+                        backgroundColor: _isConnected
+                            ? Colors.green
+                            : _isLocalSttActive
+                                ? Colors.teal
+                                : Colors.grey,
                       ),
                       const SizedBox(width: 6),
                       Text(
-                        _isConnected ? 'Gemini Live Active' : 'Disconnected',
+                        _isConnected
+                            ? 'Gemini Live Active'
+                            : _isLocalSttActive
+                                ? 'Local STT (Nemotron)'
+                                : 'Disconnected',
                         style: TextStyle(
                           fontSize: 12,
-                          color: _isConnected ? Colors.green : Colors.grey,
+                          color: _isConnected
+                              ? Colors.green
+                              : _isLocalSttActive
+                                  ? Colors.teal
+                                  : Colors.grey,
                         ),
                       ),
                     ],
@@ -770,6 +1192,11 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
                 icon: Icon(Icons.mic_outlined),
                 selectedIcon: Icon(Icons.mic),
                 label: 'Voice',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.chat_bubble_outline),
+                selectedIcon: Icon(Icons.chat_bubble),
+                label: 'Chat',
               ),
               NavigationDestination(
                 icon: Icon(Icons.psychology_outlined),
@@ -888,7 +1315,8 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
                 AnimatedBuilder(
                   animation: _orbController,
                   builder: (context, child) {
-                    final scale = _isConnected
+                    final isActive = _isConnected || _isLocalSttActive;
+                    final scale = isActive
                         ? 1.0 + (_orbController.value * 0.12)
                         : 1.0;
                     return Transform.scale(
@@ -905,15 +1333,26 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
                                     Colors.indigo,
                                     Colors.blueAccent
                                   ]
-                                : [Colors.grey.shade400, Colors.grey.shade700],
+                                : _isLocalSttActive
+                                    ? [
+                                        Colors.tealAccent,
+                                        Colors.teal.shade800,
+                                        Colors.indigo.shade900
+                                      ]
+                                    : [
+                                        Colors.grey.shade400,
+                                        Colors.grey.shade700
+                                      ],
                           ),
                           boxShadow: [
                             BoxShadow(
                               color: _isConnected
                                   ? Colors.cyanAccent.withValues(alpha: 0.4)
-                                  : Colors.black12,
-                              blurRadius: _isConnected ? 30 : 10,
-                              spreadRadius: _isConnected ? 8 : 2,
+                                  : _isLocalSttActive
+                                      ? Colors.tealAccent.withValues(alpha: 0.4)
+                                      : Colors.black12,
+                              blurRadius: isActive ? 30 : 10,
+                              spreadRadius: isActive ? 8 : 2,
                             ),
                           ],
                         ),
@@ -923,7 +1362,7 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
                               ? const CircularProgressIndicator(
                                   color: Colors.white)
                               : Icon(
-                                  _isConnected ? Icons.mic : Icons.mic_none,
+                                  isActive ? Icons.mic : Icons.mic_none,
                                   color: Colors.white,
                                 ),
                           onPressed: _toggleConnection,
@@ -936,18 +1375,25 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
                 Text(
                   _isConnected
                       ? 'Listening & Conversing with Gemini Live'
-                      : 'Tap Orb to Start Assistant',
+                      : _isLocalSttActive
+                          ? 'Listening via Local STT (Nemotron Fallback)'
+                          : 'Tap Orb to Start Assistant',
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w600,
                   ),
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Smart Routing: Nemotron 3 super vl & nano | Encrypted Local DB',
+                  _isLocalSttActive
+                      ? 'Continuous On-Device STT | Routing to NVIDIA Nemotron'
+                      : 'Smart Routing: Nemotron 3 super vl & nano | Encrypted Local DB',
                   style:
                       theme.textTheme.bodySmall?.copyWith(color: Colors.grey),
                 ),
-                if (Platform.isAndroid && _isHotwordActive && !_isConnected)
+                if (Platform.isAndroid &&
+                    _isHotwordActive &&
+                    !_isConnected &&
+                    !_isLocalSttActive)
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
                     child: Container(
@@ -1010,12 +1456,12 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
                           style: TextStyle(fontSize: 12)),
                       onPressed: _manualCaptureScreen,
                     ),
-                    if (_transcripts.isNotEmpty)
+                    if (_toolHistory.isNotEmpty)
                       OutlinedButton.icon(
-                        icon: const Icon(Icons.clear_all, size: 16),
+                        icon: const Icon(Icons.delete_sweep_outlined, size: 16),
                         label: const Text('Clear Log',
                             style: TextStyle(fontSize: 12)),
-                        onPressed: () => setState(() => _transcripts.clear()),
+                        onPressed: () => setState(() => _toolHistory.clear()),
                       ),
                   ],
                 ),
@@ -1026,108 +1472,171 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
 
         const Divider(height: 1),
 
-        // Live Transcript & Action Stream
+        // Device Actions & Automation Feed
         Expanded(
           flex: 5,
-          child: Row(
-            children: [
-              // Transcript column
-              Expanded(
-                flex: 3,
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Live Transcript',
-                          style: TextStyle(
-                              fontWeight: FontWeight.bold, fontSize: 13)),
-                      const SizedBox(height: 8),
-                      Expanded(
-                        child: _transcripts.isEmpty
-                            ? const Center(
-                                child: Text(
-                                    'Spoken responses will appear here.',
-                                    style: TextStyle(color: Colors.grey)),
-                              )
-                            : ListView.builder(
-                                itemCount: _transcripts.length,
-                                itemBuilder: (ctx, idx) => Padding(
-                                  padding:
-                                      const EdgeInsets.symmetric(vertical: 4),
-                                  child: Text(_transcripts[idx]),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.touch_app_outlined,
+                            size: 18, color: Colors.cyanAccent),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Device Actions & Execution Log',
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                    Text(
+                      '${_toolHistory.length} executed',
+                      style: const TextStyle(fontSize: 11, color: Colors.grey),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Expanded(
+                  child: _toolHistory.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.flash_on_outlined,
+                                  size: 44, color: Colors.grey.shade600),
+                              const SizedBox(height: 10),
+                              const Text(
+                                'No device actions recorded yet.',
+                                style: TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.grey),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Commands spoken or sent to Gemini Live automate app navigation, screen inspection, and device controls.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey.shade500),
+                              ),
+                            ],
+                          ),
+                        )
+                      : ListView.builder(
+                          itemCount: _toolHistory.length,
+                          itemBuilder: (ctx, idx) {
+                            final item = _toolHistory[idx];
+                            final isBlocked = item['status'] == 'blocked';
+                            final isExecuting = item['status'] == 'executing';
+                            return Card(
+                              margin: const EdgeInsets.symmetric(vertical: 4),
+                              color: isBlocked
+                                  ? Colors.red.withValues(alpha: 0.12)
+                                  : null,
+                              child: ListTile(
+                                dense: true,
+                                leading: Icon(
+                                  isBlocked
+                                      ? Icons.block
+                                      : isExecuting
+                                          ? Icons.sync
+                                          : Icons.check_circle_outline,
+                                  color: isBlocked
+                                      ? Colors.redAccent
+                                      : isExecuting
+                                          ? Colors.cyanAccent
+                                          : Colors.greenAccent,
+                                  size: 20,
                                 ),
+                                title: Text(
+                                  item['tool'] as String,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.bold),
+                                ),
+                                subtitle: Text(
+                                  'Args: ${item['args']}\n${isBlocked ? "BLOCKED by security guard" : (item['status'] == 'executing' ? "Executing on device..." : "Completed successfully")}',
+                                  style: const TextStyle(fontSize: 11),
+                                ),
+                                trailing: item['tool'] == 'remember' && !isBlocked
+                                    ? TextButton(
+                                        child: const Text('Undo',
+                                            style: TextStyle(
+                                                fontSize: 11,
+                                                color: Colors.amberAccent)),
+                                        onPressed: () {
+                                          _dispatcher?.dispatch(
+                                              toolName: 'undo_last', args: {});
+                                        },
+                                      )
+                                    : null,
                               ),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        // Quick Text Command Input Bar at bottom of Voice View
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: theme.scaffoldBackgroundColor,
+            border: Border(
+              top: BorderSide(color: theme.dividerColor.withValues(alpha: 0.2)),
+            ),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _voiceQuickInputCtrl,
+                    textInputAction: TextInputAction.send,
+                    onSubmitted: (val) {
+                      final txt = val.trim();
+                      if (txt.isNotEmpty) {
+                        _voiceQuickInputCtrl.clear();
+                        _handleUserTextInput(txt);
+                      }
+                    },
+                    decoration: InputDecoration(
+                      hintText: 'Type command or message...',
+                      hintStyle:
+                          TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 9),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(20),
+                        borderSide: BorderSide(
+                            color: theme.dividerColor.withValues(alpha: 0.3)),
                       ),
-                    ],
+                    ),
                   ),
                 ),
-              ),
-
-              const VerticalDivider(width: 1),
-
-              // Tool Execution Feed
-              Expanded(
-                flex: 2,
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Tool Execution & Audit',
-                          style: TextStyle(
-                              fontWeight: FontWeight.bold, fontSize: 13)),
-                      const SizedBox(height: 8),
-                      Expanded(
-                        child: _toolHistory.isEmpty
-                            ? const Center(
-                                child: Text('Tool calls will appear here.',
-                                    style: TextStyle(color: Colors.grey)),
-                              )
-                            : ListView.builder(
-                                itemCount: _toolHistory.length,
-                                itemBuilder: (ctx, idx) {
-                                  final item = _toolHistory[idx];
-                                  final isBlocked = item['status'] == 'blocked';
-                                  return Card(
-                                    color: isBlocked
-                                        ? Colors.red.withValues(alpha: 0.1)
-                                        : null,
-                                    child: ListTile(
-                                      dense: true,
-                                      leading: Icon(
-                                        isBlocked
-                                            ? Icons.block
-                                            : Icons.build_outlined,
-                                        color: isBlocked
-                                            ? Colors.red
-                                            : Colors.indigo,
-                                        size: 18,
-                                      ),
-                                      title: Text(item['tool'] as String,
-                                          style: const TextStyle(
-                                              fontWeight: FontWeight.bold)),
-                                      subtitle: Text(
-                                        isBlocked
-                                            ? 'Blocked by sensitive app guard'
-                                            : 'Executed successfully',
-                                        style: TextStyle(
-                                          color: isBlocked
-                                              ? Colors.red
-                                              : Colors.green,
-                                          fontSize: 11,
-                                        ),
-                                      ),
-                                    ),
-                                  );
-                                },
-                              ),
-                      ),
-                    ],
-                  ),
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: const Icon(Icons.send, size: 18, color: Colors.cyanAccent),
+                  onPressed: () {
+                    final txt = _voiceQuickInputCtrl.text.trim();
+                    if (txt.isNotEmpty) {
+                      _voiceQuickInputCtrl.clear();
+                      _handleUserTextInput(txt);
+                    }
+                  },
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ],

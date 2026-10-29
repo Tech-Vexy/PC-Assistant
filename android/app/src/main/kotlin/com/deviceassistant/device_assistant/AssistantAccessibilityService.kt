@@ -1,7 +1,10 @@
 package com.deviceassistant.device_assistant
 
+import android.accessibilityservice.AccessibilityButtonController
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Path
 import android.graphics.Rect
@@ -54,6 +57,7 @@ class AssistantAccessibilityService : AccessibilityService() {
 
     private val customProtectedPackages = mutableSetOf<String>()
     private val screenshotExecutor = Executors.newSingleThreadExecutor()
+    private var buttonCallback: AccessibilityButtonController.AccessibilityButtonCallback? = null
 
     fun updateCustomProtectedPackages(packages: List<String>) {
         synchronized(customProtectedPackages) {
@@ -65,10 +69,56 @@ class AssistantAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                val info = serviceInfo ?: AccessibilityServiceInfo()
+                info.flags = info.flags or AccessibilityServiceInfo.FLAG_REQUEST_ACCESSIBILITY_BUTTON
+                serviceInfo = info
+
+                val controller = accessibilityButtonController
+                val cb = object : AccessibilityButtonController.AccessibilityButtonCallback() {
+                    override fun onClicked(controller: AccessibilityButtonController) {
+                        handleAccessibilityShortcutClicked()
+                    }
+                }
+                buttonCallback = cb
+                controller.registerAccessibilityButtonCallback(cb)
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun handleAccessibilityShortcutClicked() {
+        // Toggle voice listening via foreground service
+        val intent = Intent(this, AssistantForegroundService::class.java).apply {
+            action = AssistantForegroundService.ACTION_TOGGLE_VOICE
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+
+        // Notify Flutter bridge if active
+        AssistantForegroundService.onTrayActionListener?.invoke("toggle_voice")
+
+        // Bring MainActivity to the front
+        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        if (launchIntent != null) {
+            startActivity(launchIntent)
+        }
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && buttonCallback != null) {
+            try {
+                accessibilityButtonController.unregisterAccessibilityButtonCallback(buttonCallback!!)
+            } catch (_: Exception) {}
+            buttonCallback = null
+        }
         try {
             screenshotExecutor.shutdown()
         } catch (_: Exception) {}

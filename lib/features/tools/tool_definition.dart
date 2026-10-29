@@ -149,7 +149,21 @@ class ToolDefinitions {
               'type': 'array',
               'description':
                   'List of steps to execute, each with tool and args',
-              'items': {'type': 'object'},
+              'items': {
+                'type': 'object',
+                'properties': {
+                  'tool': {
+                    'type': 'string',
+                    'description': 'Name of the tool to execute',
+                  },
+                  'args': {
+                    'type': 'object',
+                    'properties': {},
+                    'description': 'Arguments for the tool',
+                  },
+                },
+                'required': ['tool'],
+              },
             },
           },
           'required': ['name', 'steps'],
@@ -443,6 +457,7 @@ class ToolDefinitions {
             },
             'args': {
               'type': 'object',
+              'properties': {},
               'description': 'Arguments for the tool',
             },
           },
