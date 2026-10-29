@@ -29,8 +29,10 @@ class _MockWebSocketSink implements WebSocketSink {
 
 class MockWebSocketChannel extends StreamChannelMixin<dynamic>
     implements WebSocketChannel {
-  final StreamController<dynamic> serverToClient = StreamController<dynamic>.broadcast();
-  final StreamController<dynamic> clientToServer = StreamController<dynamic>.broadcast();
+  final StreamController<dynamic> serverToClient =
+      StreamController<dynamic>.broadcast();
+  final StreamController<dynamic> clientToServer =
+      StreamController<dynamic>.broadcast();
 
   @override
   Stream<dynamic> get stream => serverToClient.stream;
@@ -70,7 +72,8 @@ void main() {
       expect(event.arguments['key'], equals('test'));
     });
 
-    test('GeminiLiveClient initializes with default config (gemini-3.8-live)', () {
+    test('GeminiLiveClient initializes with default config (gemini-3.8-live)',
+        () {
       final client = GeminiLiveClient(apiKey: 'dummy_key');
       expect(client.isConnected, isFalse);
       expect(client.model, equals('models/gemini-3.8-live'));
@@ -79,19 +82,23 @@ void main() {
     });
 
     test('GeminiLiveClient normalizes model without models/ prefix', () {
-      final client = GeminiLiveClient(apiKey: 'dummy_key', model: 'gemini-3.8-live');
+      final client =
+          GeminiLiveClient(apiKey: 'dummy_key', model: 'gemini-3.8-live');
       expect(client.model, equals('models/gemini-3.8-live'));
       client.dispose();
     });
 
-    test('Full handshake, setupComplete, audio streaming, tool calling, and barge-in', () async {
+    test(
+        'Full handshake, setupComplete, audio streaming, tool calling, and barge-in',
+        () async {
       final mockChannel = MockWebSocketChannel();
       final client = GeminiLiveClient(
         apiKey: 'test_key',
         channelFactory: (_) => mockChannel,
       );
 
-      final connectionFuture = client.connect(timeout: const Duration(seconds: 2));
+      final connectionFuture =
+          client.connect(timeout: const Duration(seconds: 2));
 
       // Simulate server receiving setup and replying setupComplete
       mockChannel.serverToClient.add(jsonEncode({'setupComplete': {}}));
@@ -132,7 +139,8 @@ void main() {
       }));
 
       await pumpEventQueue();
-      expect(transcripts, contains('Hello! How can I assist you on your device?'));
+      expect(
+          transcripts, contains('Hello! How can I assist you on your device?'));
       expect(audioChunks.length, equals(1));
       expect(audioChunks.first, equals(dummyAudioBytes));
 

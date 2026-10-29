@@ -111,9 +111,11 @@ class _ChatTabState extends State<ChatTab> {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           decoration: BoxDecoration(
-            color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+            color: theme.colorScheme.surfaceContainerHighest
+                .withValues(alpha: 0.3),
             border: Border(
-              bottom: BorderSide(color: theme.dividerColor.withValues(alpha: 0.2)),
+              bottom:
+                  BorderSide(color: theme.dividerColor.withValues(alpha: 0.2)),
             ),
           ),
           child: Row(
@@ -128,7 +130,8 @@ class _ChatTabState extends State<ChatTab> {
                 widget.isLiveConnected
                     ? 'Connected to Gemini 3.8 Live'
                     : 'Device Assistant Chat (Idle)',
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                style:
+                    const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
               ),
               const Spacer(),
               if (widget.messages.isNotEmpty && widget.onClearChat != null)
@@ -161,8 +164,8 @@ class _ChatTabState extends State<ChatTab> {
               ? _buildEmptyState(theme)
               : ListView.builder(
                   controller: _scrollController,
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 12),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                   itemCount: widget.messages.length,
                   itemBuilder: (ctx, idx) =>
                       _buildMessageBubble(widget.messages[idx], theme),
@@ -233,8 +236,7 @@ class _ChatTabState extends State<ChatTab> {
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(24),
-                        borderSide:
-                            const BorderSide(color: Colors.cyanAccent),
+                        borderSide: const BorderSide(color: Colors.cyanAccent),
                       ),
                     ),
                   ),
@@ -348,7 +350,9 @@ class _ChatTabState extends State<ChatTab> {
                 ],
               ),
             ),
-            if (tool == 'remember' && !isBlocked && widget.onDispatchTool != null)
+            if (tool == 'remember' &&
+                !isBlocked &&
+                widget.onDispatchTool != null)
               TextButton(
                 onPressed: () => widget.onDispatchTool!('undo_last', {}),
                 child: const Text('Undo',
@@ -371,7 +375,8 @@ class _ChatTabState extends State<ChatTab> {
         decoration: BoxDecoration(
           color: isUser
               ? Colors.indigo.shade700
-              : theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.7),
+              : theme.colorScheme.surfaceContainerHighest
+                  .withValues(alpha: 0.7),
           borderRadius: BorderRadius.only(
             topLeft: const Radius.circular(16),
             topRight: const Radius.circular(16),

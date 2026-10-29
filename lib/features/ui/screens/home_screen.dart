@@ -181,7 +181,9 @@ class _HomeScreenState extends State<HomeScreen>
         } else if (action == 'exit') {
           _liveClient?.disconnect();
           _audioRecorder.stopStreaming();
-          if (_isLocalSttActive && Platform.isAndroid && _androidBridge != null) {
+          if (_isLocalSttActive &&
+              Platform.isAndroid &&
+              _androidBridge != null) {
             _androidBridge!.stopHotwordListening();
             if (mounted) setState(() => _isLocalSttActive = false);
           }
@@ -446,8 +448,8 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
     // Check if command is a direct local device shortcut
     if (lower.startsWith('open ')) {
       final app = cleanCommand.substring(5).trim();
-      final res = await _dispatcher?.dispatch(
-          toolName: 'open_application', args: {'app_name': app});
+      final res = await _dispatcher
+          ?.dispatch(toolName: 'open_application', args: {'app_name': app});
       _recordToolResult('open_application', {'app_name': app}, res ?? {});
       return;
     } else if (lower == 'take a screenshot' ||
@@ -786,8 +788,7 @@ If the user query is a general question or conversational request, reply directl
     } else {
       // Gemini key missing: activate Local STT fallback on Android
       if (Platform.isAndroid && _androidBridge != null) {
-        final ok =
-            await _androidBridge!.startHotwordListening(hotwords: ['*']);
+        final ok = await _androidBridge!.startHotwordListening(hotwords: ['*']);
         if (ok) {
           if (mounted) {
             setState(() {
@@ -1316,9 +1317,8 @@ If the user query is a general question or conversational request, reply directl
                   animation: _orbController,
                   builder: (context, child) {
                     final isActive = _isConnected || _isLocalSttActive;
-                    final scale = isActive
-                        ? 1.0 + (_orbController.value * 0.12)
-                        : 1.0;
+                    final scale =
+                        isActive ? 1.0 + (_orbController.value * 0.12) : 1.0;
                     return Transform.scale(
                       scale: scale,
                       child: Container(
@@ -1523,8 +1523,7 @@ If the user query is a general question or conversational request, reply directl
                                 'Commands spoken or sent to Gemini Live automate app navigation, screen inspection, and device controls.',
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
-                                    fontSize: 12,
-                                    color: Colors.grey.shade500),
+                                    fontSize: 12, color: Colors.grey.shade500),
                               ),
                             ],
                           ),
@@ -1564,18 +1563,20 @@ If the user query is a general question or conversational request, reply directl
                                   'Args: ${item['args']}\n${isBlocked ? "BLOCKED by security guard" : (item['status'] == 'executing' ? "Executing on device..." : "Completed successfully")}',
                                   style: const TextStyle(fontSize: 11),
                                 ),
-                                trailing: item['tool'] == 'remember' && !isBlocked
-                                    ? TextButton(
-                                        child: const Text('Undo',
-                                            style: TextStyle(
-                                                fontSize: 11,
-                                                color: Colors.amberAccent)),
-                                        onPressed: () {
-                                          _dispatcher?.dispatch(
-                                              toolName: 'undo_last', args: {});
-                                        },
-                                      )
-                                    : null,
+                                trailing:
+                                    item['tool'] == 'remember' && !isBlocked
+                                        ? TextButton(
+                                            child: const Text('Undo',
+                                                style: TextStyle(
+                                                    fontSize: 11,
+                                                    color: Colors.amberAccent)),
+                                            onPressed: () {
+                                              _dispatcher?.dispatch(
+                                                  toolName: 'undo_last',
+                                                  args: {});
+                                            },
+                                          )
+                                        : null,
                               ),
                             );
                           },
@@ -1626,7 +1627,8 @@ If the user query is a general question or conversational request, reply directl
                 ),
                 const SizedBox(width: 8),
                 IconButton(
-                  icon: const Icon(Icons.send, size: 18, color: Colors.cyanAccent),
+                  icon: const Icon(Icons.send,
+                      size: 18, color: Colors.cyanAccent),
                   onPressed: () {
                     final txt = _voiceQuickInputCtrl.text.trim();
                     if (txt.isNotEmpty) {
