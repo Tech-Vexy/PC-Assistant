@@ -27,8 +27,24 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
 
+        val targetPlatforms = (project.findProperty("target-platform") as? String)
+            ?.split(",")
+            ?.map { it.trim() }
+
         ndk {
-            abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a"))
+            if (targetPlatforms != null && targetPlatforms.isNotEmpty()) {
+                val filters = mutableListOf<String>()
+                if (targetPlatforms.contains("android-arm")) filters.add("armeabi-v7a")
+                if (targetPlatforms.contains("android-arm64")) filters.add("arm64-v8a")
+                if (targetPlatforms.contains("android-x64")) filters.add("x86_64")
+                if (filters.isNotEmpty()) {
+                    abiFilters.addAll(filters)
+                } else {
+                    abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a"))
+                }
+            } else {
+                abiFilters.addAll(listOf("armeabi-v7a", "arm64-v8a"))
+            }
         }
     }
 
