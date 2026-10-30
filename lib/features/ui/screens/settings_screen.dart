@@ -58,6 +58,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   bool _isSaving = false;
   bool _hotwordEnabled = true;
+  String _activeProvider = 'nebius';
 
   @override
   void initState() {
@@ -73,6 +74,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _gcpLocationCtrl.text = await widget.keyVault.getGcpLocation();
     _adcJsonCtrl.text = (await widget.keyVault.getAdcCredentialsJson()) ?? '';
     _authMode = await widget.keyVault.getAuthMode();
+    _activeProvider = await widget.keyVault.getActiveProvider();
 
     final adcService = GcpAdcAuthService(keyVault: widget.keyVault);
     _hasDetectedAdc = await adcService.hasAdcCredentials();
@@ -110,6 +112,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await widget.keyVault.setGcpProjectId(_gcpProjectIdCtrl.text.trim());
       await widget.keyVault.setGcpLocation(_gcpLocationCtrl.text.trim());
       await widget.keyVault.setAuthMode(_authMode);
+      await widget.keyVault.setActiveProvider(_activeProvider);
       if (_adcJsonCtrl.text.trim().isNotEmpty) {
         await widget.keyVault.setAdcCredentialsJson(_adcJsonCtrl.text.trim());
       }
@@ -458,6 +461,73 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          // --- Active AI Model Engine Selector Section ---
+          _buildSectionHeader(
+            Icons.tune,
+            'Primary AI Model Provider',
+            'Select primary reasoning engine (Independent Nebius Token Factory or Google ADC)',
+          ),
+          const SizedBox(height: 12),
+          Card(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: Colors.tealAccent.withValues(alpha: 0.3)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      ChoiceChip(
+                        avatar: const Icon(Icons.psychology, size: 16),
+                        label: const Text(
+                            'Nebius Token Factory (NVIDIA Nemotron)',
+                            style: TextStyle(
+                                fontSize: 12, fontWeight: FontWeight.bold)),
+                        selected: _activeProvider == 'nebius',
+                        onSelected: (val) {
+                          if (val) setState(() => _activeProvider = 'nebius');
+                        },
+                      ),
+                      ChoiceChip(
+                        avatar: const Icon(Icons.auto_awesome, size: 16),
+                        label: const Text('Google Cloud ADC (Gemini 3.8 Flash)',
+                            style: TextStyle(fontSize: 12)),
+                        selected: _activeProvider == 'google',
+                        onSelected: (val) {
+                          if (val) setState(() => _activeProvider = 'google');
+                        },
+                      ),
+                      ChoiceChip(
+                        avatar: const Icon(Icons.alt_route, size: 16),
+                        label: const Text('Auto / Dynamic Routing',
+                            style: TextStyle(fontSize: 12)),
+                        selected: _activeProvider == 'auto',
+                        onSelected: (val) {
+                          if (val) setState(() => _activeProvider = 'auto');
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _activeProvider == 'nebius'
+                        ? 'Nebius Token Factory operates 100% independently using NVIDIA Nemotron models (Nemotron-3.5-Super-VL & Nano 30B). No Google credentials or dependencies required.'
+                        : (_activeProvider == 'google'
+                            ? 'Google Cloud Serverless inference powered by Gemini 3.8 Flash using Application Default Credentials (ADC).'
+                            : 'Auto-routes tasks between configured providers based on availability and task complexity.'),
+                    style: TextStyle(fontSize: 11, color: Colors.grey.shade400),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+
           // --- Nebius Token Factory Section ---
           _buildSectionHeader(
             Icons.psychology,

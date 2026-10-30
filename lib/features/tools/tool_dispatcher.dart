@@ -919,7 +919,7 @@ class ToolDispatcher {
             'format': 'jpeg',
             'bytes_length': bytes.length,
             'message':
-                'Visual screen frame captured and streamed to Gemini Live model under security shield approval',
+                'Visual screen frame captured and streamed to active model under security shield approval',
           };
         }
         return {

@@ -168,10 +168,22 @@ class GcpAdcAuthService {
       }
     }
 
-    // 2. Check GOOGLE_APPLICATION_CREDENTIALS environment variable
+    // 2. Check GCP_ADC_JSON or GCP_ADC_CREDENTIALS environment variable
+    try {
+      final directJson = Platform.environment['GCP_ADC_JSON'] ??
+          Platform.environment['GCP_ADC_CREDENTIALS'];
+      if (directJson != null && directJson.trim().startsWith('{')) {
+        return jsonDecode(directJson) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+
+    // 3. Check GOOGLE_APPLICATION_CREDENTIALS environment variable
     try {
       final envPath = Platform.environment['GOOGLE_APPLICATION_CREDENTIALS'];
       if (envPath != null && envPath.isNotEmpty) {
+        if (envPath.trim().startsWith('{')) {
+          return jsonDecode(envPath) as Map<String, dynamic>;
+        }
         final file = File(envPath);
         if (await file.exists()) {
           final content = await file.readAsString();

@@ -1,8 +1,11 @@
 import 'dart:convert';
+import 'dart:typed_data';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:device_assistant/core/network/nebius_client.dart';
+import 'package:device_assistant/core/security/key_vault.dart';
 
 void main() {
   group('NebiusClient Smart Routing Tests', () {
@@ -334,6 +337,80 @@ void main() {
         complexity: TaskComplexity.complex,
       );
       expect(res, equals('ok'));
+    });
+
+    test(
+        'inspectVisualFrame performs multimodal vision reasoning independently with Nemotron 3.5 Super VL',
+        () async {
+      final mockClient = MockClient((request) async {
+        final body = jsonDecode(request.body) as Map<String, dynamic>;
+        expect(body['model'], equals('nvidia/Nemotron-3.5-Super-VL'));
+
+        final messages = body['messages'] as List<dynamic>;
+        expect(messages.first['role'], equals('user'));
+        final content = messages.first['content'] as List<dynamic>;
+        expect(content[0]['type'], equals('text'));
+        expect(content[0]['text'], equals('Describe this screenshot'));
+        expect(content[1]['type'], equals('image_url'));
+        expect(content[1]['image_url']['url'],
+            startsWith('data:image/jpeg;base64,'));
+
+        return http.Response(
+          '{"choices":[{"message":{"content":"A login screen with user/password fields."}}]}',
+          200,
+        );
+      });
+
+      final client = NebiusClient(apiKey: 'test_key', httpClient: mockClient);
+      final dummyBytes =
+          Uint8List.fromList([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10]);
+      final analysis = await client.inspectVisualFrame(
+        imageBytes: dummyBytes,
+        prompt: 'Describe this screenshot',
+      );
+
+      expect(analysis, equals('A login screen with user/password fields.'));
+    });
+  });
+
+  group('KeyVault Model Provider Decoupling Tests', () {
+    setUp(() {
+      FlutterSecureStorage.setMockInitialValues({});
+    });
+
+    test('Defaults active provider to nebius and allows switching', () async {
+      FlutterSecureStorage.setMockInitialValues({});
+      final vault = KeyVault();
+
+      expect(await vault.getActiveProvider(), equals('nebius'));
+
+      await vault.setActiveProvider('google');
+      expect(await vault.getActiveProvider(), equals('google'));
+
+      await vault.setActiveProvider('auto');
+      expect(await vault.getActiveProvider(), equals('auto'));
+
+      await vault.setActiveProvider('nebius');
+      expect(await vault.getActiveProvider(), equals('nebius'));
+    });
+
+    test(
+        'hasRequiredKeys is independent of Google when active provider is nebius',
+        () async {
+      FlutterSecureStorage.setMockInitialValues({});
+      final vault = KeyVault();
+      await vault.setActiveProvider('nebius');
+
+      // No keys set
+      expect(await vault.hasRequiredKeys(), isFalse);
+
+      // Only Nebius key set (zero Google keys or ADC)
+      await vault.setNebiusApiKey('v1.mock_nebius_key');
+      expect(await vault.hasRequiredKeys(), isTrue);
+
+      // Even if Google API key is completely null and ADC is not set, Nebius is valid
+      expect(await vault.getGeminiApiKey(), isNull);
+      expect(await vault.hasRequiredKeys(), isTrue);
     });
   });
 }

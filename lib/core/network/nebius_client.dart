@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
 /// Task complexity tier for dynamic model routing
@@ -413,5 +414,33 @@ Conversation:
       }
     } catch (_) {}
     return null;
+  }
+
+  /// Multimodal vision reasoning routed independently to Nemotron 3.5 Super VL.
+  /// Analyzes an image frame (JPEG bytes) without requiring Google Gemini models.
+  Future<String> inspectVisualFrame({
+    required Uint8List imageBytes,
+    required String prompt,
+  }) async {
+    final base64Image = base64Encode(imageBytes);
+    final messages = [
+      {
+        'role': 'user',
+        'content': [
+          {'type': 'text', 'text': prompt},
+          {
+            'type': 'image_url',
+            'image_url': {
+              'url': 'data:image/jpeg;base64,$base64Image',
+            },
+          },
+        ],
+      },
+    ];
+
+    return await chatCompletion(
+      messages: messages,
+      complexity: TaskComplexity.complex,
+    );
   }
 }

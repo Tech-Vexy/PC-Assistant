@@ -14,6 +14,7 @@ class KeyVault {
   static const _gcpLocationKey = 'KEY_GCP_LOCATION';
   static const _adcJsonKey = 'KEY_ADC_CREDENTIALS_JSON';
   static const _authModeKey = 'KEY_AUTH_MODE';
+  static const _activeProviderKey = 'KEY_ACTIVE_PROVIDER';
   static const _nebiusKey = 'KEY_NEBIUS_API';
   static const _nebiusEndpointKey = 'KEY_NEBIUS_ENDPOINT';
   static const _nebiusSuperEndpointKey = 'KEY_NEBIUS_SUPER_ENDPOINT';
@@ -136,7 +137,48 @@ class KeyVault {
 
   /// Retrieves imported ADC or Service Account JSON
   Future<String?> getAdcCredentialsJson() async {
-    return await _storage.read(key: _adcJsonKey);
+    final stored = await _storage.read(key: _adcJsonKey);
+    if (stored != null && stored.isNotEmpty) {
+      return stored;
+    }
+    try {
+      final env = Platform.environment['GCP_ADC_JSON'] ??
+          Platform.environment['GCP_ADC_CREDENTIALS'] ??
+          Platform.environment['GOOGLE_APPLICATION_CREDENTIALS_JSON'];
+      if (env != null && env.isNotEmpty) {
+        return env;
+      }
+    } catch (_) {}
+    const defineVal = String.fromEnvironment('GCP_ADC_JSON');
+    if (defineVal.isNotEmpty) {
+      return defineVal;
+    }
+    return null;
+  }
+
+  /// Saves the active AI model provider ('nebius', 'google', or 'auto')
+  Future<void> setActiveProvider(String provider) async {
+    await _storage.write(key: _activeProviderKey, value: provider.trim());
+  }
+
+  /// Retrieves the active AI model provider (defaults to 'nebius' if configured, otherwise 'auto')
+  Future<String> getActiveProvider() async {
+    final val = await _storage.read(key: _activeProviderKey);
+    if (val != null && val.isNotEmpty) return val;
+    try {
+      final env = Platform.environment['ACTIVE_LLM_PROVIDER'] ??
+          Platform.environment['PREFERRED_PROVIDER'];
+      if (env != null && env.isNotEmpty) return env;
+    } catch (_) {}
+    const defineVal = String.fromEnvironment('ACTIVE_LLM_PROVIDER');
+    if (defineVal.isNotEmpty) return defineVal;
+
+    // Default to Nebius if Nebius key is present
+    final nebiusKey = await getNebiusApiKey();
+    if (nebiusKey != null && nebiusKey.isNotEmpty) {
+      return 'nebius';
+    }
+    return 'nebius';
   }
 
   /// Saves authentication mode ('adc' or 'api_key')
@@ -276,10 +318,24 @@ class KeyVault {
     return pass;
   }
 
-  /// Checks if all necessary keys have been configured
+  /// Checks if all necessary keys have been configured for the active model provider
   Future<bool> hasRequiredKeys() async {
+    final provider = await getActiveProvider();
+    final nebius = await getNebiusApiKey();
     final gemini = await getGeminiApiKey();
-    return gemini != null && gemini.isNotEmpty;
+    final adc = await getAdcCredentialsJson();
+    final isAdc = await isUsingAdc();
+
+    if (provider == 'nebius') {
+      return nebius != null && nebius.isNotEmpty;
+    } else if (provider == 'google') {
+      return (gemini != null && gemini.isNotEmpty) || (isAdc && adc != null);
+    } else {
+      // 'auto' mode: valid if either provider has keys configured
+      return (nebius != null && nebius.isNotEmpty) ||
+          (gemini != null && gemini.isNotEmpty) ||
+          (isAdc && adc != null);
+    }
   }
 
   /// Saves whether continuous background hotword detection is enabled

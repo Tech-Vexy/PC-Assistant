@@ -12,6 +12,8 @@ concurrency:
 env:
   GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
   NEBIUS_API_KEY: ${{ secrets.NEBIUS_API_KEY }}
+  GCP_ADC_JSON: ${{ secrets.GCP_ADC_JSON }}
+  GCP_ADC_CREDENTIALS: ${{ secrets.GCP_ADC_CREDENTIALS }}
 jobs:
   analyze-and-test:
     name: Code Analysis & Unit Tests

@@ -548,6 +548,7 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
     final clean = command.trim();
     if (clean.isEmpty) return;
 
+    final activeProvider = await widget.keyVault.getActiveProvider();
     final adcService = GcpAdcAuthService(keyVault: widget.keyVault);
     final hasAdc = await adcService.hasAdcCredentials();
     final authMode = await widget.keyVault.getAuthMode();
@@ -556,37 +557,82 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
 
     final canUseGemini = (authMode == 'adc' && hasAdc) ||
         (geminiKey != null && geminiKey.isNotEmpty);
+    final canUseNebius = nebiusKey != null && nebiusKey.isNotEmpty;
 
-    if (!canUseGemini && (nebiusKey == null || nebiusKey.isEmpty)) {
-      if (mounted) {
-        setState(() {
-          _chatMessages.add(
-            ChatMessage(
-              id: 'err_${DateTime.now().millisecondsSinceEpoch}',
-              isUser: false,
-              text:
-                  'Please configure Google Cloud Application Default Credentials (ADC) or Nebius API key in Settings.',
-              timestamp: DateTime.now(),
-              isError: true,
-            ),
-          );
-        });
+    // Determine target provider completely independently
+    bool useNebius;
+    if (activeProvider == 'nebius') {
+      if (!canUseNebius) {
+        if (mounted) {
+          setState(() {
+            _chatMessages.add(
+              ChatMessage(
+                id: 'err_${DateTime.now().millisecondsSinceEpoch}',
+                isUser: false,
+                text:
+                    'Please configure your Nebius Token Factory API key in Settings.',
+                timestamp: DateTime.now(),
+                isError: true,
+              ),
+            );
+          });
+        }
+        _showKeyDialog();
+        return;
       }
-      _showKeyDialog();
-      return;
+      useNebius = true;
+    } else if (activeProvider == 'google') {
+      if (!canUseGemini) {
+        if (mounted) {
+          setState(() {
+            _chatMessages.add(
+              ChatMessage(
+                id: 'err_${DateTime.now().millisecondsSinceEpoch}',
+                isUser: false,
+                text:
+                    'Please configure Google Cloud Application Default Credentials (ADC) or Gemini API key in Settings.',
+                timestamp: DateTime.now(),
+                isError: true,
+              ),
+            );
+          });
+        }
+        _showKeyDialog();
+        return;
+      }
+      useNebius = false;
+    } else {
+      // 'auto' mode: Prefer Nebius when configured, completely decoupled from Google ADC
+      if (canUseNebius) {
+        useNebius = true;
+      } else if (canUseGemini) {
+        useNebius = false;
+      } else {
+        if (mounted) {
+          setState(() {
+            _chatMessages.add(
+              ChatMessage(
+                id: 'err_${DateTime.now().millisecondsSinceEpoch}',
+                isUser: false,
+                text:
+                    'Please configure Nebius Token Factory API key or Google Cloud ADC in Settings.',
+                timestamp: DateTime.now(),
+                isError: true,
+              ),
+            );
+          });
+        }
+        _showKeyDialog();
+        return;
+      }
     }
 
-    final geminiModel = await widget.keyVault.getGeminiModel();
-    final geminiEndpoint = await widget.keyVault.getGeminiEndpoint();
-    final projectId = await widget.keyVault.getGcpProjectId();
-    final location = await widget.keyVault.getGcpLocation();
-
     final pendingMsgId = 'assistant_${DateTime.now().millisecondsSinceEpoch}';
-    final modelLabel = canUseGemini
-        ? (authMode == 'adc'
+    final modelLabel = useNebius
+        ? 'NVIDIA Nemotron (Nebius Token Factory)'
+        : (authMode == 'adc'
             ? 'Gemini 3.8 Flash (ADC Serverless)'
-            : 'Gemini 3.8 Flash')
-        : 'Nemotron';
+            : 'Gemini 3.8 Flash');
 
     if (mounted) {
       setState(() {
@@ -635,24 +681,7 @@ If the user query is a general knowledge question, conversational request, or ex
 ''';
 
       String response;
-      if (canUseGemini) {
-        _liveClient ??= GeminiLiveClient(
-          apiKey: authMode == 'api_key' ? geminiKey : null,
-          accessTokenProvider:
-              authMode == 'adc' ? () => adcService.getAccessToken() : null,
-          projectId: projectId,
-          location: location,
-          host: geminiEndpoint,
-          model: geminiModel,
-          toolDeclarations:
-              ToolDefinitions.getAllDeclarations(isAndroid: Platform.isAndroid),
-        );
-
-        response = await _liveClient!.generateContent(
-          prompt: clean,
-          systemInstruction: systemPrompt,
-        );
-      } else {
+      if (useNebius) {
         final baseEndpoint = await widget.keyVault.getNebiusBaseEndpoint();
         final superVlEndpoint =
             await widget.keyVault.getNebiusSuperVlEndpoint();
@@ -676,6 +705,28 @@ If the user query is a general knowledge question, conversational request, or ex
             {'role': 'user', 'content': clean},
           ],
           complexity: complexity,
+        );
+      } else {
+        final geminiModel = await widget.keyVault.getGeminiModel();
+        final geminiEndpoint = await widget.keyVault.getGeminiEndpoint();
+        final projectId = await widget.keyVault.getGcpProjectId();
+        final location = await widget.keyVault.getGcpLocation();
+
+        _liveClient ??= GeminiLiveClient(
+          apiKey: authMode == 'api_key' ? geminiKey : null,
+          accessTokenProvider:
+              authMode == 'adc' ? () => adcService.getAccessToken() : null,
+          projectId: projectId,
+          location: location,
+          host: geminiEndpoint,
+          model: geminiModel,
+          toolDeclarations:
+              ToolDefinitions.getAllDeclarations(isAndroid: Platform.isAndroid),
+        );
+
+        response = await _liveClient!.generateContent(
+          prompt: clean,
+          systemInstruction: systemPrompt,
         );
       }
 
@@ -1006,22 +1057,24 @@ If the user query is a general knowledge question, conversational request, or ex
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
-                controller: geminiCtrl,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: 'Google Gemini API Key',
-                  hintText: 'Used for Gemini Live Voice & Computer Use',
-                  prefixIcon: Icon(Icons.mic),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
                 controller: nebiusCtrl,
                 obscureText: true,
                 decoration: const InputDecoration(
                   labelText: 'Nebius Token Factory Key',
-                  hintText: 'Used for Nemotron-3-super-vl Task Planning',
+                  hintText:
+                      'Used for Nemotron-3.5-Super-VL & Nano 30B Reasoning',
                   prefixIcon: Icon(Icons.psychology),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: geminiCtrl,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'Google Gemini API Key (Optional)',
+                  hintText:
+                      'Used for Gemini Live Voice & Google Cloud inference',
+                  prefixIcon: Icon(Icons.mic),
                 ),
               ),
             ],
