@@ -89,25 +89,23 @@ class AssistantAccessibilityService : AccessibilityService() {
     }
 
     private fun handleAccessibilityShortcutClicked() {
-        // Toggle voice listening via foreground service
-        val intent = Intent(this, AssistantForegroundService::class.java).apply {
-            action = AssistantForegroundService.ACTION_TOGGLE_VOICE
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
+        // Deliver ACTION_TOGGLE_VOICE to the foreground service.
+        // The service calls toggleListening() directly — no activity is started,
+        // so the app is never brought to the foreground.
+        val svc = AssistantForegroundService.instance
+        if (svc != null) {
+            // Service is alive — call toggleListening() directly (no IPC needed).
+            svc.toggleListening()
         } else {
-            startService(intent)
-        }
-
-        // Notify Flutter bridge if active
-        AssistantForegroundService.onTrayActionListener?.invoke("toggle_voice")
-
-        // Bring MainActivity to the front
-        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-        }
-        if (launchIntent != null) {
-            startActivity(launchIntent)
+            // Service not running yet — start it with the toggle action.
+            val intent = Intent(this, AssistantForegroundService::class.java).apply {
+                action = AssistantForegroundService.ACTION_TOGGLE_VOICE
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
         }
     }
 

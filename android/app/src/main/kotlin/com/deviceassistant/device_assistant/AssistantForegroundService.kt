@@ -16,6 +16,7 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.service.quicksettings.TileService
 import androidx.core.app.NotificationCompat
+import io.flutter.plugin.common.MethodChannel
 import java.util.concurrent.Executors
 
 /**
@@ -44,11 +45,51 @@ class AssistantForegroundService : Service() {
             private set
 
         var onTrayActionListener: ((action: String) -> Unit)? = null
+
+        /**
+         * Registered by MainActivity so the foreground service can deliver hotword
+         * results back to Flutter even when the activity is in the background.
+         */
+        var methodChannel: MethodChannel? = null
     }
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var audioTrack: AudioTrack? = null
     private val audioExecutor = Executors.newSingleThreadExecutor()
+
+    // On-device hotword/STT detector owned by the service so it survives
+    // when MainActivity is not in the foreground.
+    private var hotwordDetector: HotwordDetector? = null
+
+    /** Returns the service-owned HotwordDetector so MainActivity can share it. */
+    fun getHotwordDetector(): HotwordDetector? = hotwordDetector
+
+    /**
+     * Toggles microphone listening on/off directly from the foreground service.
+     * Called by the accessibility button and notification action — never opens the app.
+     */
+    fun toggleListening() {
+        val detector = hotwordDetector ?: return
+        if (detector.isListening()) {
+            detector.stopListening()
+            isVoiceActive = false
+            updateNotification()
+            // Notify Flutter bridge if active (MainActivity in foreground)
+            onTrayActionListener?.invoke("toggle_voice")
+        } else {
+            if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
+                    != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                // Can't request runtime permissions from a service — rely on
+                // MainActivity having pre-requested permission already.
+                return
+            }
+            detector.updateHotwords(listOf("*"))
+            detector.startListening()
+            isVoiceActive = true
+            updateNotification()
+            onTrayActionListener?.invoke("toggle_voice")
+        }
+    }
 
     private fun initAudioTrack() {
         val sampleRate = 24000
@@ -113,6 +154,37 @@ class AssistantForegroundService : Service() {
         ).apply {
             setReferenceCounted(false)
         }
+
+        // Create the on-device hotword/STT detector for background operation.
+        // Callbacks deliver results to Flutter via the static methodChannel reference
+        // set by MainActivity, or via onTrayActionListener when the activity is alive.
+        hotwordDetector = HotwordDetector(
+            context = this,
+            onHotwordTriggered = { hotword, command ->
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    methodChannel?.invokeMethod(
+                        "onHotwordDetected",
+                        mapOf("hotword" to hotword, "command" to command)
+                    )
+                }
+            },
+            onRmsChangedListener = { rms ->
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    methodChannel?.invokeMethod(
+                        "onAudioRmsChanged",
+                        mapOf("rms" to rms.toDouble())
+                    )
+                }
+            },
+            onPartialTranscriptListener = { partial ->
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    methodChannel?.invokeMethod(
+                        "onPartialTranscript",
+                        mapOf("text" to partial)
+                    )
+                }
+            }
+        )
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -122,7 +194,8 @@ class AssistantForegroundService : Service() {
                 stopForegroundService()
             }
             ACTION_TOGGLE_VOICE -> {
-                onTrayActionListener?.invoke("toggle_voice")
+                // Toggle the mic directly in the service — no activity needed.
+                toggleListening()
             }
             ACTION_UPDATE_STATUS -> {
                 isVoiceActive = intent.getBooleanExtra(EXTRA_IS_ACTIVE, isVoiceActive)
@@ -261,6 +334,10 @@ class AssistantForegroundService : Service() {
         } catch (_: Exception) {}
         try {
             audioExecutor.shutdown()
+        } catch (_: Exception) {}
+        try {
+            hotwordDetector?.stopListening()
+            hotwordDetector = null
         } catch (_: Exception) {}
         if (instance == this) {
             instance = null

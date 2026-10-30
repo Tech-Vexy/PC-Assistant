@@ -465,7 +465,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _buildSectionHeader(
             Icons.tune,
             'Primary AI Model Provider',
-            'Select primary reasoning engine (Independent Nebius Token Factory or Google ADC)',
+            'Role separation: Google for Computer Use only, Nebius Token Factory for Everything Else',
           ),
           const SizedBox(height: 12),
           Card(
@@ -483,11 +483,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     runSpacing: 8,
                     children: [
                       ChoiceChip(
-                        avatar: const Icon(Icons.psychology, size: 16),
+                        avatar: const Icon(Icons.bolt, size: 16),
                         label: const Text(
-                            'Nebius Token Factory (NVIDIA Nemotron)',
+                            'Role-Based: Google for Computer Use, Nebius for Everything Else',
                             style: TextStyle(
                                 fontSize: 12, fontWeight: FontWeight.bold)),
+                        selected: _activeProvider == 'role_based',
+                        onSelected: (val) {
+                          if (val) {
+                            setState(() => _activeProvider = 'role_based');
+                          }
+                        },
+                      ),
+                      ChoiceChip(
+                        avatar: const Icon(Icons.psychology, size: 16),
+                        label: const Text(
+                            'Nebius Token Factory Only (NVIDIA Nemotron)',
+                            style: TextStyle(fontSize: 12)),
                         selected: _activeProvider == 'nebius',
                         onSelected: (val) {
                           if (val) setState(() => _activeProvider = 'nebius');
@@ -495,7 +507,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                       ChoiceChip(
                         avatar: const Icon(Icons.auto_awesome, size: 16),
-                        label: const Text('Google Cloud ADC (Gemini 3.8 Flash)',
+                        label: const Text(
+                            'Google Cloud ADC Only (Gemini 3.8 Flash)',
                             style: TextStyle(fontSize: 12)),
                         selected: _activeProvider == 'google',
                         onSelected: (val) {
@@ -515,11 +528,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    _activeProvider == 'nebius'
-                        ? 'Nebius Token Factory operates 100% independently using NVIDIA Nemotron models (Nemotron-3.5-Super-VL & Nano 30B). No Google credentials or dependencies required.'
-                        : (_activeProvider == 'google'
-                            ? 'Google Cloud Serverless inference powered by Gemini 3.8 Flash using Application Default Credentials (ADC).'
-                            : 'Auto-routes tasks between configured providers based on availability and task complexity.'),
+                    _activeProvider == 'role_based'
+                        ? 'Google Cloud ADC (Gemini 3.8 Flash) is used exclusively for Computer Use (screen clicks, GUI automation, and OS actions). Everything else (conversations, "what is on my screen" visual inspection via Nemotron-3.5-Super-VL, task planning, sub-agents, and memories) is powered by Nebius Token Factory.'
+                        : (_activeProvider == 'nebius'
+                            ? 'Nebius Token Factory operates 100% independently for all tasks using NVIDIA Nemotron models (Nemotron-3.5-Super-VL for vision/planning & Nano 30B for chat/memory).'
+                            : (_activeProvider == 'google'
+                                ? 'Google Cloud Serverless inference powered by Gemini 3.8 Flash using Application Default Credentials (ADC).'
+                                : 'Auto-routes tasks between configured providers based on availability and task complexity.')),
                     style: TextStyle(fontSize: 11, color: Colors.grey.shade400),
                   ),
                 ],

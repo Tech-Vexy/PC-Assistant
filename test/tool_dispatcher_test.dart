@@ -203,5 +203,74 @@ void main() {
       expect(blockedRes['status'], equals('blocked'));
       expect(blockedRes['security_alert'], contains('SIM Toolkit'));
     });
+
+    test(
+        'isComputerUseRequest and isScreenVisionRequest accurately route requests',
+        () {
+      // Screen vision requests (Nemotron-3.5-Super-VL)
+      expect(ToolDispatcher.isScreenVisionRequest('What is on my screen?'),
+          isTrue);
+      expect(
+          ToolDispatcher.isScreenVisionRequest(
+              "What's on my screen right now?"),
+          isTrue);
+      expect(
+          ToolDispatcher.isScreenVisionRequest('Describe what is on my screen'),
+          isTrue);
+      expect(
+          ToolDispatcher.isScreenVisionRequest('What do you see on my screen?'),
+          isTrue);
+      expect(
+          ToolDispatcher.isScreenVisionRequest('Inspect the screen'), isTrue);
+
+      // Computer Use requests (Google Gemini 3.8 Flash via ADC)
+      expect(ToolDispatcher.isComputerUseRequest('Click on the Login button'),
+          isTrue);
+      expect(
+          ToolDispatcher.isComputerUseRequest('Tap the Settings icon'), isTrue);
+      expect(
+          ToolDispatcher.isComputerUseRequest(
+              'Type admin into the password field'),
+          isTrue);
+      expect(ToolDispatcher.isComputerUseRequest('Scroll down the webpage'),
+          isTrue);
+      expect(
+          ToolDispatcher.isComputerUseRequest(
+              'Use the computer to automate this form'),
+          isTrue);
+
+      // Vision requests should NOT be classified as Computer Use
+      expect(ToolDispatcher.isComputerUseRequest('What is on my screen?'),
+          isFalse);
+      expect(
+          ToolDispatcher.isComputerUseRequest('What do you see on my screen?'),
+          isFalse);
+
+      // Everything else (General conversation, planning, sub-agents, memory)
+      expect(ToolDispatcher.isComputerUseRequest('Plan a 5K running routine'),
+          isFalse);
+      expect(ToolDispatcher.isScreenVisionRequest('Plan a 5K running routine'),
+          isFalse);
+      expect(
+          ToolDispatcher.isComputerUseRequest(
+              'Remember that my favorite tea is green'),
+          isFalse);
+      expect(
+          ToolDispatcher.isScreenVisionRequest('What is the capital of Kenya?'),
+          isFalse);
+    });
+
+    test('computer_use tool executes under security shield', () async {
+      final res = await dispatcher.dispatch(
+        toolName: 'computer_use',
+        args: {
+          'action': 'click',
+          'coordinate': [100, 200],
+        },
+      );
+
+      expect(res['status'], equals('done'));
+      expect(res['engine'], contains('Computer Use'));
+    });
   });
 }

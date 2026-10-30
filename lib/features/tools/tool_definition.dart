@@ -472,6 +472,39 @@ class ToolDefinitions {
         },
       },
       {
+        'name': 'computer_use',
+        'description':
+            'Executes direct computer use and GUI actions on desktop/mobile interface (clicks, keystrokes, gestures, coordinate actions, command execution) powered by Google Gemini',
+        'parameters': {
+          'type': 'object',
+          'properties': {
+            'action': {
+              'type': 'string',
+              'description':
+                  'Action to execute: "click", "mouse_move", "type", "scroll", "screenshot", "shell"',
+            },
+            'coordinate': {
+              'type': 'array',
+              'items': {'type': 'number'},
+              'description': '[x, y] coordinates for click or tap',
+            },
+            'text': {
+              'type': 'string',
+              'description': 'Text string to type into the focused element',
+            },
+            'command': {
+              'type': 'string',
+              'description': 'Terminal or shell command to execute',
+            },
+            'direction': {
+              'type': 'string',
+              'description': 'Scroll direction: "down" or "up"',
+            },
+          },
+          'required': ['action'],
+        },
+      },
+      {
         'name': 'delegate_to_pc',
         'description':
             'Delegates execution of a desktop tool to the linked PC Assistant server (e.g. computer_use, terminal, media)',

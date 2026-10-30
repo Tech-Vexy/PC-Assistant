@@ -156,12 +156,12 @@ class KeyVault {
     return null;
   }
 
-  /// Saves the active AI model provider ('nebius', 'google', or 'auto')
+  /// Saves the active AI model provider ('role_based', 'nebius', 'google', or 'auto')
   Future<void> setActiveProvider(String provider) async {
     await _storage.write(key: _activeProviderKey, value: provider.trim());
   }
 
-  /// Retrieves the active AI model provider (defaults to 'nebius' if configured, otherwise 'auto')
+  /// Retrieves the active AI model provider (defaults to 'role_based': Google for Computer Use only, Nebius for everything else)
   Future<String> getActiveProvider() async {
     final val = await _storage.read(key: _activeProviderKey);
     if (val != null && val.isNotEmpty) return val;
@@ -173,12 +173,7 @@ class KeyVault {
     const defineVal = String.fromEnvironment('ACTIVE_LLM_PROVIDER');
     if (defineVal.isNotEmpty) return defineVal;
 
-    // Default to Nebius if Nebius key is present
-    final nebiusKey = await getNebiusApiKey();
-    if (nebiusKey != null && nebiusKey.isNotEmpty) {
-      return 'nebius';
-    }
-    return 'nebius';
+    return 'role_based';
   }
 
   /// Saves authentication mode ('adc' or 'api_key')
@@ -326,7 +321,10 @@ class KeyVault {
     final adc = await getAdcCredentialsJson();
     final isAdc = await isUsingAdc();
 
-    if (provider == 'nebius') {
+    if (provider == 'role_based') {
+      // Role-based: Nebius Token Factory powers everything else, so Nebius is required
+      return nebius != null && nebius.isNotEmpty;
+    } else if (provider == 'nebius') {
       return nebius != null && nebius.isNotEmpty;
     } else if (provider == 'google') {
       return (gemini != null && gemini.isNotEmpty) || (isAdc && adc != null);

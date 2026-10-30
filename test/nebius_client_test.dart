@@ -378,11 +378,12 @@ void main() {
       FlutterSecureStorage.setMockInitialValues({});
     });
 
-    test('Defaults active provider to nebius and allows switching', () async {
+    test('Defaults active provider to role_based and allows switching',
+        () async {
       FlutterSecureStorage.setMockInitialValues({});
       final vault = KeyVault();
 
-      expect(await vault.getActiveProvider(), equals('nebius'));
+      expect(await vault.getActiveProvider(), equals('role_based'));
 
       await vault.setActiveProvider('google');
       expect(await vault.getActiveProvider(), equals('google'));
@@ -392,14 +393,17 @@ void main() {
 
       await vault.setActiveProvider('nebius');
       expect(await vault.getActiveProvider(), equals('nebius'));
+
+      await vault.setActiveProvider('role_based');
+      expect(await vault.getActiveProvider(), equals('role_based'));
     });
 
     test(
-        'hasRequiredKeys is independent of Google when active provider is nebius',
+        'hasRequiredKeys in role_based and nebius modes depends on Nebius API key without Google keys',
         () async {
       FlutterSecureStorage.setMockInitialValues({});
       final vault = KeyVault();
-      await vault.setActiveProvider('nebius');
+      await vault.setActiveProvider('role_based');
 
       // No keys set
       expect(await vault.hasRequiredKeys(), isFalse);
@@ -410,6 +414,10 @@ void main() {
 
       // Even if Google API key is completely null and ADC is not set, Nebius is valid
       expect(await vault.getGeminiApiKey(), isNull);
+      expect(await vault.hasRequiredKeys(), isTrue);
+
+      // Same independence under explicit 'nebius' mode
+      await vault.setActiveProvider('nebius');
       expect(await vault.hasRequiredKeys(), isTrue);
     });
   });

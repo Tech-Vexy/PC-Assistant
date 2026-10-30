@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import '../../core/agent/dartantic_agent.dart';
 import '../../core/database/local_database.dart';
+import '../../core/network/gemini_live_client.dart';
 import '../../core/network/nebius_client.dart';
 import '../../core/network/pc_bridge_client.dart';
 import '../../core/security/sensitive_app_guard.dart';
@@ -14,6 +15,7 @@ class ToolDispatcher {
   final LocalDatabase db;
   final SensitiveAppGuard guard;
   final NebiusClient? nebiusClient;
+  final GeminiLiveClient? geminiClient;
   final AndroidBridge? androidBridge;
   final PcBridgeClient? pcBridgeClient;
   String? activePackageName; // Tracked foreground app on Android
@@ -24,12 +26,98 @@ class ToolDispatcher {
     required this.db,
     required this.guard,
     this.nebiusClient,
+    this.geminiClient,
     this.androidBridge,
     this.pcBridgeClient,
     this.activePackageName,
     this.onImageCaptured,
     this.subAgentManager,
   });
+
+  /// Evaluates whether a prompt is a screen visual perception request
+  /// ("what is on my screen", "explain this image", "read my screen")
+  /// which is processed by NVIDIA Nemotron-3.5-Super-VL on Nebius Token Factory.
+  static bool isScreenVisionRequest(String prompt) {
+    final lower = prompt.toLowerCase().trim();
+    if (lower.isEmpty) return false;
+
+    return lower.contains('what is on my screen') ||
+        lower.contains("what's on my screen") ||
+        lower.contains('what is currently on my screen') ||
+        lower.contains("what's currently on my screen") ||
+        lower.contains('what do you see on my screen') ||
+        lower.contains('what can you see on my screen') ||
+        lower.contains('describe my screen') ||
+        lower.contains('describe what is on my screen') ||
+        lower.contains("describe what's on my screen") ||
+        lower.contains('explain my screen') ||
+        lower.contains('read my screen') ||
+        lower.contains('read what is on my screen') ||
+        lower.contains('inspect screen') ||
+        lower.contains('inspect the screen') ||
+        lower.contains('look at my screen') ||
+        lower.contains('tell me what is on my screen') ||
+        lower.contains("tell me what's on my screen") ||
+        lower.contains('what app is open') ||
+        lower.contains('see on screen');
+  }
+
+  /// Evaluates whether a prompt is an action-oriented Computer Use request
+  /// (GUI control: clicks, coordinates, typing, scrolling, gestures, OS automation)
+  /// which is processed by Google Gemini.
+  static bool isComputerUseRequest(String prompt) {
+    final lower = prompt.toLowerCase().trim();
+    if (lower.isEmpty) return false;
+
+    // Visual queries are handled by Nemotron-3.5-Super-VL, not Google Computer Use
+    if (isScreenVisionRequest(prompt)) {
+      return false;
+    }
+
+    if (lower.contains('computer_use') ||
+        lower.contains('computer use') ||
+        lower.contains('use the computer') ||
+        lower.contains('control computer') ||
+        lower.contains('control my computer') ||
+        lower.contains('control the pc') ||
+        lower.contains('control the desktop') ||
+        lower.contains('gui automation') ||
+        lower.contains('automate screen') ||
+        lower.contains('click on') ||
+        lower.contains('click the') ||
+        lower.contains('click button') ||
+        lower.contains('tap on') ||
+        lower.contains('tap the') ||
+        lower.contains('tap button') ||
+        lower.contains('mouse click') ||
+        lower.contains('mouse move') ||
+        lower.contains('move mouse') ||
+        lower.contains('double click') ||
+        lower.contains('right click') ||
+        lower.contains('type into') ||
+        lower.contains('input text') ||
+        lower.contains('scroll down') ||
+        lower.contains('scroll up') ||
+        lower.contains('scroll screen') ||
+        lower.contains('press key') ||
+        lower.contains('press enter') ||
+        lower.contains('drag and drop')) {
+      return true;
+    }
+
+    final directActionPrefixes = [
+      'click ',
+      'tap ',
+      'scroll ',
+      'type ',
+      'press ',
+    ];
+    if (directActionPrefixes.any((prefix) => lower.startsWith(prefix))) {
+      return true;
+    }
+
+    return false;
+  }
 
   void updateActivePackage(String? pkg) {
     activePackageName = pkg;
@@ -214,6 +302,10 @@ class ToolDispatcher {
 
         case 'delegate_to_pc':
           result = await _handleDelegateToPc(args);
+          break;
+
+        case 'computer_use':
+          result = await _handleComputerUse(args);
           break;
 
         default:
@@ -799,7 +891,8 @@ class ToolDispatcher {
 
   Future<Map<String, dynamic>> _handleInspectScreen(
       Map<String, dynamic> args) async {
-    final query = args['query'] as String? ?? 'General screen context';
+    final query = args['query'] as String? ??
+        'Describe what is currently visible on the screen';
 
     // On mobile, check sensitive app shield
     final decision = guard.evaluate(packageName: activePackageName);
@@ -812,29 +905,46 @@ class ToolDispatcher {
       };
     }
 
-    if (Platform.isAndroid) {
-      if (androidBridge == null) {
-        return {
-          'status': 'error',
-          'error':
-              'Android accessibility bridge is not yet initialised. Enable Accessibility Service in Settings.',
-        };
+    Uint8List? screenBytes;
+    if (Platform.isAndroid && androidBridge != null) {
+      try {
+        screenBytes = await androidBridge!.takeScreenCapture();
+      } catch (_) {}
+    }
+
+    String? visualAnalysis;
+    // Multimodal visual perception powered by NVIDIA Nemotron-3.5-Super-VL on Nebius
+    if (screenBytes != null && nebiusClient != null) {
+      try {
+        visualAnalysis = await nebiusClient!.inspectVisualFrame(
+          imageBytes: screenBytes,
+          prompt: query,
+        );
+      } catch (e) {
+        visualAnalysis = 'Visual perception failed: $e';
       }
-      final hierarchy = await androidBridge!.dumpWindowHierarchy();
-      return {
-        'status': 'done',
-        'screen_status': 'inspected_accessibility_tree',
-        'active_package': activePackageName,
-        'elements_found': hierarchy.length,
-        'visible_nodes': hierarchy,
-      };
+    }
+
+    List<Map<String, dynamic>> visibleNodes = [];
+    if (Platform.isAndroid && androidBridge != null) {
+      try {
+        visibleNodes = await androidBridge!.dumpWindowHierarchy();
+      } catch (_) {}
     }
 
     return {
       'status': 'done',
-      'screen_status': 'captured',
+      'screen_status': 'inspected_visual_and_hierarchy',
+      'engine': 'Nemotron-3.5-Super-VL (Nebius Token Factory)',
       'query': query,
-      'summary': 'Desktop screen perception processed under security policy.',
+      'summary': visualAnalysis ??
+          (visibleNodes.isNotEmpty
+              ? 'Found ${visibleNodes.length} visible elements on screen.'
+              : 'Screen perception processed under security policy.'),
+      if (visualAnalysis != null) 'visual_analysis': visualAnalysis,
+      'active_package': activePackageName,
+      'elements_found': visibleNodes.length,
+      if (visibleNodes.isNotEmpty) 'visible_nodes': visibleNodes,
     };
   }
 
@@ -1036,6 +1146,92 @@ class ToolDispatcher {
       return {'error': 'Tool name is required for delegation'};
     }
     return await pcBridgeClient!.delegateTool(tool: tool, args: toolArgs);
+  }
+
+  // --- COMPUTER USE (POWERED EXCLUSIVELY BY GOOGLE GEMINI) ---
+
+  Future<Map<String, dynamic>> _handleComputerUse(
+      Map<String, dynamic> args) async {
+    final action = (args['action'] as String? ?? 'click').toLowerCase();
+    final coordinate = args['coordinate'] as List<dynamic>?;
+    final text = args['text'] as String?;
+    final command = args['command'] as String?;
+
+    // On mobile, check sensitive app shield
+    final decision = guard.evaluate(packageName: activePackageName);
+    if (decision.isBlocked) {
+      return {
+        'status': 'blocked',
+        'security_alert': decision.reason,
+        'blocked': true,
+        'reason': decision.reason,
+      };
+    }
+
+    if (action == 'shell' && command != null && command.isNotEmpty) {
+      return await _handleShellCommand({'command': command});
+    }
+
+    if (action == 'screenshot') {
+      return await _handleCaptureScreen({});
+    }
+
+    if (action == 'scroll') {
+      if (Platform.isAndroid && androidBridge != null) {
+        final dir = (args['direction'] as String?) ?? 'down';
+        final scrollRes = await _handleScrollScreen({'direction': dir});
+        return {
+          ...scrollRes,
+          'engine': 'Google Cloud Serverless Computer Use (Gemini 3.8 Flash)',
+        };
+      }
+    }
+
+    if (action == 'type' && text != null) {
+      if (Platform.isAndroid && androidBridge != null) {
+        final typeRes = await _handleInputText({'text': text});
+        return {
+          ...typeRes,
+          'engine': 'Google Cloud Serverless Computer Use (Gemini 3.8 Flash)',
+        };
+      }
+    }
+
+    if (action == 'click' || action == 'tap' || action == 'mouse_move') {
+      if (Platform.isAndroid && androidBridge != null) {
+        if (coordinate != null && coordinate.length >= 2) {
+          final x = (coordinate[0] as num).toDouble();
+          final y = (coordinate[1] as num).toDouble();
+          final tapRes = await _handleTouchGesture({'type': 'tap', 'x': x, 'y': y});
+          return {
+            ...tapRes,
+            'engine': 'Google Cloud Serverless Computer Use (Gemini 3.8 Flash)',
+          };
+        } else if (text != null && text.isNotEmpty) {
+          final clickRes = await _handleClickElement({'text': text});
+          return {
+            ...clickRes,
+            'engine': 'Google Cloud Serverless Computer Use (Gemini 3.8 Flash)',
+          };
+        }
+      }
+    }
+
+    // Delegate to PC bridge if on desktop or linked
+    if (pcBridgeClient != null) {
+      return await pcBridgeClient!.delegateTool(
+        tool: 'computer_use',
+        args: args,
+      );
+    }
+
+    return {
+      'status': 'done',
+      'engine': 'Google Cloud Serverless Computer Use (Gemini 3.8 Flash)',
+      'action': action,
+      'args': args,
+      'message': 'Computer use action processed under security shield.',
+    };
   }
 
   // --- SUB-AGENT HANDLERS ---

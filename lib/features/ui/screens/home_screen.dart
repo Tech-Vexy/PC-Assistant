@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../../../core/agent/dartantic_agent.dart';
 import '../../../core/audio/audio_playback_service.dart';
@@ -85,7 +86,6 @@ class _HomeScreenState extends State<HomeScreen>
   StreamSubscription? _cameraStreamSub;
 
   bool _isHotwordActive = false;
-  String _activeHotwordPhrase = 'hey assistant';
   String _currentVoiceTranscript = '';
   String _lastAssistantVoiceResponse = '';
   bool _isTtsSpeaking = false;
@@ -210,24 +210,18 @@ class _HomeScreenState extends State<HomeScreen>
         }
       });
 
-      // Always-On On-Device Hotword Detection ("Hey Assistant", "OK Google")
+      // On-Device Hotword Detection — configured but NOT auto-started.
+      // The mic only activates when the user explicitly taps the orb,
+      // the notification "Start Listening" button, or the accessibility button.
       final hotwordEnabled = await widget.keyVault.isHotwordEnabled();
-      _activeHotwordPhrase = await widget.keyVault.getCustomHotword();
       if (hotwordEnabled) {
         _isHotwordActive = true;
+        // Pre-flight: ensure permission is present so the first tap is instant.
         final hasMic = await _androidBridge!.isMicrophonePermissionGranted();
         if (!hasMic) {
           await _androidBridge!.requestMicrophonePermission();
         }
-        await _androidBridge!.startHotwordListening(
-          hotwords: [
-            _activeHotwordPhrase,
-            'hey assistant',
-            'ok google',
-            'device assistant',
-            'computer'
-          ],
-        );
+        // Do NOT call startHotwordListening here — mic stays off until user touch.
       }
       _hotwordSub?.cancel();
       _hotwordSub =
@@ -237,18 +231,11 @@ class _HomeScreenState extends State<HomeScreen>
       _micPermSub =
           _androidBridge!.microphonePermissionStream.listen((granted) {
         if (granted && mounted) {
+          // Only resume if user is already in an active STT session
+          // (e.g. they started listening before permission was granted).
+          // Do NOT auto-arm on init — mic only activates on explicit touch.
           if (_isLocalSttActive) {
             _androidBridge!.startHotwordListening(hotwords: ['*']);
-          } else if (_isHotwordActive) {
-            _androidBridge!.startHotwordListening(
-              hotwords: [
-                _activeHotwordPhrase,
-                'hey assistant',
-                'ok google',
-                'device assistant',
-                'computer'
-              ],
-            );
           }
         }
       });
@@ -281,6 +268,7 @@ class _HomeScreenState extends State<HomeScreen>
       db: widget.database,
       guard: widget.guard,
       nebiusClient: _nebiusClient,
+      geminiClient: _liveClient,
       androidBridge: _androidBridge,
       pcBridgeClient: _pcBridgeClient,
       activePackageName: _activePackage,
@@ -559,9 +547,157 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
         (geminiKey != null && geminiKey.isNotEmpty);
     final canUseNebius = nebiusKey != null && nebiusKey.isNotEmpty;
 
-    // Determine target provider completely independently
+    // 1. Direct Visual Screen Comprehension powered by NVIDIA Nemotron-3.5-Super-VL
+    // Handles scenarios like "what is on my screen?", "explain my screen", "read my screen"
+    final isScreenVision = ToolDispatcher.isScreenVisionRequest(clean);
+    if (isScreenVision) {
+      if (!canUseNebius) {
+        if (mounted) {
+          setState(() {
+            _chatMessages.add(
+              ChatMessage(
+                id: 'err_${DateTime.now().millisecondsSinceEpoch}',
+                isUser: false,
+                text:
+                    'Visual screen comprehension requires Nebius Token Factory (Nemotron-3.5-Super-VL). Please configure your Nebius API key in Settings.',
+                timestamp: DateTime.now(),
+                isError: true,
+              ),
+            );
+          });
+        }
+        _showKeyDialog();
+        return;
+      }
+
+      final pendingMsgId = 'assistant_${DateTime.now().millisecondsSinceEpoch}';
+      if (mounted) {
+        setState(() {
+          _chatMessages.add(
+            ChatMessage(
+              id: pendingMsgId,
+              isUser: false,
+              text: 'Analyzing screen with Nemotron 3.5 Super VL...',
+              timestamp: DateTime.now(),
+            ),
+          );
+        });
+      }
+
+      try {
+        Uint8List? screenBytes;
+        if (Platform.isAndroid && _androidBridge != null) {
+          screenBytes = await _androidBridge!.takeScreenCapture();
+        }
+
+        if (screenBytes == null) {
+          final fallbackResult = await _dispatcher?.dispatch(
+            toolName: 'inspect_screen',
+            args: {'query': clean},
+          );
+          final summary = fallbackResult?['summary']?.toString() ??
+              'Screen capture unavailable or protected by security shield.';
+          if (mounted) {
+            setState(() {
+              _lastAssistantVoiceResponse = summary;
+              final idx = _chatMessages.indexWhere((m) => m.id == pendingMsgId);
+              if (idx != -1) _chatMessages[idx].text = summary;
+            });
+          }
+          _androidBridge?.speakText(summary);
+          return;
+        }
+
+        final superEndpoint = await widget.keyVault.getNebiusSuperVlEndpoint();
+        final superModel = await widget.keyVault.getNebiusSuperVlModel();
+        _nebiusClient ??= NebiusClient(
+          apiKey: nebiusKey,
+          superVlEndpoint: superEndpoint,
+          superVlModel: superModel,
+        );
+
+        final visualResponse = await _nebiusClient!.inspectVisualFrame(
+          imageBytes: screenBytes,
+          prompt: clean,
+        );
+
+        if (mounted) {
+          setState(() {
+            _lastAssistantVoiceResponse = visualResponse;
+            final idx = _chatMessages.indexWhere((m) => m.id == pendingMsgId);
+            if (idx != -1) _chatMessages[idx].text = visualResponse;
+          });
+        }
+        _androidBridge?.speakText(visualResponse);
+        return;
+      } catch (e) {
+        if (mounted) {
+          setState(() {
+            final idx = _chatMessages.indexWhere((m) => m.id == pendingMsgId);
+            if (idx != -1) {
+              _chatMessages[idx] = ChatMessage(
+                id: pendingMsgId,
+                isUser: false,
+                text: 'Visual screen analysis failed: $e',
+                timestamp: DateTime.now(),
+                isError: true,
+              );
+            }
+          });
+        }
+        return;
+      }
+    }
+
+    // 2. Action-oriented Computer Use vs Everything Else
+    final isComputerUse = ToolDispatcher.isComputerUseRequest(clean);
+
     bool useNebius;
-    if (activeProvider == 'nebius') {
+    if (activeProvider == 'role_based') {
+      // Role-Based: Google is used for Computer Use ONLY. Everything else uses Nebius Token Factory.
+      if (isComputerUse) {
+        if (!canUseGemini) {
+          if (mounted) {
+            setState(() {
+              _chatMessages.add(
+                ChatMessage(
+                  id: 'err_${DateTime.now().millisecondsSinceEpoch}',
+                  isUser: false,
+                  text:
+                      'Computer Use requires Google Cloud Application Default Credentials (ADC) or Gemini API key. Please configure in Settings.',
+                  timestamp: DateTime.now(),
+                  isError: true,
+                ),
+              );
+            });
+          }
+          _showKeyDialog();
+          return;
+        }
+        useNebius = false;
+      } else {
+        // Everything else uses Nebius Token Factory
+        if (!canUseNebius) {
+          if (mounted) {
+            setState(() {
+              _chatMessages.add(
+                ChatMessage(
+                  id: 'err_${DateTime.now().millisecondsSinceEpoch}',
+                  isUser: false,
+                  text:
+                      'Please configure your Nebius Token Factory API key in Settings.',
+                  timestamp: DateTime.now(),
+                  isError: true,
+                ),
+              );
+            });
+          }
+          _showKeyDialog();
+          return;
+        }
+        useNebius = true;
+      }
+    } else if (activeProvider == 'nebius') {
       if (!canUseNebius) {
         if (mounted) {
           setState(() {
@@ -602,8 +738,10 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
       }
       useNebius = false;
     } else {
-      // 'auto' mode: Prefer Nebius when configured, completely decoupled from Google ADC
-      if (canUseNebius) {
+      // 'auto' mode: Use Google for Computer Use if available, otherwise Nebius
+      if (isComputerUse && canUseGemini) {
+        useNebius = false;
+      } else if (canUseNebius) {
         useNebius = true;
       } else if (canUseGemini) {
         useNebius = false;
@@ -630,9 +768,11 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
     final pendingMsgId = 'assistant_${DateTime.now().millisecondsSinceEpoch}';
     final modelLabel = useNebius
         ? 'NVIDIA Nemotron (Nebius Token Factory)'
-        : (authMode == 'adc'
-            ? 'Gemini 3.8 Flash (ADC Serverless)'
-            : 'Gemini 3.8 Flash');
+        : (isComputerUse
+            ? 'Google Gemini 3.8 Flash (Computer Use)'
+            : (authMode == 'adc'
+                ? 'Gemini 3.8 Flash (ADC Serverless)'
+                : 'Gemini 3.8 Flash'));
 
     if (mounted) {
       setState(() {
@@ -648,15 +788,16 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
     }
 
     try {
-      const systemPrompt = '''
-You are Device Assistant running as an on-device intelligent agent for Android.
-When a user asks to perform an action on their device or inspect device state, reply ONLY with a single JSON object in this format:
+      final String systemPrompt;
+      if (!useNebius && isComputerUse) {
+        systemPrompt = '''
+You are Device Assistant's Computer Use agent powered by Google Gemini 3.8 Flash.
+Your role is to execute GUI computer use actions, screen navigation, clicks, typing, gestures, and desktop OS commands.
+Reply ONLY with a single JSON object in this format:
 {"action": "tool_call", "tool": "<tool_name>", "args": {<arguments>}}
 
-Available tools:
-- system_status: {}
-- open_application: {"package_name": "string (e.g. com.chrome.dev)", "app_name": "string"}
-- list_installed_apps: {"filter": "optional string"}
+Available Computer Use tools:
+- computer_use: {"action": "click"|"mouse_move"|"type"|"scroll"|"screenshot"|"shell", "coordinate": [x,y], "text": "string", "command": "string"}
 - click_element: {"text": "visible label on screen"}
 - touch_gesture: {"type": "tap"|"swipe", "x": number, "y": number, "startX": number, "startY": number, "endX": number, "endY": number}
 - input_text: {"text": "string to type", "view_id": "optional string"}
@@ -664,6 +805,20 @@ Available tools:
 - navigate: {"action": "back"|"home"|"recents"|"notifications"}
 - capture_screen: {}
 - inspect_screen: {"query": "string"}
+- run_shell_command: {"command": "string"}
+- delegate_to_pc: {"tool": "string", "args": {}}
+''';
+      } else {
+        systemPrompt = '''
+You are Device Assistant powered by NVIDIA Nemotron on Nebius Token Factory.
+You handle all general conversational intelligence, multi-step task planning, sub-agents, memory retention, workflows, and knowledge queries.
+When a user asks to perform an action on their device or inspect device state, reply ONLY with a single JSON object in this format:
+{"action": "tool_call", "tool": "<tool_name>", "args": {<arguments>}}
+
+Available tools:
+- system_status: {}
+- open_application: {"package_name": "string (e.g. com.chrome.dev)", "app_name": "string"}
+- list_installed_apps: {"filter": "optional string"}
 - remember: {"key": "string", "value": "string", "category": "preference"|"location"|"general"}
 - recall: {"key": "string"}
 - list_memories: {"category": "optional string"}
@@ -676,9 +831,11 @@ Available tools:
 - list_workflows: {}
 - delete_workflow: {"name": "string"}
 - web_search: {"query": "string"}
+- computer_use: {"action": "string", "coordinate": [x,y], "text": "string", "command": "string"}
 
 If the user query is a general knowledge question, conversational request, or explanation, reply directly in natural language without any JSON wrapper.
 ''';
+      }
 
       String response;
       if (useNebius) {
@@ -982,17 +1139,6 @@ If the user query is a general knowledge question, conversational request, or ex
     if (_isLocalSttActive) {
       if (Platform.isAndroid && _androidBridge != null) {
         await _androidBridge!.stopHotwordListening();
-        if (_isHotwordActive) {
-          await _androidBridge!.startHotwordListening(
-            hotwords: [
-              _activeHotwordPhrase,
-              'hey assistant',
-              'ok google',
-              'device assistant',
-              'computer'
-            ],
-          );
-        }
       }
       if (mounted) {
         setState(() => _isLocalSttActive = false);
@@ -1751,15 +1897,15 @@ If the user query is a general knowledge question, conversational request, or ex
                         border: Border.all(
                             color: Colors.cyanAccent.withValues(alpha: 0.3)),
                       ),
-                      child: Row(
+                      child: const Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.hearing,
+                          Icon(Icons.touch_app_outlined,
                               size: 14, color: Colors.cyanAccent),
-                          const SizedBox(width: 6),
+                          SizedBox(width: 6),
                           Text(
-                            'Hotword Active: Say "$_activeHotwordPhrase"',
-                            style: const TextStyle(
+                            'Tap Orb to Start Listening',
+                            style: TextStyle(
                                 fontSize: 11,
                                 color: Colors.cyanAccent,
                                 fontWeight: FontWeight.w500),

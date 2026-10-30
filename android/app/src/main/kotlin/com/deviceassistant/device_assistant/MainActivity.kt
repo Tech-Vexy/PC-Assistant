@@ -291,21 +291,34 @@ class MainActivity : FlutterActivity() {
                             requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), 102)
                             result.success(false)
                         } else {
-                            if (hotwords.isNotEmpty()) {
-                                hotwordDetector?.updateHotwords(hotwords)
+                            // Prefer the service-owned detector so there is only one
+                            // SpeechRecognizer active and it survives when the activity is
+                            // backgrounded (e.g. after tapping the accessibility button).
+                            val detector = AssistantForegroundService.instance?.getHotwordDetector()
+                                ?: hotwordDetector
+                            if (detector != null) {
+                                if (hotwords.isNotEmpty()) {
+                                    detector.updateHotwords(hotwords)
+                                }
+                                detector.startListening()
+                                result.success(true)
+                            } else {
+                                result.success(false)
                             }
-                            hotwordDetector?.startListening()
-                            result.success(true)
                         }
                     }
 
                     "stopHotwordListening" -> {
-                        hotwordDetector?.stopListening()
+                        val detector = AssistantForegroundService.instance?.getHotwordDetector()
+                            ?: hotwordDetector
+                        detector?.stopListening()
                         result.success(true)
                     }
 
                     "isHotwordListening" -> {
-                        val isListening = hotwordDetector?.isListening() ?: false
+                        val detector = AssistantForegroundService.instance?.getHotwordDetector()
+                            ?: hotwordDetector
+                        val isListening = detector?.isListening() ?: false
                         result.success(isListening)
                     }
 
@@ -352,6 +365,10 @@ class MainActivity : FlutterActivity() {
                 }
             }
         }
+
+        // Register this channel in the foreground service so it can deliver hotword
+        // and transcript callbacks to Flutter even when the activity is backgrounded.
+        AssistantForegroundService.methodChannel = methodChannel
 
         // Forward active package changes and sensitive shield alerts to Flutter
         AssistantAccessibilityService.instance?.onWindowStateChangedListener = { pkg, isProtected ->
@@ -659,6 +676,10 @@ class MainActivity : FlutterActivity() {
         hotwordDetector?.stopListening()
         textToSpeech?.stop()
         textToSpeech?.shutdown()
+        // Clear static reference to avoid leaking a dead channel
+        if (AssistantForegroundService.methodChannel == methodChannel) {
+            AssistantForegroundService.methodChannel = null
+        }
         super.onDestroy()
     }
 }
