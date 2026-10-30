@@ -21,7 +21,7 @@ void main() {
         ),
       );
 
-      expect(find.text('How can I help you today?'), findsOneWidget);
+      expect(find.text('NVIDIA Nemotron On-Device Agent'), findsOneWidget);
       expect(find.text('System status'), findsOneWidget);
       expect(find.text('Take a screenshot'), findsOneWidget);
 
@@ -52,7 +52,7 @@ void main() {
       expect(inputFinder, findsOneWidget);
 
       await tester.enterText(inputFinder, 'Open Chrome');
-      await tester.tap(find.byIcon(Icons.send));
+      await tester.tap(find.byIcon(Icons.send_rounded));
       await tester.pumpAndSettle();
 
       expect(sentText, equals('Open Chrome'));

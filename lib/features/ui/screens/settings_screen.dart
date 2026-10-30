@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import '../../../core/database/local_database.dart';
 import '../../../core/network/discovery_service.dart';
+import '../../../core/network/nebius_client.dart';
 import '../../../core/network/pc_bridge_client.dart';
 import '../../../core/security/key_vault.dart';
 
@@ -22,8 +23,9 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   final _geminiCtrl = TextEditingController();
   final _nebiusCtrl = TextEditingController();
-  final _nebiusEndpointCtrl = TextEditingController();
+  final _nebiusSuperEndpointCtrl = TextEditingController();
   final _nebiusSuperModelCtrl = TextEditingController();
+  final _nebiusNanoEndpointCtrl = TextEditingController();
   final _nebiusNanoModelCtrl = TextEditingController();
   final _pcUrlCtrl = TextEditingController();
   final _hotwordPhraseCtrl = TextEditingController();
@@ -34,6 +36,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   bool _isTestingPc = false;
   Map<String, dynamic>? _pcHealthResult;
+
+  bool _isTestingSuperVl = false;
+  Map<String, dynamic>? _superVlTestResult;
+
+  bool _isTestingNano = false;
+  Map<String, dynamic>? _nanoTestResult;
+
   bool _isSaving = false;
   bool _hotwordEnabled = true;
 
@@ -46,8 +55,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _loadCurrentValues() async {
     _geminiCtrl.text = (await widget.keyVault.getGeminiApiKey()) ?? '';
     _nebiusCtrl.text = (await widget.keyVault.getNebiusApiKey()) ?? '';
-    _nebiusEndpointCtrl.text = await widget.keyVault.getNebiusEndpoint();
+    _nebiusSuperEndpointCtrl.text =
+        await widget.keyVault.getNebiusSuperEndpoint();
     _nebiusSuperModelCtrl.text = await widget.keyVault.getNebiusSuperModel();
+    _nebiusNanoEndpointCtrl.text =
+        await widget.keyVault.getNebiusNanoEndpoint();
     _nebiusNanoModelCtrl.text = await widget.keyVault.getNebiusNanoModel();
     _pcUrlCtrl.text = await widget.keyVault.getPcServerUrl();
     _hotwordEnabled = await widget.keyVault.isHotwordEnabled();
@@ -64,13 +76,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (_nebiusCtrl.text.trim().isNotEmpty) {
         await widget.keyVault.setNebiusApiKey(_nebiusCtrl.text.trim());
       }
-      if (_nebiusEndpointCtrl.text.trim().isNotEmpty) {
+      if (_nebiusSuperEndpointCtrl.text.trim().isNotEmpty) {
         await widget.keyVault
-            .setNebiusEndpoint(_nebiusEndpointCtrl.text.trim());
+            .setNebiusSuperEndpoint(_nebiusSuperEndpointCtrl.text.trim());
       }
       if (_nebiusSuperModelCtrl.text.trim().isNotEmpty) {
         await widget.keyVault
             .setNebiusSuperModel(_nebiusSuperModelCtrl.text.trim());
+      }
+      if (_nebiusNanoEndpointCtrl.text.trim().isNotEmpty) {
+        await widget.keyVault
+            .setNebiusNanoEndpoint(_nebiusNanoEndpointCtrl.text.trim());
       }
       if (_nebiusNanoModelCtrl.text.trim().isNotEmpty) {
         await widget.keyVault
@@ -92,6 +108,96 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
     } finally {
       if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  Future<void> _testSuperVlEndpoint() async {
+    setState(() {
+      _isTestingSuperVl = true;
+      _superVlTestResult = null;
+    });
+
+    try {
+      final key = _nebiusCtrl.text.trim();
+      final endpoint = _nebiusSuperEndpointCtrl.text.trim();
+      final model = _nebiusSuperModelCtrl.text.trim();
+
+      if (key.isEmpty) {
+        setState(() {
+          _superVlTestResult = {
+            'success': false,
+            'error': 'Nebius API Key required to test endpoint',
+          };
+        });
+        return;
+      }
+
+      final client = NebiusClient(
+        apiKey: key,
+        superVlEndpoint: endpoint,
+        superVlModel: model,
+      );
+
+      final res = await client.testConnection(
+        endpoint: endpoint,
+        model: model,
+        complexity: TaskComplexity.complex,
+      );
+      if (mounted) setState(() => _superVlTestResult = res);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _superVlTestResult = {
+              'success': false,
+              'error': e.toString(),
+            });
+      }
+    } finally {
+      if (mounted) setState(() => _isTestingSuperVl = false);
+    }
+  }
+
+  Future<void> _testNanoEndpoint() async {
+    setState(() {
+      _isTestingNano = true;
+      _nanoTestResult = null;
+    });
+
+    try {
+      final key = _nebiusCtrl.text.trim();
+      final endpoint = _nebiusNanoEndpointCtrl.text.trim();
+      final model = _nebiusNanoModelCtrl.text.trim();
+
+      if (key.isEmpty) {
+        setState(() {
+          _nanoTestResult = {
+            'success': false,
+            'error': 'Nebius API Key required to test endpoint',
+          };
+        });
+        return;
+      }
+
+      final client = NebiusClient(
+        apiKey: key,
+        nanoEndpoint: endpoint,
+        nanoModel: model,
+      );
+
+      final res = await client.testConnection(
+        endpoint: endpoint,
+        model: model,
+        complexity: TaskComplexity.simple,
+      );
+      if (mounted) setState(() => _nanoTestResult = res);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _nanoTestResult = {
+              'success': false,
+              'error': e.toString(),
+            });
+      }
+    } finally {
+      if (mounted) setState(() => _isTestingNano = false);
     }
   }
 
@@ -142,21 +248,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   'No PC Assistant servers found via UDP broadcast. Ensure PC server is running on the same network.'),
             ),
           );
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              backgroundColor: Colors.green,
-              content: Text(
-                  'Discovered ${servers.length} PC Assistant server(s) on Wi-Fi.'),
-            ),
-          );
         }
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              backgroundColor: Colors.red, content: Text('Scan error: $e')),
+          SnackBar(content: Text('Scan failed: $e')),
         );
       }
     } finally {
@@ -168,48 +265,60 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() {
       _pcUrlCtrl.text = server.url;
     });
-    _testPcConnection();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Selected ${server.hostname} (${server.url})')),
+    );
   }
 
-  void _confirmClearKeys() {
-    showDialog(
+  Future<void> _confirmClearKeys() async {
+    final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Clear All API Keys?'),
         content: const Text(
-          'This will remove all stored API keys from the hardware keystore. '
-          'You will need to reconfigure them to use voice and planning features.',
-        ),
+            'This will purge all API keys and custom server configurations from the secure storage.'),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () async {
-              await widget.keyVault.clearAll();
-              if (ctx.mounted) Navigator.pop(ctx);
-              await _loadCurrentValues();
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                      backgroundColor: Colors.red,
-                      content: Text('All API keys cleared.')),
-                );
-              }
-            },
+            onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Clear All Keys'),
           ),
         ],
       ),
     );
+
+    if (confirmed == true) {
+      await widget.keyVault.clearAllKeys();
+      _geminiCtrl.clear();
+      _nebiusCtrl.clear();
+      _nebiusSuperEndpointCtrl.text = 'https://api.tokenfactory.nebius.com/v1';
+      _nebiusNanoEndpointCtrl.text = 'https://api.tokenfactory.nebius.com/v1';
+      _nebiusSuperModelCtrl.text = 'nvidia/Nemotron-3.5-Super-VL';
+      _nebiusNanoModelCtrl.text = 'nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B';
+      _pcUrlCtrl.clear();
+      if (mounted) {
+        setState(() {});
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            backgroundColor: Colors.orange,
+            content: Text('Keystore cleared.'),
+          ),
+        );
+      }
+    }
   }
 
   @override
   void dispose() {
     _geminiCtrl.dispose();
     _nebiusCtrl.dispose();
-    _nebiusEndpointCtrl.dispose();
+    _nebiusSuperEndpointCtrl.dispose();
     _nebiusSuperModelCtrl.dispose();
+    _nebiusNanoEndpointCtrl.dispose();
     _nebiusNanoModelCtrl.dispose();
     _pcUrlCtrl.dispose();
     _hotwordPhraseCtrl.dispose();
@@ -240,35 +349,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // --- API Keys Section ---
+          // --- Nebius Token Factory Section ---
           _buildSectionHeader(
-              Icons.key, 'API Keys', 'Stored in hardware-backed keystore'),
-          const SizedBox(height: 12),
-          _buildSecureField(
-            controller: _geminiCtrl,
-            label: 'Google Gemini API Key',
-            hint: 'Used for Gemini Live speech-to-speech and vision',
-            icon: Icons.mic,
+            Icons.psychology,
+            'Nebius Token Factory & NVIDIA Nemotron',
+            'Primary on-device reasoning engine & smart tool routing',
           ),
           const SizedBox(height: 12),
           _buildSecureField(
             controller: _nebiusCtrl,
             label: 'Nebius Token Factory API Key',
-            hint: 'Used for Nemotron-3-super-vl task planning',
-            icon: Icons.psychology,
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _nebiusEndpointCtrl,
-            decoration: InputDecoration(
-              labelText: 'Nebius API Endpoint',
-              hintText: 'https://api.studio.nebius.ai/v1',
-              prefixIcon: const Icon(Icons.link),
-              border:
-                  OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-            ),
+            hint: 'v1.CmQK...',
+            icon: Icons.key,
           ),
           const SizedBox(height: 14),
+
+          // Region-agnostic deployments info card
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
@@ -282,56 +378,218 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children: [
                 const Row(
                   children: [
-                    Icon(Icons.alt_route, color: Colors.indigoAccent, size: 18),
+                    Icon(Icons.hub_outlined,
+                        color: Colors.cyanAccent, size: 18),
                     SizedBox(width: 8),
                     Text(
-                      'Smart Model Routing',
+                      'Region-Agnostic Deployments',
                       style: TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 13,
-                          color: Colors.indigoAccent),
+                          color: Colors.cyanAccent),
                     ),
                   ],
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Complex tasks (multi-step planning, visual inspection, deep sub-agents) route to Nemotron 3 super vl. '
-                  'Simple tasks (memory extraction, fast QA, simple tool calls) route to Nemotron 3 nano.',
+                  'Nebius deployments are region-agnostic (tokenfactory.nebius.com/endpoints). '
+                  'Each model can point to its own dedicated endpoint URL or serverless base.',
                   style: TextStyle(fontSize: 11, color: Colors.grey.shade400),
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _nebiusSuperModelCtrl,
-            decoration: InputDecoration(
-              labelText: 'Complex Tasks Model (Super VL)',
-              hintText: 'nvidia/nemotron-3-super-vl',
-              prefixIcon: const Icon(Icons.psychology_alt),
-              border:
-                  OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _nebiusNanoModelCtrl,
-            decoration: InputDecoration(
-              labelText: 'Simple Tasks Model (Nano)',
-              hintText: 'nvidia/nemotron-3-nano',
-              prefixIcon: const Icon(Icons.flash_on),
-              border:
-                  OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-          ),
+          const SizedBox(height: 16),
 
+          // --- Complex Tasks: Nemotron 3.5 Super VL ---
+          Card(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side:
+                  BorderSide(color: Colors.indigoAccent.withValues(alpha: 0.3)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.psychology_alt,
+                          color: Colors.indigoAccent, size: 20),
+                      SizedBox(width: 8),
+                      Text(
+                        'Complex Tasks (Vision / Multimodal / Planning)',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 13),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _nebiusSuperModelCtrl,
+                    decoration: InputDecoration(
+                      labelText: 'Super VL Model ID',
+                      hintText: 'nvidia/Nemotron-3.5-Super-VL',
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                      isDense: true,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    children: [
+                      _buildChip(
+                        label: 'Nemotron-3.5-Super-VL',
+                        model: 'nvidia/Nemotron-3.5-Super-VL',
+                        targetController: _nebiusSuperModelCtrl,
+                      ),
+                      _buildChip(
+                        label: 'Super-120b',
+                        model: 'nvidia/nemotron-3-super-120b-a12b',
+                        targetController: _nebiusSuperModelCtrl,
+                      ),
+                      _buildChip(
+                        label: 'Ultra-550b',
+                        model: 'nvidia/Nemotron-3-Ultra-550b-a55b',
+                        targetController: _nebiusSuperModelCtrl,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _nebiusSuperEndpointCtrl,
+                    decoration: InputDecoration(
+                      labelText: 'Super VL Dedicated Endpoint',
+                      hintText: 'https://api.tokenfactory.nebius.com/v1',
+                      prefixIcon: const Icon(Icons.link, size: 18),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                      isDense: true,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      ElevatedButton.icon(
+                        icon: _isTestingSuperVl
+                            ? const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.network_check, size: 16),
+                        label: const Text('Test Super VL Endpoint'),
+                        onPressed:
+                            _isTestingSuperVl ? null : _testSuperVlEndpoint,
+                      ),
+                    ],
+                  ),
+                  if (_superVlTestResult != null) ...[
+                    const SizedBox(height: 8),
+                    _buildTestStatusCard(_superVlTestResult!),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // --- Simple Tasks: Nemotron 3 Nano 30b ---
+          Card(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: Colors.tealAccent.withValues(alpha: 0.3)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.flash_on, color: Colors.tealAccent, size: 20),
+                      SizedBox(width: 8),
+                      Text(
+                        'Simple Tasks (Tools / Fast QA / Device Actions)',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 13),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _nebiusNanoModelCtrl,
+                    decoration: InputDecoration(
+                      labelText: 'Nano Model ID',
+                      hintText: 'nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B',
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                      isDense: true,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    children: [
+                      _buildChip(
+                        label: 'Nemotron-3-Nano-30b',
+                        model: 'nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B',
+                        targetController: _nebiusNanoModelCtrl,
+                      ),
+                      _buildChip(
+                        label: 'Nemotron-3.5-Lightning',
+                        model: 'nvidia/Nemotron-3_5-Lightning',
+                        targetController: _nebiusNanoModelCtrl,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _nebiusNanoEndpointCtrl,
+                    decoration: InputDecoration(
+                      labelText: 'Nano Dedicated Endpoint',
+                      hintText: 'https://api.tokenfactory.nebius.com/v1',
+                      prefixIcon: const Icon(Icons.link, size: 18),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                      isDense: true,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      ElevatedButton.icon(
+                        icon: _isTestingNano
+                            ? const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.network_check, size: 16),
+                        label: const Text('Test Nano Endpoint'),
+                        onPressed: _isTestingNano ? null : _testNanoEndpoint,
+                      ),
+                    ],
+                  ),
+                  if (_nanoTestResult != null) ...[
+                    const SizedBox(height: 8),
+                    _buildTestStatusCard(_nanoTestResult!),
+                  ],
+                ],
+              ),
+            ),
+          ),
           const SizedBox(height: 28),
 
-          // --- Voice Wake-up & Hotword Section ---
+          // --- Voice Wake-up & Device STT Section ---
           _buildSectionHeader(
               Icons.record_voice_over,
-              'Voice Wake-up & Hotword',
-              'Always-on on-device voice trigger (Google Hotword style)'),
+              'Voice Wake-up & Device STT',
+              'On-device speech recognition & wake word detection'),
           const SizedBox(height: 12),
           Card(
             child: Padding(
@@ -345,7 +603,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         style: TextStyle(
                             fontWeight: FontWeight.bold, fontSize: 14)),
                     subtitle: const Text(
-                        'Listens continuously in background for wake words without draining battery',
+                        'Listens on-device for wake words with zero battery overhead',
                         style: TextStyle(fontSize: 12)),
                     value: _hotwordEnabled,
                     onChanged: (val) => setState(() => _hotwordEnabled = val),
@@ -363,119 +621,72 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12)),
                         helperText:
-                            'Spotted locally on-device. You can also say commands directly: "Hey Assistant, open YouTube".',
+                            'Processed on-device. Spoken commands route directly to NVIDIA Nemotron.',
                         helperMaxLines: 2,
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 4,
-                      children: [
-                        'hey assistant',
-                        'ok google',
-                        'device assistant',
-                        'computer',
-                        'jarvis',
-                      ]
-                          .map((preset) => ActionChip(
-                                label: Text(preset,
-                                    style: const TextStyle(fontSize: 11)),
-                                onPressed: () => setState(
-                                    () => _hotwordPhraseCtrl.text = preset),
-                              ))
-                          .toList(),
                     ),
                   ],
                 ],
               ),
             ),
           ),
+          const SizedBox(height: 28),
 
+          // --- Optional Google Gemini Section ---
+          _buildSectionHeader(
+              Icons.key, 'Google Gemini Key (Optional)', 'Live API fallback'),
+          const SizedBox(height: 12),
+          _buildSecureField(
+            controller: _geminiCtrl,
+            label: 'Google Gemini API Key',
+            hint: 'Optional fallback key',
+            icon: Icons.mic,
+          ),
           const SizedBox(height: 28),
 
           // --- PC Bridge Section ---
-          _buildSectionHeader(Icons.computer, 'PC Bridge (Cross-Device)',
-              'Link to desktop PC Assistant for delegation'),
+          _buildSectionHeader(Icons.computer, 'PC Assistant Bridge',
+              'Bi-directional bridge to desktop computer'),
           const SizedBox(height: 12),
           TextField(
             controller: _pcUrlCtrl,
             decoration: InputDecoration(
-              labelText: 'PC Assistant Server URL',
-              hintText: 'http://192.168.x.x:3000 or http://localhost:3000',
-              prefixIcon: const Icon(Icons.dns),
+              labelText: 'PC Server URL',
+              hintText: 'http://192.168.1.50:3000',
+              prefixIcon: const Icon(Icons.lan),
               border:
                   OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
             ),
           ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 12,
-            runSpacing: 8,
+          const SizedBox(height: 10),
+          Row(
             children: [
-              OutlinedButton.icon(
-                icon: _isScanningPc
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.radar, size: 18),
-                label: const Text('Auto-Discover (Wi-Fi)'),
-                onPressed: _isScanningPc ? null : _scanForPcServers,
-              ),
               ElevatedButton.icon(
                 icon: _isTestingPc
                     ? const SizedBox(
-                        width: 16,
-                        height: 16,
+                        width: 14,
+                        height: 14,
                         child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.wifi_tethering, size: 18),
-                label: const Text('Test Connection'),
+                    : const Icon(Icons.network_check, size: 16),
+                label: const Text('Test PC Connection'),
                 onPressed: _isTestingPc ? null : _testPcConnection,
+              ),
+              const SizedBox(width: 10),
+              OutlinedButton.icon(
+                icon: _isScanningPc
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.radar, size: 16),
+                label: const Text('Scan LAN'),
+                onPressed: _isScanningPc ? null : _scanForPcServers,
               ),
             ],
           ),
-          if (_discoveredServers.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.indigo.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                    color: Colors.indigoAccent.withValues(alpha: 0.3)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Row(
-                    children: [
-                      Icon(Icons.devices, size: 18, color: Colors.indigoAccent),
-                      SizedBox(width: 8),
-                      Text('Discovered PC Servers',
-                          style: TextStyle(
-                              fontWeight: FontWeight.bold, fontSize: 13)),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  ..._discoveredServers.map((s) => ListTile(
-                        dense: true,
-                        contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.laptop),
-                        title: Text('${s.hostname} (${s.platform})'),
-                        subtitle:
-                            Text(s.url, style: const TextStyle(fontSize: 12)),
-                        trailing: ElevatedButton(
-                          onPressed: () => _selectDiscoveredServer(s),
-                          child: const Text('Connect'),
-                        ),
-                      )),
-                ],
-              ),
-            ),
-          ],
+
           if (_pcHealthResult != null) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
@@ -494,8 +705,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   Icon(
                     _pcHealthResult!['connected'] == true
                         ? Icons.check_circle
-                        : Icons.error_outline,
-                    size: 18,
+                        : Icons.error,
+                    size: 16,
                     color: _pcHealthResult!['connected'] == true
                         ? Colors.green
                         : Colors.red,
@@ -514,6 +725,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ),
                   ),
+                ],
+              ),
+            ),
+          ],
+
+          if (_discoveredServers.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Card(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: Text('Discovered PC Servers',
+                        style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                  ..._discoveredServers.map((s) => ListTile(
+                        leading: const Icon(Icons.desktop_windows),
+                        title: Text(s.hostname),
+                        subtitle: Text(s.url),
+                        trailing: ElevatedButton(
+                          onPressed: () => _selectDiscoveredServer(s),
+                          child: const Text('Select'),
+                        ),
+                      )),
                 ],
               ),
             ),
@@ -541,6 +777,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       widget.database.isInitialized
                           ? 'Initialized (Encrypted)'
                           : 'Not initialized'),
+                  _buildInfoRow('Primary AI Engine', 'NVIDIA Nemotron 3.5 / 3'),
                   _buildInfoRow('App Version', '1.0.0+1'),
                 ],
               ),
@@ -583,6 +820,60 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
 
           const SizedBox(height: 40),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChip({
+    required String label,
+    required String model,
+    required TextEditingController targetController,
+  }) {
+    final isSelected = targetController.text.trim() == model;
+    return ChoiceChip(
+      label: Text(label, style: const TextStyle(fontSize: 11)),
+      selected: isSelected,
+      onSelected: (_) {
+        setState(() {
+          targetController.text = model;
+        });
+      },
+    );
+  }
+
+  Widget _buildTestStatusCard(Map<String, dynamic> res) {
+    final success = res['success'] == true;
+    final msg = res['message'] ?? res['error'] ?? 'Unknown response';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: success
+            ? Colors.green.withValues(alpha: 0.12)
+            : Colors.red.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: success ? Colors.green : Colors.red,
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            success ? Icons.check_circle : Icons.error,
+            size: 16,
+            color: success ? Colors.green : Colors.red,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              msg,
+              style: TextStyle(
+                fontSize: 11,
+                color: success ? Colors.greenAccent : Colors.redAccent,
+              ),
+            ),
+          ),
         ],
       ),
     );

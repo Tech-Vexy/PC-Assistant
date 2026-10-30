@@ -10,6 +10,8 @@ class KeyVault {
   static const _geminiKey = 'KEY_GEMINI_API';
   static const _nebiusKey = 'KEY_NEBIUS_API';
   static const _nebiusEndpointKey = 'KEY_NEBIUS_ENDPOINT';
+  static const _nebiusSuperEndpointKey = 'KEY_NEBIUS_SUPER_ENDPOINT';
+  static const _nebiusNanoEndpointKey = 'KEY_NEBIUS_NANO_ENDPOINT';
   static const _nebiusSuperModelKey = 'KEY_NEBIUS_SUPER_MODEL';
   static const _nebiusNanoModelKey = 'KEY_NEBIUS_NANO_MODEL';
   static const _dbPassphraseKey = 'KEY_DB_PASSPHRASE';
@@ -89,16 +91,50 @@ class KeyVault {
     await _storage.write(key: _nebiusEndpointKey, value: endpoint.trim());
   }
 
-  /// Retrieves the Nebius endpoint (defaults to official studio endpoint)
+  /// Retrieves the Nebius endpoint (defaults to region-agnostic Token Factory endpoint)
   Future<String> getNebiusEndpoint() async {
     final custom = await _storage.read(key: _nebiusEndpointKey);
     if (custom != null && custom.isNotEmpty) {
       return custom;
     }
-    return 'https://api.studio.nebius.ai/v1';
+    return 'https://api.tokenfactory.nebius.com/v1';
   }
 
-  /// Saves the model identifier used for complex reasoning tasks (default: nvidia/nemotron-3-super-vl)
+  /// Alias for getNebiusEndpoint()
+  Future<String> getNebiusBaseEndpoint() => getNebiusEndpoint();
+
+  /// Saves the dedicated endpoint for Complex Tasks (Nemotron 3.5 Super VL)
+  Future<void> setNebiusSuperEndpoint(String endpoint) async {
+    await _storage.write(key: _nebiusSuperEndpointKey, value: endpoint.trim());
+  }
+
+  /// Retrieves the dedicated endpoint for Complex Tasks (Nemotron 3.5 Super VL)
+  Future<String> getNebiusSuperEndpoint() async {
+    final custom = await _storage.read(key: _nebiusSuperEndpointKey);
+    if (custom != null && custom.isNotEmpty) {
+      return custom;
+    }
+    return getNebiusEndpoint();
+  }
+
+  /// Alias for getNebiusSuperEndpoint()
+  Future<String> getNebiusSuperVlEndpoint() => getNebiusSuperEndpoint();
+
+  /// Saves the dedicated endpoint for Simple Tasks (Nemotron 3 Nano 30B)
+  Future<void> setNebiusNanoEndpoint(String endpoint) async {
+    await _storage.write(key: _nebiusNanoEndpointKey, value: endpoint.trim());
+  }
+
+  /// Retrieves the dedicated endpoint for Simple Tasks (Nemotron 3 Nano 30B)
+  Future<String> getNebiusNanoEndpoint() async {
+    final custom = await _storage.read(key: _nebiusNanoEndpointKey);
+    if (custom != null && custom.isNotEmpty) {
+      return custom;
+    }
+    return getNebiusEndpoint();
+  }
+
+  /// Saves the model identifier used for complex reasoning tasks (default: nvidia/Nemotron-3.5-Super-VL)
   Future<void> setNebiusSuperModel(String model) async {
     await _storage.write(key: _nebiusSuperModelKey, value: model.trim());
   }
@@ -106,13 +142,18 @@ class KeyVault {
   /// Retrieves the model identifier for complex reasoning tasks
   Future<String> getNebiusSuperModel() async {
     final custom = await _storage.read(key: _nebiusSuperModelKey);
-    if (custom != null && custom.isNotEmpty) {
+    if (custom != null &&
+        custom.isNotEmpty &&
+        custom != 'nvidia/nemotron-3-super-vl') {
       return custom;
     }
-    return 'nvidia/nemotron-3-super-vl';
+    return 'nvidia/Nemotron-3.5-Super-VL';
   }
 
-  /// Saves the model identifier used for simple/fast tasks (default: nvidia/nemotron-3-nano)
+  /// Alias for getNebiusSuperModel()
+  Future<String> getNebiusSuperVlModel() => getNebiusSuperModel();
+
+  /// Saves the model identifier used for simple/fast tasks (default: nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B)
   Future<void> setNebiusNanoModel(String model) async {
     await _storage.write(key: _nebiusNanoModelKey, value: model.trim());
   }
@@ -120,10 +161,12 @@ class KeyVault {
   /// Retrieves the model identifier for simple/fast tasks
   Future<String> getNebiusNanoModel() async {
     final custom = await _storage.read(key: _nebiusNanoModelKey);
-    if (custom != null && custom.isNotEmpty) {
+    if (custom != null &&
+        custom.isNotEmpty &&
+        custom != 'nvidia/nemotron-3-nano') {
       return custom;
     }
-    return 'nvidia/nemotron-3-nano';
+    return 'nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B';
   }
 
   /// Retrieves or generates a persistent 256-bit passphrase for local DB encryption
@@ -172,4 +215,7 @@ class KeyVault {
   Future<void> clearAll() async {
     await _storage.deleteAll();
   }
+
+  /// Alias for clearAll()
+  Future<void> clearAllKeys() => clearAll();
 }

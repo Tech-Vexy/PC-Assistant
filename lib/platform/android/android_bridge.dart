@@ -12,6 +12,7 @@ class AndroidBridge {
   static final _trayActionController = StreamController<String>.broadcast();
   static final _hotwordController =
       StreamController<Map<String, String?>>.broadcast();
+  static final _micPermissionController = StreamController<bool>.broadcast();
 
   static bool _handlerInitialized = false;
 
@@ -53,6 +54,8 @@ class AndroidBridge {
           final command = args['command'] as String?;
           _hotwordController.add({'hotword': hotword, 'command': command});
         }
+      } else if (call.method == 'onMicrophonePermissionGranted') {
+        _micPermissionController.add(true);
       }
     });
   }
@@ -68,6 +71,10 @@ class AndroidBridge {
 
   /// Stream emitting when an on-device hotword ("Hey Assistant", "OK Google") is spotted
   Stream<Map<String, String?>> get hotwordStream => _hotwordController.stream;
+
+  /// Stream emitting when microphone permission is granted at runtime
+  Stream<bool> get microphonePermissionStream =>
+      _micPermissionController.stream;
 
   /// Checks if the AssistantAccessibilityService has been enabled by the user in Android Settings
   Future<bool> isAccessibilityEnabled() async {
@@ -326,9 +333,14 @@ class AndroidBridge {
   }
 
   /// Starts on-device continuous hotword listening ("Hey Assistant", "OK Google")
+  /// Automatically prompts for runtime RECORD_AUDIO permission if not already granted.
   Future<bool> startHotwordListening({List<String>? hotwords}) async {
     if (!_isAndroid) return false;
     try {
+      final hasPerm = await isMicrophonePermissionGranted();
+      if (!hasPerm) {
+        await requestMicrophonePermission();
+      }
       final bool? result =
           await _channel.invokeMethod<bool>('startHotwordListening', {
         if (hotwords != null) 'hotwords': hotwords,
@@ -357,5 +369,25 @@ class AndroidBridge {
     } catch (_) {
       return false;
     }
+  }
+
+  /// Speaks text using on-device TextToSpeech
+  Future<bool> speakText(String text) async {
+    if (!_isAndroid) return false;
+    try {
+      final bool? ok =
+          await _channel.invokeMethod<bool>('speakText', {'text': text});
+      return ok ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Halts any active TextToSpeech playback
+  Future<void> stopSpeaking() async {
+    if (!_isAndroid) return;
+    try {
+      await _channel.invokeMethod('stopSpeaking');
+    } catch (_) {}
   }
 }

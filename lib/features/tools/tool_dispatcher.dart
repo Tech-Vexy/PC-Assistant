@@ -148,6 +148,7 @@ class ToolDispatcher {
           break;
 
         case 'navigate':
+        case 'perform_navigation':
           result = await _handleNavigate(args);
           break;
 
@@ -156,6 +157,7 @@ class ToolDispatcher {
           break;
 
         case 'scroll_screen':
+        case 'scroll':
           result = await _handleScrollScreen(args);
           break;
 
@@ -678,13 +680,22 @@ class ToolDispatcher {
     if (androidBridge == null) {
       return {'error': 'Mobile navigation is not available on this platform'};
     }
-    final actionStr = (args['action'] as String).toLowerCase();
-    int actionCode = 1; // BACK
-    if (actionStr == 'home') actionCode = 2;
-    if (actionStr == 'recents') actionCode = 3;
-    if (actionStr == 'notifications') actionCode = 4;
+    final raw = args['action'];
+    int actionCode = 1;
+    String actionStr = 'back';
+    if (raw is int) {
+      actionCode = raw;
+      if (raw == 2) actionStr = 'home';
+      if (raw == 3) actionStr = 'recents';
+      if (raw == 4) actionStr = 'notifications';
+    } else if (raw is String) {
+      actionStr = raw.toLowerCase();
+      if (actionStr == 'home' || actionStr == '2') actionCode = 2;
+      if (actionStr == 'recents' || actionStr == '3') actionCode = 3;
+      if (actionStr == 'notifications' || actionStr == '4') actionCode = 4;
+    }
     final success = await androidBridge!.performNavigation(actionCode);
-    return {'action': actionStr, 'success': success};
+    return {'action': actionStr, 'action_code': actionCode, 'success': success};
   }
 
   Future<Map<String, dynamic>> _handleInspectScreen(
@@ -734,15 +745,20 @@ class ToolDispatcher {
 
   Future<Map<String, dynamic>> _handleScrollScreen(
       Map<String, dynamic> args) async {
-    final direction = (args['direction'] as String?)?.toLowerCase() ?? 'down';
-    final forward = direction != 'up';
+    final bool forward;
+    if (args.containsKey('forward') && args['forward'] is bool) {
+      forward = args['forward'] as bool;
+    } else {
+      final direction = (args['direction'] as String?)?.toLowerCase() ?? 'down';
+      forward = direction != 'up';
+    }
 
     if (androidBridge == null) {
       return {'error': 'Screen scrolling is not available on this platform'};
     }
 
     final success = await androidBridge!.scroll(forward: forward);
-    return {'action': 'scroll', 'direction': direction, 'success': success};
+    return {'action': 'scroll', 'forward': forward, 'success': success};
   }
 
   Future<Map<String, dynamic>> _handleCaptureScreen(

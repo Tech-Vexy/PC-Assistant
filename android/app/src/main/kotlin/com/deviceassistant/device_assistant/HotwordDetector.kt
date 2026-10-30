@@ -52,6 +52,9 @@ class HotwordDetector(
     fun startListening() {
         mainHandler.post {
             if (isListening) return@post
+            if (context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                return@post
+            }
             isListening = true
             initAndStartRecognizer()
         }
@@ -94,6 +97,11 @@ class HotwordDetector(
 
             override fun onError(error: Int) {
                 isRecognitionActive = false
+                // Stop trying if permission is denied
+                if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                    isListening = false
+                    return
+                }
                 // Schedule restart on error if continuous hotword listening is active
                 if (isListening) {
                     mainHandler.postDelayed({

@@ -6,14 +6,17 @@ import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
+import android.speech.tts.TextToSpeech
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.util.Locale
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.deviceassistant/bridge"
     private var methodChannel: MethodChannel? = null
     private var hotwordDetector: HotwordDetector? = null
+    private var textToSpeech: TextToSpeech? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -24,6 +27,12 @@ class MainActivity : FlutterActivity() {
                     "onHotwordDetected",
                     mapOf("hotword" to hotword, "command" to command)
                 )
+            }
+        }
+
+        textToSpeech = TextToSpeech(this) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                textToSpeech?.language = Locale.getDefault()
             }
         }
 
@@ -238,11 +247,16 @@ class MainActivity : FlutterActivity() {
 
                     "startHotwordListening" -> {
                         val hotwords = call.argument<List<String>>("hotwords") ?: emptyList()
-                        if (hotwords.isNotEmpty()) {
-                            hotwordDetector?.updateHotwords(hotwords)
+                        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                            requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), 102)
+                            result.success(false)
+                        } else {
+                            if (hotwords.isNotEmpty()) {
+                                hotwordDetector?.updateHotwords(hotwords)
+                            }
+                            hotwordDetector?.startListening()
+                            result.success(true)
                         }
-                        hotwordDetector?.startListening()
-                        result.success(true)
                     }
 
                     "stopHotwordListening" -> {
@@ -253,6 +267,21 @@ class MainActivity : FlutterActivity() {
                     "isHotwordListening" -> {
                         val isListening = hotwordDetector?.isListening() ?: false
                         result.success(isListening)
+                    }
+
+                    "speakText" -> {
+                        val text = call.argument<String>("text") ?: ""
+                        if (text.isNotEmpty()) {
+                            textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "device_assistant_tts")
+                            result.success(true)
+                        } else {
+                            result.success(false)
+                        }
+                    }
+
+                    "stopSpeaking" -> {
+                        textToSpeech?.stop()
+                        result.success(true)
                     }
 
                     else -> {
@@ -293,8 +322,20 @@ class MainActivity : FlutterActivity() {
         return enabledServices.split(":").any { it.equals(expectedComponentName, ignoreCase = true) }
     }
 
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 102 && grantResults.isNotEmpty() && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            hotwordDetector?.startListening()
+            runOnUiThread {
+                methodChannel?.invokeMethod("onMicrophonePermissionGranted", null)
+            }
+        }
+    }
+
     override fun onDestroy() {
         hotwordDetector?.stopListening()
+        textToSpeech?.stop()
+        textToSpeech?.shutdown()
         super.onDestroy()
     }
 }

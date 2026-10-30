@@ -21,6 +21,7 @@ class ChatMessage {
 }
 
 /// Dedicated, uncluttered text chat tab for Device Assistant
+/// Powered by NVIDIA Nemotron on Nebius Token Factory with real-time tool calling.
 class ChatTab extends StatefulWidget {
   final List<ChatMessage> messages;
   final Future<void> Function(String text) onSendMessage;
@@ -52,8 +53,8 @@ class _ChatTabState extends State<ChatTab> {
 
   final List<String> _quickSuggestions = [
     'System status',
-    'Take a screenshot',
     'List memories',
+    'Take a screenshot',
     'Scroll down',
     'Go home',
     'Show recents',
@@ -121,17 +122,32 @@ class _ChatTabState extends State<ChatTab> {
           child: Row(
             children: [
               Icon(
-                Icons.smart_toy_outlined,
-                size: 18,
-                color: widget.isLiveConnected ? Colors.cyanAccent : Colors.grey,
+                Icons.psychology,
+                size: 20,
+                color: widget.isLiveConnected
+                    ? Colors.cyanAccent
+                    : Colors.tealAccent,
               ),
-              const SizedBox(width: 8),
-              Text(
-                widget.isLiveConnected
-                    ? 'Connected to Gemini 3.8 Live'
-                    : 'Device Assistant Chat (Idle)',
-                style:
-                    const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+              const SizedBox(width: 10),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'NVIDIA Nemotron Agent',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
+                  Text(
+                    widget.isLiveConnected
+                        ? 'Device STT: Listening on-device...'
+                        : 'Nebius Token Factory | STT Ready',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: widget.isLiveConnected
+                          ? Colors.greenAccent
+                          : Colors.grey.shade400,
+                    ),
+                  ),
+                ],
               ),
               const Spacer(),
               if (widget.messages.isNotEmpty && widget.onClearChat != null)
@@ -150,8 +166,8 @@ class _ChatTabState extends State<ChatTab> {
                         : Colors.grey,
                   ),
                   tooltip: widget.isLiveConnected
-                      ? 'Disconnect Voice'
-                      : 'Connect Voice (Gemini Live)',
+                      ? 'Stop Device STT'
+                      : 'Start Device STT',
                   onPressed: widget.onToggleLive,
                 ),
             ],
@@ -172,7 +188,7 @@ class _ChatTabState extends State<ChatTab> {
                 ),
         ),
 
-        // Quick Suggestion Chips (when idle)
+        // Quick Suggestion Chips (when idle or list empty)
         if (widget.messages.isEmpty)
           Container(
             height: 44,
@@ -218,47 +234,35 @@ class _ChatTabState extends State<ChatTab> {
                     textInputAction: TextInputAction.send,
                     onSubmitted: (_) => _handleSend(),
                     decoration: InputDecoration(
-                      hintText: 'Type a command or ask assistant...',
+                      hintText: 'Ask or command Nemotron...',
                       hintStyle:
                           TextStyle(fontSize: 13, color: Colors.grey.shade500),
                       isDense: true,
                       contentPadding: const EdgeInsets.symmetric(
                           horizontal: 14, vertical: 10),
                       border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(24),
+                        borderRadius: BorderRadius.circular(22),
                         borderSide: BorderSide(
                             color: theme.dividerColor.withValues(alpha: 0.4)),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(24),
-                        borderSide: BorderSide(
-                            color: theme.dividerColor.withValues(alpha: 0.3)),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(24),
-                        borderSide: const BorderSide(color: Colors.cyanAccent),
                       ),
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                IconButton.filled(
-                  icon: _isSending
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Icon(Icons.send, size: 18),
-                  style: IconButton.styleFrom(
-                    backgroundColor: Colors.indigoAccent,
-                    foregroundColor: Colors.white,
-                  ),
-                  onPressed: _isSending ? null : () => _handleSend(),
-                ),
+                const SizedBox(width: 6),
+                _isSending
+                    ? const Padding(
+                        padding: EdgeInsets.all(10),
+                        child: SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      )
+                    : IconButton(
+                        icon: const Icon(Icons.send_rounded,
+                            size: 20, color: Colors.cyanAccent),
+                        onPressed: () => _handleSend(),
+                      ),
               ],
             ),
           ),
@@ -269,31 +273,33 @@ class _ChatTabState extends State<ChatTab> {
 
   Widget _buildEmptyState(ThemeData theme) {
     return Center(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
+      child: Padding(
+        padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              width: 72,
-              height: 72,
+              padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: Colors.indigoAccent.withValues(alpha: 0.12),
+                color: Colors.indigo.withValues(alpha: 0.15),
                 border: Border.all(
                     color: Colors.indigoAccent.withValues(alpha: 0.3)),
               ),
-              child: const Icon(Icons.chat_bubble_outline,
-                  size: 32, color: Colors.indigoAccent),
+              child: const Icon(
+                Icons.psychology,
+                size: 48,
+                color: Colors.cyanAccent,
+              ),
             ),
             const SizedBox(height: 16),
             const Text(
-              'How can I help you today?',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              'NVIDIA Nemotron On-Device Agent',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Text(
-              'Send natural language queries or direct device commands.\nAutomate tasks, take screenshots, remember facts, or control apps.',
+              'Type a command, ask factual queries, or tap the microphone to use continuous on-device speech recognition.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 12, color: Colors.grey.shade400),
             ),
@@ -304,10 +310,14 @@ class _ChatTabState extends State<ChatTab> {
   }
 
   Widget _buildMessageBubble(ChatMessage msg, ThemeData theme) {
-    // Tool execution notice bubble
+    // Tool execution notice bubble with rich real-result breakdown
     if (msg.toolData != null) {
       final tool = msg.toolData!['tool'] ?? 'device_tool';
       final isBlocked = msg.toolData!['status'] == 'blocked';
+      final result = (msg.toolData!['result'] as Map<dynamic, dynamic>?)
+              ?.cast<String, dynamic>() ??
+          {};
+
       return Container(
         margin: const EdgeInsets.symmetric(vertical: 4),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -322,19 +332,19 @@ class _ChatTabState extends State<ChatTab> {
                 : Colors.indigoAccent.withValues(alpha: 0.3),
           ),
         ),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(
-              isBlocked ? Icons.block : Icons.build_circle_outlined,
-              size: 16,
-              color: isBlocked ? Colors.redAccent : Colors.cyanAccent,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
+            Row(
+              children: [
+                Icon(
+                  isBlocked ? Icons.block : Icons.build_circle_outlined,
+                  size: 16,
+                  color: isBlocked ? Colors.redAccent : Colors.cyanAccent,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
                     'Device Tool: $tool',
                     style: TextStyle(
                       fontSize: 12,
@@ -342,22 +352,29 @@ class _ChatTabState extends State<ChatTab> {
                       color: isBlocked ? Colors.redAccent : Colors.cyanAccent,
                     ),
                   ),
-                  if (msg.toolData!['args'] != null)
-                    Text(
-                      'Args: ${msg.toolData!['args']}',
-                      style: const TextStyle(fontSize: 11, color: Colors.grey),
-                    ),
-                ],
-              ),
+                ),
+                if (tool == 'remember' &&
+                    !isBlocked &&
+                    widget.onDispatchTool != null)
+                  TextButton(
+                    onPressed: () => widget.onDispatchTool!('undo_last', {}),
+                    child: const Text('Undo',
+                        style:
+                            TextStyle(fontSize: 11, color: Colors.amberAccent)),
+                  ),
+              ],
             ),
-            if (tool == 'remember' &&
-                !isBlocked &&
-                widget.onDispatchTool != null)
-              TextButton(
-                onPressed: () => widget.onDispatchTool!('undo_last', {}),
-                child: const Text('Undo',
-                    style: TextStyle(fontSize: 11, color: Colors.amberAccent)),
+            if (msg.toolData!['args'] != null &&
+                (msg.toolData!['args'] as Map).isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 2, bottom: 4),
+                child: Text(
+                  'Args: ${msg.toolData!['args']}',
+                  style: const TextStyle(fontSize: 11, color: Colors.grey),
+                ),
               ),
+            const SizedBox(height: 4),
+            _buildToolResultContent(result, theme),
           ],
         ),
       );
@@ -427,6 +444,96 @@ class _ChatTabState extends State<ChatTab> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildToolResultContent(Map<String, dynamic> result, ThemeData theme) {
+    if (result.isEmpty) {
+      return const Text('Action executed successfully.',
+          style: TextStyle(fontSize: 11, color: Colors.greenAccent));
+    }
+    if (result.containsKey('error')) {
+      return Text('Error: ${result['error']}',
+          style: const TextStyle(fontSize: 11, color: Colors.redAccent));
+    }
+    if (result.containsKey('blocked') || result['status'] == 'blocked') {
+      return Text(
+        'Blocked by Security Shield: ${result['security_alert'] ?? result['reason'] ?? 'Sensitive application active'}',
+        style: const TextStyle(fontSize: 11, color: Colors.orangeAccent),
+      );
+    }
+    if (result.containsKey('os')) {
+      return Wrap(
+        spacing: 6,
+        runSpacing: 4,
+        children: [
+          _buildInfoChip(Icons.desktop_windows,
+              '${result['os']} ${result['os_version'] ?? ''}'),
+          _buildInfoChip(Icons.memory, '${result['cores'] ?? 1} cores'),
+          _buildInfoChip(Icons.devices, '${result['device'] ?? 'Mobile'}'),
+        ],
+      );
+    }
+    if (result.containsKey('memories')) {
+      final list = result['memories'] as List<dynamic>? ?? [];
+      if (list.isEmpty) {
+        return const Text('No memories stored in database.',
+            style: TextStyle(fontSize: 11, color: Colors.grey));
+      }
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: list.take(5).map((m) {
+          final map = m is Map ? m : {'key': 'key', 'value': m.toString()};
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 1.5),
+            child: Text(
+              '• ${map['key']}: ${map['value']}',
+              style: const TextStyle(fontSize: 11, color: Colors.cyanAccent),
+            ),
+          );
+        }).toList(),
+      );
+    }
+    if (result.containsKey('answer')) {
+      return Text('${result['answer']}',
+          style: const TextStyle(fontSize: 11, color: Colors.white70));
+    }
+    if (result.containsKey('steps')) {
+      final steps = result['steps'] as List<dynamic>? ?? [];
+      return Text(
+        'Plan generated with ${steps.length} steps for: "${result['goal'] ?? ''}"',
+        style: const TextStyle(fontSize: 11, color: Colors.greenAccent),
+      );
+    }
+    if (result.containsKey('format') && result['format'] == 'image/jpeg') {
+      return Text('Screenshot captured (${result['size_bytes'] ?? 0} bytes)',
+          style: const TextStyle(fontSize: 11, color: Colors.greenAccent));
+    }
+    if (result.containsKey('status')) {
+      return Text('Status: ${result['status']}',
+          style: const TextStyle(fontSize: 11, color: Colors.greenAccent));
+    }
+    return Text(result.toString(),
+        style: const TextStyle(fontSize: 11, color: Colors.grey));
+  }
+
+  Widget _buildInfoChip(IconData icon, String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: Colors.cyanAccent.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: Colors.cyanAccent),
+          const SizedBox(width: 4),
+          Text(text,
+              style: const TextStyle(fontSize: 10, color: Colors.cyanAccent)),
+        ],
       ),
     );
   }

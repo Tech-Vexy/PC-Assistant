@@ -1,0 +1,10 @@
+# Release Keystore Configuration for Device Assistant
+# Copy this file to `android/key.properties` and fill in your keystore credentials:
+#
+# To generate a new release keystore, run:
+# keytool -genkey -v -keystore android/app/upload-keystore.jks -storetype JKS -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+#
+keyAlias=upload
+keyPassword=your_key_password_here
+storeFile=upload-keystore.jks
+storePassword=your_store_password_here

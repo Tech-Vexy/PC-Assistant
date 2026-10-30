@@ -6,19 +6,20 @@ import 'package:device_assistant/core/network/nebius_client.dart';
 
 void main() {
   group('NebiusClient Smart Routing Tests', () {
-    test('chatCompletion with TaskComplexity.simple routes to Nemotron-3-nano',
+    test(
+        'chatCompletion with TaskComplexity.simple routes to Nemotron-3-Nano-30B',
         () async {
       final mockClient = MockClient((request) async {
         expect(request.url.path, endsWith('/chat/completions'));
         expect(request.headers['Authorization'], equals('Bearer test_key'));
 
         final body = jsonDecode(request.body) as Map<String, dynamic>;
-        expect(body['model'], equals('nvidia/nemotron-3-nano'));
+        expect(body['model'], equals('nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B'));
 
         final responseBody = {
           'choices': [
             {
-              'message': {'content': 'Fast reply from Nemotron 3 nano'}
+              'message': {'content': 'Fast reply from Nemotron 3 nano 30b'}
             }
           ]
         };
@@ -33,20 +34,22 @@ void main() {
         complexity: TaskComplexity.simple,
       );
 
-      expect(reply, equals('Fast reply from Nemotron 3 nano'));
+      expect(reply, equals('Fast reply from Nemotron 3 nano 30b'));
     });
 
     test(
-        'chatCompletion with TaskComplexity.complex routes to Nemotron-3-super-vl',
+        'chatCompletion with TaskComplexity.complex routes to Nemotron-3.5-Super-VL',
         () async {
       final mockClient = MockClient((request) async {
         final body = jsonDecode(request.body) as Map<String, dynamic>;
-        expect(body['model'], equals('nvidia/nemotron-3-super-vl'));
+        expect(body['model'], equals('nvidia/Nemotron-3.5-Super-VL'));
 
         final responseBody = {
           'choices': [
             {
-              'message': {'content': 'Deep reasoning from Nemotron 3 super vl'}
+              'message': {
+                'content': 'Deep reasoning from Nemotron 3.5 super vl'
+              }
             }
           ]
         };
@@ -64,11 +67,130 @@ void main() {
         complexity: TaskComplexity.complex,
       );
 
-      expect(reply, equals('Deep reasoning from Nemotron 3 super vl'));
+      expect(reply, equals('Deep reasoning from Nemotron 3.5 super vl'));
+    });
+
+    test('chatCompletion handles reasoning fallback when content is null',
+        () async {
+      final mockClient = MockClient((request) async {
+        final responseBody = {
+          'choices': [
+            {
+              'message': {
+                'content': null,
+                'reasoning': 'Extracted reasoning from thinking model',
+              }
+            }
+          ]
+        };
+        return http.Response(jsonEncode(responseBody), 200);
+      });
+
+      final client = NebiusClient(apiKey: 'test_key', httpClient: mockClient);
+      final reply = await client.chatCompletion(
+        messages: [
+          {'role': 'user', 'content': 'Explain logic'}
+        ],
+      );
+
+      expect(reply, equals('Extracted reasoning from thinking model'));
+    });
+
+    test('supports dedicated per-model endpoints for Super VL and Nano',
+        () async {
+      final mockClient = MockClient((request) async {
+        if (request.url.host == 'super-vl.tokenfactory.nebius.com') {
+          return http.Response(
+              '{"choices":[{"message":{"content":"from super endpoint"}}]}',
+              200);
+        } else if (request.url.host == 'nano.tokenfactory.nebius.com') {
+          return http.Response(
+              '{"choices":[{"message":{"content":"from nano endpoint"}}]}',
+              200);
+        }
+        return http.Response('{"error":"unknown host"}', 404);
+      });
+
+      final client = NebiusClient(
+        apiKey: 'test_key',
+        superVlEndpoint: 'https://super-vl.tokenfactory.nebius.com/v1',
+        nanoEndpoint: 'https://nano.tokenfactory.nebius.com/v1',
+        httpClient: mockClient,
+      );
+
+      final superRes = await client.chatCompletion(
+        messages: [
+          {'role': 'user', 'content': 'plan'}
+        ],
+        complexity: TaskComplexity.complex,
+      );
+      expect(superRes, equals('from super endpoint'));
+
+      final nanoRes = await client.chatCompletion(
+        messages: [
+          {'role': 'user', 'content': 'hello'}
+        ],
+        complexity: TaskComplexity.simple,
+      );
+      expect(nanoRes, equals('from nano endpoint'));
+    });
+
+    test('normalizes user model aliases to official identifiers', () {
+      expect(NebiusClient.normalizeModel('Nemotron-3-Nano-30b'),
+          equals('nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B'));
+      expect(NebiusClient.normalizeModel('nemotron-3-nano'),
+          equals('nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B'));
+      expect(NebiusClient.normalizeModel('Nemotron 3.5 super vl'),
+          equals('nvidia/Nemotron-3.5-Super-VL'));
+      expect(NebiusClient.normalizeModel('nvidia/nemotron-3-super-vl'),
+          equals('nvidia/Nemotron-3.5-Super-VL'));
+      expect(NebiusClient.normalizeModel('Nemotron 3.5 Lightning'),
+          equals('nvidia/Nemotron-3_5-Lightning'));
+      expect(NebiusClient.normalizeModel('nvidia/nemotron-3-super-120b'),
+          equals('nvidia/nemotron-3-super-120b-a12b'));
+    });
+
+    test('listModels and testConnection correctly evaluate Nebius endpoint',
+        () async {
+      final mockModelsResponse = {
+        'object': 'list',
+        'data': [
+          {'id': 'nvidia/Nemotron-3.5-Super-VL'},
+          {'id': 'nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B'},
+          {'id': 'nvidia/Nemotron-3_5-Lightning'},
+          {'id': 'meta/llama-3.3-70b-instruct'},
+        ]
+      };
+
+      final mockClient = MockClient((request) async {
+        if (request.url.path.endsWith('/models')) {
+          expect(request.headers['Authorization'], equals('Bearer test_key'));
+          return http.Response(jsonEncode(mockModelsResponse), 200);
+        }
+        if (request.url.path.endsWith('/chat/completions')) {
+          return http.Response(
+              '{"choices":[{"message":{"content":"OK Verified"}}]}', 200);
+        }
+        return http.Response('{"error":"not found"}', 404);
+      });
+
+      final client = NebiusClient(apiKey: 'test_key', httpClient: mockClient);
+      final models = await client.listModels();
+      expect(models.length, equals(4));
+      expect(models, contains('nvidia/Nemotron-3.5-Super-VL'));
+      expect(models, contains('nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B'));
+
+      final health = await client.testConnection(
+        model: 'nvidia/Nemotron-3.5-Super-VL',
+      );
+      expect(health['success'], isTrue);
+      expect(health['modelCount'], equals(4));
+      expect((health['nvidiaModels'] as List).length, equals(3));
+      expect(health['hasTargetModel'], isTrue);
     });
 
     test(
-        'planTask automatically routes request with model=nvidia/nemotron-3-super-vl',
+        'planTask automatically routes request with model=nvidia/Nemotron-3.5-Super-VL',
         () async {
       final planResponse = {
         'choices': [
@@ -100,7 +222,7 @@ void main() {
 
       final mockClient = MockClient((request) async {
         final body = jsonDecode(request.body) as Map<String, dynamic>;
-        expect(body['model'], equals('nvidia/nemotron-3-super-vl'));
+        expect(body['model'], equals('nvidia/Nemotron-3.5-Super-VL'));
         return http.Response(jsonEncode(planResponse), 200);
       });
 
@@ -116,7 +238,7 @@ void main() {
     });
 
     test(
-        'extractMemory automatically routes request with model=nvidia/nemotron-3-nano',
+        'extractMemory automatically routes request with model=nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B',
         () async {
       final memoryResponse = {
         'choices': [
@@ -137,7 +259,7 @@ void main() {
 
       final mockClient = MockClient((request) async {
         final body = jsonDecode(request.body) as Map<String, dynamic>;
-        expect(body['model'], equals('nvidia/nemotron-3-nano'));
+        expect(body['model'], equals('nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B'));
         return http.Response(jsonEncode(memoryResponse), 200);
       });
 

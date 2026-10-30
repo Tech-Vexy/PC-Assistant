@@ -295,7 +295,8 @@ void main() {
       expect(res['status'], equals('success'));
       expect(res['answer'], contains('Flutter is an open-source UI'));
       expect(res['complexity'], equals('simple'));
-      expect(res['model_used'], equals('nvidia/nemotron-3-nano'));
+      expect(
+          res['model_used'], equals('nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B'));
       expect(res['source'], contains('nemotron smart routing'));
     });
   });

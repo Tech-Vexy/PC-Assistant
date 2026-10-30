@@ -42,7 +42,6 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final AudioRecordingService _audioRecorder = AudioRecordingService();
-  final TextEditingController _voiceQuickInputCtrl = TextEditingController();
   AudioPlaybackService? _audioPlayback;
   int _activeTabIndex = 0;
 
@@ -72,6 +71,7 @@ class _HomeScreenState extends State<HomeScreen>
   StreamSubscription? _audioOutputSub;
   StreamSubscription? _interruptionSub;
   StreamSubscription? _hotwordSub;
+  StreamSubscription? _micPermSub;
 
   List<Map<String, dynamic>> _pendingPcApprovals = [];
   Timer? _approvalPollTimer;
@@ -129,12 +129,14 @@ class _HomeScreenState extends State<HomeScreen>
     final nebiusKey = await widget.keyVault.getNebiusApiKey();
 
     if (nebiusKey != null && nebiusKey.isNotEmpty) {
-      final endpoint = await widget.keyVault.getNebiusEndpoint();
+      final superEndpoint = await widget.keyVault.getNebiusSuperEndpoint();
+      final nanoEndpoint = await widget.keyVault.getNebiusNanoEndpoint();
       final superModel = await widget.keyVault.getNebiusSuperModel();
       final nanoModel = await widget.keyVault.getNebiusNanoModel();
       _nebiusClient = NebiusClient(
         apiKey: nebiusKey,
-        endpoint: endpoint,
+        superVlEndpoint: superEndpoint,
+        nanoEndpoint: nanoEndpoint,
         superVlModel: superModel,
         nanoModel: nanoModel,
       );
@@ -195,6 +197,10 @@ class _HomeScreenState extends State<HomeScreen>
       _activeHotwordPhrase = await widget.keyVault.getCustomHotword();
       if (hotwordEnabled) {
         _isHotwordActive = true;
+        final hasMic = await _androidBridge!.isMicrophonePermissionGranted();
+        if (!hasMic) {
+          await _androidBridge!.requestMicrophonePermission();
+        }
         await _androidBridge!.startHotwordListening(
           hotwords: [
             _activeHotwordPhrase,
@@ -208,6 +214,26 @@ class _HomeScreenState extends State<HomeScreen>
       _hotwordSub?.cancel();
       _hotwordSub =
           _androidBridge!.hotwordStream.listen(_handleHotwordDetected);
+
+      _micPermSub?.cancel();
+      _micPermSub =
+          _androidBridge!.microphonePermissionStream.listen((granted) {
+        if (granted && mounted) {
+          if (_isLocalSttActive) {
+            _androidBridge!.startHotwordListening(hotwords: ['*']);
+          } else if (_isHotwordActive) {
+            _androidBridge!.startHotwordListening(
+              hotwords: [
+                _activeHotwordPhrase,
+                'hey assistant',
+                'ok google',
+                'device assistant',
+                'computer'
+              ],
+            );
+          }
+        }
+      });
     } else if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
       _desktopDriver = DesktopDriver(onToggleVoice: _toggleConnection);
       await _desktopDriver!.initialize();
@@ -388,41 +414,7 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
 
     if (command != null && command.isNotEmpty) {
       final cleanCommand = command.trim();
-      final lower = cleanCommand.toLowerCase();
-
-      // Check if command is a direct local device shortcut
-      if (lower.startsWith('open ')) {
-        final app = cleanCommand.substring(5).trim();
-        _dispatcher
-            ?.dispatch(toolName: 'open_application', args: {'app_name': app});
-      } else if (lower == 'take a screenshot' ||
-          lower == 'take screenshot' ||
-          lower == 'screenshot' ||
-          lower == 'capture screen') {
-        _dispatcher?.dispatch(toolName: 'capture_screen', args: {});
-      } else if (lower == 'scroll down') {
-        _dispatcher?.dispatch(toolName: 'scroll', args: {'forward': true});
-      } else if (lower == 'scroll up') {
-        _dispatcher?.dispatch(toolName: 'scroll', args: {'forward': false});
-      } else if (lower == 'go back' ||
-          lower == 'press back' ||
-          lower == 'back') {
-        _dispatcher
-            ?.dispatch(toolName: 'perform_navigation', args: {'action': 1});
-      } else if (lower == 'go home' ||
-          lower == 'press home' ||
-          lower == 'home') {
-        _dispatcher
-            ?.dispatch(toolName: 'perform_navigation', args: {'action': 2});
-      } else if (lower == 'show recents' ||
-          lower == 'recent apps' ||
-          lower == 'recents') {
-        _dispatcher
-            ?.dispatch(toolName: 'perform_navigation', args: {'action': 3});
-      } else {
-        // Compound natural language request - forward directly as user turn to Gemini Live
-        _handleUserTextInput(cleanCommand);
-      }
+      await _handleUserTextInput(cleanCommand);
     }
   }
 
@@ -445,12 +437,15 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
 
     final lower = cleanCommand.toLowerCase();
 
-    // Check if command is a direct local device shortcut
+    // Check if command is a direct local device shortcut for instantaneous action
     if (lower.startsWith('open ')) {
       final app = cleanCommand.substring(5).trim();
       final res = await _dispatcher
           ?.dispatch(toolName: 'open_application', args: {'app_name': app});
-      _recordToolResult('open_application', {'app_name': app}, res ?? {});
+      final summary = 'Opened application: $app';
+      _recordToolResult('open_application', {'app_name': app}, res ?? {},
+          summaryText: summary);
+      _androidBridge?.speakText(summary);
       return;
     } else if (lower == 'take a screenshot' ||
         lower == 'take screenshot' ||
@@ -458,83 +453,73 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
         lower == 'capture screen') {
       final res =
           await _dispatcher?.dispatch(toolName: 'capture_screen', args: {});
-      _recordToolResult('capture_screen', {}, res ?? {});
+      final bytes = res?['size_bytes'] ?? 0;
+      final summary = 'Screenshot captured ($bytes bytes).';
+      _recordToolResult('capture_screen', {}, res ?? {}, summaryText: summary);
+      _androidBridge?.speakText(summary);
       return;
     } else if (lower == 'scroll down') {
       final res = await _dispatcher
           ?.dispatch(toolName: 'scroll', args: {'forward': true});
-      _recordToolResult('scroll', {'forward': true}, res ?? {});
+      const summary = 'Scrolled screen down.';
+      _recordToolResult('scroll', {'forward': true}, res ?? {},
+          summaryText: summary);
       return;
     } else if (lower == 'scroll up') {
       final res = await _dispatcher
           ?.dispatch(toolName: 'scroll', args: {'forward': false});
-      _recordToolResult('scroll', {'forward': false}, res ?? {});
+      const summary = 'Scrolled screen up.';
+      _recordToolResult('scroll', {'forward': false}, res ?? {},
+          summaryText: summary);
       return;
     } else if (lower == 'go back' || lower == 'press back' || lower == 'back') {
       final res = await _dispatcher
           ?.dispatch(toolName: 'perform_navigation', args: {'action': 1});
-      _recordToolResult('perform_navigation', {'action': 1}, res ?? {});
+      const summary = 'Navigated back.';
+      _recordToolResult('perform_navigation', {'action': 1}, res ?? {},
+          summaryText: summary);
       return;
     } else if (lower == 'go home' || lower == 'press home' || lower == 'home') {
       final res = await _dispatcher
           ?.dispatch(toolName: 'perform_navigation', args: {'action': 2});
-      _recordToolResult('perform_navigation', {'action': 2}, res ?? {});
+      const summary = 'Navigated to home screen.';
+      _recordToolResult('perform_navigation', {'action': 2}, res ?? {},
+          summaryText: summary);
       return;
     } else if (lower == 'show recents' ||
         lower == 'recent apps' ||
         lower == 'recents') {
       final res = await _dispatcher
           ?.dispatch(toolName: 'perform_navigation', args: {'action': 3});
-      _recordToolResult('perform_navigation', {'action': 3}, res ?? {});
+      const summary = 'Opened recent apps view.';
+      _recordToolResult('perform_navigation', {'action': 3}, res ?? {},
+          summaryText: summary);
       return;
     } else if (lower == 'system status' || lower == 'status') {
       final res =
           await _dispatcher?.dispatch(toolName: 'system_status', args: {});
-      _recordToolResult('system_status', {}, res ?? {});
+      final os = res?['os'] ?? 'Device';
+      final cores = res?['cores'] ?? 1;
+      final dev = res?['device'] ?? '';
+      final summary = 'System Status: $os ($dev) with $cores CPU cores.';
+      _recordToolResult('system_status', {}, res ?? {}, summaryText: summary);
+      _androidBridge?.speakText(summary);
       return;
     } else if (lower == 'list memories' || lower == 'memories') {
       final res =
           await _dispatcher?.dispatch(toolName: 'list_memories', args: {});
-      _recordToolResult('list_memories', {}, res ?? {});
+      final count = res?['count'] ?? 0;
+      final summary = 'Found $count memories in local encrypted database.';
+      _recordToolResult('list_memories', {}, res ?? {}, summaryText: summary);
+      _androidBridge?.speakText(summary);
       return;
     }
 
-    // Forward natural language query to Gemini Live if connected
-    if (_isConnected) {
-      _liveClient?.sendTextMessage(cleanCommand);
-      return;
-    }
-
-    // If Local STT is actively listening, route directly to Nemotron fallback
-    if (_isLocalSttActive) {
-      await _processCommandWithNemotronFallback(cleanCommand);
-      return;
-    }
-
-    // Try connecting to Gemini Live if key is present
-    final geminiKey = await widget.keyVault.getGeminiApiKey();
-    if (geminiKey != null && geminiKey.isNotEmpty) {
-      setState(() => _isConnecting = true);
-      try {
-        _setupGeminiClient(geminiKey);
-        await _liveClient?.connect();
-        _liveClient?.sendTextMessage(cleanCommand);
-        return;
-      } catch (_) {
-        if (mounted) {
-          setState(() {
-            _isConnecting = false;
-            _isConnected = false;
-          });
-        }
-      }
-    }
-
-    // Fall back to Nemotron models on Nebius Token Factory
-    await _processCommandWithNemotronFallback(cleanCommand);
+    // Process all queries and compound tasks through NVIDIA Nemotron Tool Calling
+    await _processCommandWithNemotron(cleanCommand);
   }
 
-  Future<void> _processCommandWithNemotronFallback(String command) async {
+  Future<void> _processCommandWithNemotron(String command) async {
     final clean = command.trim();
     if (clean.isEmpty) return;
 
@@ -547,17 +532,35 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
               id: 'err_${DateTime.now().millisecondsSinceEpoch}',
               isUser: false,
               text:
-                  'Nemotron fallback unavailable: No Nebius API key configured in Settings.',
+                  'NVIDIA Nemotron requires a Nebius Token Factory API key. Please configure your key in Settings.',
               timestamp: DateTime.now(),
               isError: true,
             ),
           );
         });
       }
+      _showKeyDialog();
       return;
     }
 
-    _nebiusClient ??= NebiusClient(apiKey: nebiusKey);
+    final baseEndpoint = await widget.keyVault.getNebiusBaseEndpoint();
+    final superVlEndpoint = await widget.keyVault.getNebiusSuperVlEndpoint();
+    final nanoEndpoint = await widget.keyVault.getNebiusNanoEndpoint();
+    final superVlModel = await widget.keyVault.getNebiusSuperVlModel();
+    final nanoModel = await widget.keyVault.getNebiusNanoModel();
+
+    _nebiusClient ??= NebiusClient(
+      apiKey: nebiusKey,
+      endpoint: baseEndpoint,
+      superVlEndpoint: superVlEndpoint,
+      nanoEndpoint: nanoEndpoint,
+      superVlModel: superVlModel,
+      nanoModel: nanoModel,
+    );
+
+    final complexity = NebiusClient.classifyTask(taskDescription: clean);
+    final activeModel =
+        complexity == TaskComplexity.complex ? superVlModel : nanoModel;
 
     final pendingMsgId = 'nemotron_${DateTime.now().millisecondsSinceEpoch}';
     if (mounted) {
@@ -566,7 +569,7 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
           ChatMessage(
             id: pendingMsgId,
             isUser: false,
-            text: 'Processing with Nemotron fallback...',
+            text: 'Thinking with Nemotron ($activeModel)...',
             timestamp: DateTime.now(),
           ),
         );
@@ -574,11 +577,9 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
     }
 
     try {
-      final complexity = NebiusClient.classifyTask(taskDescription: clean);
-
       const systemPrompt = '''
-You are Device Assistant running as an on-device agent.
-When a user asks to perform an action on the device, reply ONLY with a JSON object:
+You are Device Assistant running as an on-device intelligent agent.
+When a user asks to perform an action on their device or inspect device state, reply ONLY with a single JSON object in this format:
 {"action": "tool_call", "tool": "<tool_name>", "args": {<arguments>}}
 
 Available tools:
@@ -600,7 +601,7 @@ Available tools:
 - scroll: {"forward": true/false}
 - perform_navigation: {"action": 1 for back, 2 for home, 3 for recents}
 
-If the user query is a general question or conversational request, reply directly with the answer in natural language.
+If the user query is a general knowledge question, conversational request, or explanation, reply directly in natural language without any JSON wrapper.
 ''';
 
       final response = await _nebiusClient!.chatCompletion(
@@ -612,36 +613,70 @@ If the user query is a general question or conversational request, reply directl
       );
 
       final trimmed = response.trim();
-      if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
-        try {
+      Map<String, dynamic>? toolCall;
+
+      try {
+        if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
           final parsed = jsonDecode(trimmed) as Map<String, dynamic>;
           if (parsed['action'] == 'tool_call' && parsed['tool'] != null) {
-            final toolName = parsed['tool'] as String;
-            final toolArgs = (parsed['args'] as Map<String, dynamic>?) ?? {};
-
-            final result = await _dispatcher?.dispatch(
-                  toolName: toolName,
-                  args: toolArgs,
-                ) ??
-                {};
-
-            _recordToolResult(toolName, toolArgs, result);
-
-            if (mounted) {
-              setState(() {
-                final idx =
-                    _chatMessages.indexWhere((m) => m.id == pendingMsgId);
-                if (idx != -1) {
-                  _chatMessages[idx].text =
-                      'Executed $toolName via Nemotron (${complexity.name})';
-                }
-              });
-            }
-            return;
+            toolCall = parsed;
           }
-        } catch (_) {}
+        } else {
+          final s = trimmed.indexOf('{');
+          final e = trimmed.lastIndexOf('}');
+          if (s != -1 && e != -1 && e > s) {
+            final candidate = trimmed.substring(s, e + 1);
+            final parsed = jsonDecode(candidate) as Map<String, dynamic>;
+            if (parsed['action'] == 'tool_call' && parsed['tool'] != null) {
+              toolCall = parsed;
+            }
+          }
+        }
+      } catch (_) {}
+
+      if (toolCall != null) {
+        final toolName = toolCall['tool'] as String;
+        final toolArgs = (toolCall['args'] as Map<String, dynamic>?) ?? {};
+
+        final result = await _dispatcher?.dispatch(
+              toolName: toolName,
+              args: toolArgs,
+            ) ??
+            {};
+
+        final summary = _formatToolResultSummary(toolName, toolArgs, result);
+
+        if (mounted) {
+          setState(() {
+            final idx = _chatMessages.indexWhere((m) => m.id == pendingMsgId);
+            if (idx != -1) {
+              _chatMessages[idx] = ChatMessage(
+                id: pendingMsgId,
+                isUser: false,
+                text: summary,
+                timestamp: DateTime.now(),
+                toolData: {
+                  'tool': toolName,
+                  'args': toolArgs,
+                  'status': result.containsKey('blocked') ? 'blocked' : 'done',
+                  'result': result,
+                },
+              );
+            }
+            _toolHistory.insert(0, {
+              'tool': toolName,
+              'args': toolArgs,
+              'status': result.containsKey('blocked') ? 'blocked' : 'done',
+              'result': result,
+              'time': DateTime.now(),
+            });
+          });
+        }
+        _androidBridge?.speakText(summary);
+        return;
       }
 
+      // Natural language conversational response
       if (mounted) {
         setState(() {
           final idx = _chatMessages.indexWhere((m) => m.id == pendingMsgId);
@@ -650,6 +685,7 @@ If the user query is a general question or conversational request, reply directl
           }
         });
       }
+      _androidBridge?.speakText(trimmed);
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -658,7 +694,7 @@ If the user query is a general question or conversational request, reply directl
             _chatMessages[idx] = ChatMessage(
               id: pendingMsgId,
               isUser: false,
-              text: 'Nemotron Fallback Error: $e',
+              text: 'Nemotron Error: $e',
               timestamp: DateTime.now(),
               isError: true,
             );
@@ -668,9 +704,122 @@ If the user query is a general question or conversational request, reply directl
     }
   }
 
-  void _recordToolResult(
+  String _formatToolResultSummary(
       String tool, Map<String, dynamic> args, Map<String, dynamic> result) {
+    if (result.containsKey('blocked') || result['status'] == 'blocked') {
+      final reason = result['security_alert'] ??
+          result['reason'] ??
+          'Sensitive application active';
+      return 'Blocked by Security Shield: $reason';
+    }
+    if (result.containsKey('error')) {
+      return 'Tool error ($tool): ${result['error']}';
+    }
+
+    switch (tool) {
+      case 'system_status':
+        final os = result['os'] ?? 'Unknown';
+        final ver = result['os_version'] ?? '';
+        final cores = result['cores'] ?? 1;
+        final dev = result['device'] ?? 'Device';
+        return 'System Status: $os $ver on $dev ($cores CPU cores).';
+
+      case 'open_application':
+        final app = args['app_name'] ?? 'app';
+        return 'Opened $app.';
+
+      case 'capture_screen':
+        final bytes = result['size_bytes'] ?? 0;
+        return 'Captured screen screenshot ($bytes bytes).';
+
+      case 'scroll':
+      case 'scroll_screen':
+        final fwd = args['forward'] == true;
+        return fwd ? 'Scrolled down.' : 'Scrolled up.';
+
+      case 'perform_navigation':
+      case 'navigate':
+        final action = args['action'];
+        final actionStr = action == 1 || action == 'back'
+            ? 'back'
+            : action == 2 || action == 'home'
+                ? 'home'
+                : action == 3 || action == 'recents'
+                    ? 'recents'
+                    : 'navigation';
+        return 'Executed $actionStr navigation.';
+
+      case 'remember':
+        final key = args['key'] ?? '';
+        final val = args['value'] ?? '';
+        return 'Remembered "$key": $val';
+
+      case 'recall':
+        if (result['found'] == true) {
+          return 'Recalled "${args['key']}": ${result['value']}';
+        }
+        return 'No saved memory found for "${args['key']}".';
+
+      case 'forget':
+        if (result['status'] == 'forgotten') {
+          return 'Forgot memory "${args['key']}".';
+        }
+        return 'Memory "${args['key']}" was not found.';
+
+      case 'list_memories':
+        final count = result['count'] ?? 0;
+        final memories = result['memories'] as List<dynamic>? ?? [];
+        if (memories.isEmpty) {
+          return 'No memories found in local database.';
+        }
+        final preview = memories
+            .take(3)
+            .map((m) => m is Map ? '${m['key']}: ${m['value']}' : m.toString())
+            .join('; ');
+        return 'Found $count memories ($preview${memories.length > 3 ? '...' : ''}).';
+
+      case 'plan_task':
+        final goal = result['goal'] ?? args['goal'] ?? '';
+        final steps = (result['steps'] as List<dynamic>?) ?? [];
+        final planId = result['plan_id'] ?? '';
+        return 'Generated plan for "$goal" with ${steps.length} steps (ID: $planId).';
+
+      case 'execute_plan':
+        final status = result['status'] ?? 'completed';
+        final count = result['steps_executed'] ?? 0;
+        return 'Plan execution $status: completed $count steps.';
+
+      case 'save_workflow':
+        final name = result['name'] ?? args['name'] ?? '';
+        final stepsCount = result['steps_count'] ?? 0;
+        return 'Saved workflow "$name" ($stepsCount steps).';
+
+      case 'run_workflow':
+        final name = args['name'] ?? '';
+        final status = result['status'] ?? 'done';
+        return 'Workflow "$name" executed ($status).';
+
+      case 'web_search':
+        final ans = result['answer'] ?? result['result'] ?? '';
+        if (ans.toString().isNotEmpty) {
+          return ans.toString();
+        }
+        return 'Web search completed for "${args['query']}".';
+
+      case 'undo_last':
+        final toolName = result['tool'] ?? '';
+        return 'Undid last action ($toolName).';
+
+      default:
+        return 'Executed tool $tool successfully.';
+    }
+  }
+
+  void _recordToolResult(
+      String tool, Map<String, dynamic> args, Map<String, dynamic> result,
+      {String? summaryText}) {
     if (!mounted) return;
+    final summary = summaryText ?? _formatToolResultSummary(tool, args, result);
     setState(() {
       _toolHistory.insert(0, {
         'tool': tool,
@@ -683,7 +832,7 @@ If the user query is a general question or conversational request, reply directl
         ChatMessage(
           id: 'tool_${DateTime.now().millisecondsSinceEpoch}',
           isUser: false,
-          text: 'Executed tool: $tool',
+          text: summary,
           timestamp: DateTime.now(),
           toolData: {
             'tool': tool,
@@ -697,24 +846,7 @@ If the user query is a general question or conversational request, reply directl
   }
 
   Future<void> _toggleConnection() async {
-    if (_isConnected) {
-      await _audioRecorder.stopStreaming();
-      await _liveClient?.disconnect();
-      // Resume idle hotword detection if active
-      if (Platform.isAndroid && _androidBridge != null && _isHotwordActive) {
-        await _androidBridge!.startHotwordListening(
-          hotwords: [
-            _activeHotwordPhrase,
-            'hey assistant',
-            'ok google',
-            'device assistant',
-            'computer'
-          ],
-        );
-      }
-      return;
-    }
-
+    // If currently listening via local device STT, stop it
     if (_isLocalSttActive) {
       if (Platform.isAndroid && _androidBridge != null) {
         await _androidBridge!.stopHotwordListening();
@@ -732,81 +864,44 @@ If the user query is a general question or conversational request, reply directl
       }
       if (mounted) {
         setState(() => _isLocalSttActive = false);
+        _androidBridge?.updateTrayStatus(isActive: false);
       }
       return;
     }
 
-    // Pause idle hotword detector before capturing audio stream
+    // Start Device STT listening
     if (Platform.isAndroid && _androidBridge != null) {
-      await _androidBridge!.stopHotwordListening();
-    }
+      final hasMic = await _androidBridge!.isMicrophonePermissionGranted();
+      if (!hasMic) {
+        await _androidBridge!.requestMicrophonePermission();
+      }
 
-    final geminiKey = await widget.keyVault.getGeminiApiKey();
-    if (geminiKey != null && geminiKey.isNotEmpty) {
-      setState(() => _isConnecting = true);
-      try {
-        _setupGeminiClient(geminiKey);
-        await _liveClient?.connect();
-        await _audioRecorder.startStreaming(
-          onAudioChunk: (chunk) {
-            _liveClient?.sendAudioChunk(chunk);
-          },
-        );
-        return;
-      } catch (e) {
-        if (mounted) {
-          setState(() {
-            _isConnecting = false;
-            _isConnected = false;
-          });
-          // Fall back to Local STT on Android
-          if (Platform.isAndroid && _androidBridge != null) {
-            final ok =
-                await _androidBridge!.startHotwordListening(hotwords: ['*']);
-            if (!mounted) return;
-            if (ok) {
-              setState(() => _isLocalSttActive = true);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(
-                      'Gemini Live connection failed ($e). Switched to Local STT (Nemotron).'),
-                  backgroundColor: Colors.teal.shade800,
-                ),
-              );
-              return;
-            }
-          }
-          if (!mounted) return;
+      final ok = await _androidBridge!.startHotwordListening(hotwords: ['*']);
+      if (mounted) {
+        setState(() => _isLocalSttActive = ok);
+        _androidBridge?.updateTrayStatus(isActive: ok);
+        if (ok) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Failed to connect to Gemini Live: $e'),
-              backgroundColor: Colors.redAccent,
+            const SnackBar(
+              content: Text('Device STT active. Speak a command or request...'),
+              backgroundColor: Colors.teal,
+              duration: Duration(seconds: 2),
             ),
           );
         }
       }
-    } else {
-      // Gemini key missing: activate Local STT fallback on Android
-      if (Platform.isAndroid && _androidBridge != null) {
-        final ok = await _androidBridge!.startHotwordListening(hotwords: ['*']);
-        if (ok) {
-          if (mounted) {
-            setState(() {
-              _isLocalSttActive = true;
-              _isConnecting = false;
-            });
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text(
-                    'Gemini API key not configured. Activated Local STT fallback (routing to Nemotron).'),
-                backgroundColor: Colors.teal,
-              ),
-            );
-          }
-          return;
-        }
-      }
-      _showKeyDialog();
+      return;
+    }
+
+    // Non-Android desktop
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Continuous Device STT is currently supported on Android. On desktop, please use the Chat tab.'),
+          backgroundColor: Colors.indigo,
+        ),
+      );
     }
   }
 
@@ -1053,7 +1148,7 @@ If the user query is a general question or conversational request, reply directl
     _cameraStreaming.dispose();
     _workflowScheduler?.dispose();
     _audioRecorder.dispose();
-    _voiceQuickInputCtrl.dispose();
+    _micPermSub?.cancel();
     _audioPlayback?.dispose();
     _liveClient?.dispose();
     _desktopDriver?.dispose();
@@ -1373,11 +1468,11 @@ If the user query is a general question or conversational request, reply directl
                 ),
                 const SizedBox(height: 20),
                 Text(
-                  _isConnected
-                      ? 'Listening & Conversing with Gemini Live'
-                      : _isLocalSttActive
-                          ? 'Listening via Local STT (Nemotron Fallback)'
-                          : 'Tap Orb to Start Assistant',
+                  _isLocalSttActive
+                      ? 'Listening via Device STT (NVIDIA Nemotron)'
+                      : (_isConnected
+                          ? 'Listening & Conversing with Gemini Live'
+                          : 'Tap Orb to Speak with Nemotron'),
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w600,
                   ),
@@ -1385,8 +1480,8 @@ If the user query is a general question or conversational request, reply directl
                 const SizedBox(height: 6),
                 Text(
                   _isLocalSttActive
-                      ? 'Continuous On-Device STT | Routing to NVIDIA Nemotron'
-                      : 'Smart Routing: Nemotron 3 super vl & nano | Encrypted Local DB',
+                      ? 'Continuous On-Device STT | Active Tool Calling'
+                      : 'Smart Routing: Nemotron-3.5-Super-VL & Nano-30B | Local DB',
                   style:
                       theme.textTheme.bodySmall?.copyWith(color: Colors.grey),
                 ),
@@ -1520,7 +1615,7 @@ If the user query is a general question or conversational request, reply directl
                               ),
                               const SizedBox(height: 4),
                               Text(
-                                'Commands spoken or sent to Gemini Live automate app navigation, screen inspection, and device controls.',
+                                'Commands spoken via Device STT or sent to NVIDIA Nemotron automate app navigation, screen inspection, and device controls.',
                                 textAlign: TextAlign.center,
                                 style: TextStyle(
                                     fontSize: 12, color: Colors.grey.shade500),
@@ -1581,61 +1676,6 @@ If the user query is a general question or conversational request, reply directl
                             );
                           },
                         ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        // Quick Text Command Input Bar at bottom of Voice View
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          decoration: BoxDecoration(
-            color: theme.scaffoldBackgroundColor,
-            border: Border(
-              top: BorderSide(color: theme.dividerColor.withValues(alpha: 0.2)),
-            ),
-          ),
-          child: SafeArea(
-            top: false,
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _voiceQuickInputCtrl,
-                    textInputAction: TextInputAction.send,
-                    onSubmitted: (val) {
-                      final txt = val.trim();
-                      if (txt.isNotEmpty) {
-                        _voiceQuickInputCtrl.clear();
-                        _handleUserTextInput(txt);
-                      }
-                    },
-                    decoration: InputDecoration(
-                      hintText: 'Type command or message...',
-                      hintStyle:
-                          TextStyle(fontSize: 12, color: Colors.grey.shade500),
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 9),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(20),
-                        borderSide: BorderSide(
-                            color: theme.dividerColor.withValues(alpha: 0.3)),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton(
-                  icon: const Icon(Icons.send,
-                      size: 18, color: Colors.cyanAccent),
-                  onPressed: () {
-                    final txt = _voiceQuickInputCtrl.text.trim();
-                    if (txt.isNotEmpty) {
-                      _voiceQuickInputCtrl.clear();
-                      _handleUserTextInput(txt);
-                    }
-                  },
                 ),
               ],
             ),
