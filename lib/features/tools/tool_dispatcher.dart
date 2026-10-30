@@ -1202,7 +1202,8 @@ class ToolDispatcher {
         if (coordinate != null && coordinate.length >= 2) {
           final x = (coordinate[0] as num).toDouble();
           final y = (coordinate[1] as num).toDouble();
-          final tapRes = await _handleTouchGesture({'type': 'tap', 'x': x, 'y': y});
+          final tapRes =
+              await _handleTouchGesture({'type': 'tap', 'x': x, 'y': y});
           return {
             ...tapRes,
             'engine': 'Google Cloud Serverless Computer Use (Gemini 3.8 Flash)',
