@@ -381,7 +381,7 @@ void main() {
     test('Defaults active provider to role_based and allows switching',
         () async {
       FlutterSecureStorage.setMockInitialValues({});
-      final vault = KeyVault();
+      final vault = KeyVault(skipEnvFallback: true);
 
       expect(await vault.getActiveProvider(), equals('role_based'));
 
@@ -402,7 +402,9 @@ void main() {
         'hasRequiredKeys in role_based and nebius modes depends on Nebius API key without Google keys',
         () async {
       FlutterSecureStorage.setMockInitialValues({});
-      final vault = KeyVault();
+      // skipEnvFallback=true ensures ambient CI env vars (NEBIUS_API_KEY,
+      // GEMINI_API_KEY, GCP_ADC_JSON) don't leak into the assertion checks.
+      final vault = KeyVault(skipEnvFallback: true);
       await vault.setActiveProvider('role_based');
 
       // No keys set

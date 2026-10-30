@@ -28,7 +28,12 @@ class KeyVault {
 
   final FlutterSecureStorage _storage;
 
-  KeyVault({FlutterSecureStorage? storage})
+  /// When true, env-variable and --dart-define fallbacks are skipped.
+  /// Set this in unit tests to prevent ambient CI env vars (NEBIUS_API_KEY,
+  /// GEMINI_API_KEY, GCP_ADC_JSON) from leaking into hasRequiredKeys() assertions.
+  final bool skipEnvFallback;
+
+  KeyVault({FlutterSecureStorage? storage, this.skipEnvFallback = false})
       : _storage = storage ?? const FlutterSecureStorage();
 
   /// Saves the PC Assistant Server URL (e.g. http://localhost:3000 or LAN IP)
@@ -56,15 +61,17 @@ class KeyVault {
     if (stored != null && stored.isNotEmpty) {
       return stored;
     }
-    try {
-      final env = Platform.environment['GEMINI_API_KEY'];
-      if (env != null && env.isNotEmpty) {
-        return env;
+    if (!skipEnvFallback) {
+      try {
+        final env = Platform.environment['GEMINI_API_KEY'];
+        if (env != null && env.isNotEmpty) {
+          return env;
+        }
+      } catch (_) {}
+      const defineVal = String.fromEnvironment('GEMINI_API_KEY');
+      if (defineVal.isNotEmpty) {
+        return defineVal;
       }
-    } catch (_) {}
-    const defineVal = String.fromEnvironment('GEMINI_API_KEY');
-    if (defineVal.isNotEmpty) {
-      return defineVal;
     }
     return null;
   }
@@ -141,17 +148,19 @@ class KeyVault {
     if (stored != null && stored.isNotEmpty) {
       return stored;
     }
-    try {
-      final env = Platform.environment['GCP_ADC_JSON'] ??
-          Platform.environment['GCP_ADC_CREDENTIALS'] ??
-          Platform.environment['GOOGLE_APPLICATION_CREDENTIALS_JSON'];
-      if (env != null && env.isNotEmpty) {
-        return env;
+    if (!skipEnvFallback) {
+      try {
+        final env = Platform.environment['GCP_ADC_JSON'] ??
+            Platform.environment['GCP_ADC_CREDENTIALS'] ??
+            Platform.environment['GOOGLE_APPLICATION_CREDENTIALS_JSON'];
+        if (env != null && env.isNotEmpty) {
+          return env;
+        }
+      } catch (_) {}
+      const defineVal = String.fromEnvironment('GCP_ADC_JSON');
+      if (defineVal.isNotEmpty) {
+        return defineVal;
       }
-    } catch (_) {}
-    const defineVal = String.fromEnvironment('GCP_ADC_JSON');
-    if (defineVal.isNotEmpty) {
-      return defineVal;
     }
     return null;
   }
@@ -205,15 +214,17 @@ class KeyVault {
     if (stored != null && stored.isNotEmpty) {
       return stored;
     }
-    try {
-      final env = Platform.environment['NEBIUS_API_KEY'];
-      if (env != null && env.isNotEmpty) {
-        return env;
+    if (!skipEnvFallback) {
+      try {
+        final env = Platform.environment['NEBIUS_API_KEY'];
+        if (env != null && env.isNotEmpty) {
+          return env;
+        }
+      } catch (_) {}
+      const defineVal = String.fromEnvironment('NEBIUS_API_KEY');
+      if (defineVal.isNotEmpty) {
+        return defineVal;
       }
-    } catch (_) {}
-    const defineVal = String.fromEnvironment('NEBIUS_API_KEY');
-    if (defineVal.isNotEmpty) {
-      return defineVal;
     }
     return null;
   }
