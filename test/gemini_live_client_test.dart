@@ -154,6 +154,46 @@ void main() {
       client.dispose();
     });
 
+    test('GeminiLiveClient uses ADC Bearer Token and user project header',
+        () async {
+      final mockHttpClient = MockClient((request) async {
+        expect(request.headers['Authorization'], equals('Bearer ya29.mock_adc'));
+        expect(request.headers['x-goog-user-project'],
+            equals('tafiti-ai-508523'));
+        expect(request.url.queryParameters.containsKey('key'), isFalse);
+
+        return http.Response(
+          jsonEncode({
+            'candidates': [
+              {
+                'content': {
+                  'role': 'model',
+                  'parts': [
+                    {'text': 'ADC Inference Success!'}
+                  ]
+                }
+              }
+            ]
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+
+      final client = GeminiLiveClient(
+        accessTokenProvider: () async => 'ya29.mock_adc',
+        projectId: 'tafiti-ai-508523',
+      );
+
+      final result = await client.generateContent(
+        prompt: 'Check ADC',
+        httpClient: mockHttpClient,
+      );
+
+      expect(result, equals('ADC Inference Success!'));
+      client.dispose();
+    });
+
     test(
         'Full handshake, setupComplete, audio streaming, tool calling, and barge-in',
         () async {

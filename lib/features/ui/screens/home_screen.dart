@@ -6,6 +6,7 @@ import '../../../core/agent/dartantic_agent.dart';
 import '../../../core/audio/audio_playback_service.dart';
 import '../../../core/audio/audio_recording_service.dart';
 import '../../../core/database/local_database.dart';
+import '../../../core/network/gcp_adc_auth_service.dart';
 import '../../../core/network/gemini_live_client.dart';
 import '../../../core/network/nebius_client.dart';
 import '../../../core/network/pc_bridge_client.dart';
@@ -301,18 +302,43 @@ class _HomeScreenState extends State<HomeScreen>
     );
     _workflowScheduler!.start();
 
-    if (geminiKey != null && geminiKey.isNotEmpty) {
+    final adcService = GcpAdcAuthService(keyVault: widget.keyVault);
+    final hasAdc = await adcService.hasAdcCredentials();
+    final authMode = await widget.keyVault.getAuthMode();
+
+    if ((authMode == 'adc' && hasAdc) ||
+        (geminiKey != null && geminiKey.isNotEmpty)) {
       final geminiModel = await widget.keyVault.getGeminiModel();
       final geminiEndpoint = await widget.keyVault.getGeminiEndpoint();
-      _setupGeminiClient(geminiKey,
-          model: geminiModel, endpoint: geminiEndpoint);
+      final projectId = await widget.keyVault.getGcpProjectId();
+      final location = await widget.keyVault.getGcpLocation();
+
+      _setupGeminiClient(
+        apiKey: authMode == 'api_key' ? geminiKey : null,
+        accessTokenProvider:
+            authMode == 'adc' ? () => adcService.getAccessToken() : null,
+        projectId: projectId,
+        location: location,
+        model: geminiModel,
+        endpoint: geminiEndpoint,
+      );
     }
   }
 
-  void _setupGeminiClient(String apiKey, {String? model, String? endpoint}) {
+  void _setupGeminiClient({
+    String? apiKey,
+    Future<String> Function()? accessTokenProvider,
+    String? projectId,
+    String? location,
+    String? model,
+    String? endpoint,
+  }) {
     _liveClient?.dispose();
     _liveClient = GeminiLiveClient(
       apiKey: apiKey,
+      accessTokenProvider: accessTokenProvider,
+      projectId: projectId,
+      location: location ?? 'us-central1',
       host: endpoint,
       model: model ?? GeminiLiveClient.defaultModel,
       toolDeclarations: ToolDefinitions.getAllDeclarations(
@@ -521,11 +547,16 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
     final clean = command.trim();
     if (clean.isEmpty) return;
 
+    final adcService = GcpAdcAuthService(keyVault: widget.keyVault);
+    final hasAdc = await adcService.hasAdcCredentials();
+    final authMode = await widget.keyVault.getAuthMode();
     final geminiKey = await widget.keyVault.getGeminiApiKey();
     final nebiusKey = await widget.keyVault.getNebiusApiKey();
 
-    if ((geminiKey == null || geminiKey.isEmpty) &&
-        (nebiusKey == null || nebiusKey.isEmpty)) {
+    final canUseGemini = (authMode == 'adc' && hasAdc) ||
+        (geminiKey != null && geminiKey.isNotEmpty);
+
+    if (!canUseGemini && (nebiusKey == null || nebiusKey.isEmpty)) {
       if (mounted) {
         setState(() {
           _chatMessages.add(
@@ -533,7 +564,7 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
               id: 'err_${DateTime.now().millisecondsSinceEpoch}',
               isUser: false,
               text:
-                  'Please configure your Google Cloud Gemini or Nebius API key in Settings.',
+                  'Please configure Google Cloud Application Default Credentials (ADC) or Nebius API key in Settings.',
               timestamp: DateTime.now(),
               isError: true,
             ),
@@ -544,13 +575,16 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
       return;
     }
 
-    final useGemini = geminiKey != null && geminiKey.isNotEmpty;
     final geminiModel = await widget.keyVault.getGeminiModel();
     final geminiEndpoint = await widget.keyVault.getGeminiEndpoint();
+    final projectId = await widget.keyVault.getGcpProjectId();
+    final location = await widget.keyVault.getGcpLocation();
 
     final pendingMsgId = 'assistant_${DateTime.now().millisecondsSinceEpoch}';
-    final modelLabel = useGemini
-        ? 'Gemini 3.8 Flash (Serverless)'
+    final modelLabel = canUseGemini
+        ? (authMode == 'adc'
+            ? 'Gemini 3.8 Flash (ADC Serverless)'
+            : 'Gemini 3.8 Flash')
         : 'Nemotron';
 
     if (mounted) {
@@ -600,9 +634,13 @@ If the user query is a general knowledge question, conversational request, or ex
 ''';
 
       String response;
-      if (useGemini) {
+      if (canUseGemini) {
         _liveClient ??= GeminiLiveClient(
-          apiKey: geminiKey,
+          apiKey: authMode == 'api_key' ? geminiKey : null,
+          accessTokenProvider:
+              authMode == 'adc' ? () => adcService.getAccessToken() : null,
+          projectId: projectId,
+          location: location,
           host: geminiEndpoint,
           model: geminiModel,
           toolDeclarations: ToolDefinitions.getAllDeclarations(

@@ -10,6 +10,10 @@ class KeyVault {
   static const _geminiKey = 'KEY_GEMINI_API';
   static const _geminiModelKey = 'KEY_GEMINI_MODEL';
   static const _geminiEndpointKey = 'KEY_GEMINI_ENDPOINT';
+  static const _gcpProjectIdKey = 'KEY_GCP_PROJECT_ID';
+  static const _gcpLocationKey = 'KEY_GCP_LOCATION';
+  static const _adcJsonKey = 'KEY_ADC_CREDENTIALS_JSON';
+  static const _authModeKey = 'KEY_AUTH_MODE';
   static const _nebiusKey = 'KEY_NEBIUS_API';
   static const _nebiusEndpointKey = 'KEY_NEBIUS_ENDPOINT';
   static const _nebiusSuperEndpointKey = 'KEY_NEBIUS_SUPER_ENDPOINT';
@@ -90,6 +94,67 @@ class KeyVault {
       return custom;
     }
     return 'generativelanguage.googleapis.com';
+  }
+
+  /// Saves the Google Cloud Project ID for Vertex AI serverless inference
+  Future<void> setGcpProjectId(String id) async {
+    await _storage.write(key: _gcpProjectIdKey, value: id.trim());
+  }
+
+  /// Retrieves the Google Cloud Project ID (default: tafiti-ai-508523 or custom)
+  Future<String> getGcpProjectId() async {
+    final custom = await _storage.read(key: _gcpProjectIdKey);
+    if (custom != null && custom.isNotEmpty) {
+      return custom;
+    }
+    try {
+      final env = Platform.environment['GOOGLE_CLOUD_PROJECT'] ??
+          Platform.environment['GCLOUD_PROJECT'];
+      if (env != null && env.isNotEmpty) return env;
+    } catch (_) {}
+    return 'tafiti-ai-508523';
+  }
+
+  /// Saves the Google Cloud Region / Location for Vertex AI (e.g. us-central1)
+  Future<void> setGcpLocation(String location) async {
+    await _storage.write(key: _gcpLocationKey, value: location.trim());
+  }
+
+  /// Retrieves the Google Cloud Region / Location (default: us-central1)
+  Future<String> getGcpLocation() async {
+    final custom = await _storage.read(key: _gcpLocationKey);
+    if (custom != null && custom.isNotEmpty) {
+      return custom;
+    }
+    return 'us-central1';
+  }
+
+  /// Saves imported ADC or Service Account JSON for Android hardware keystore
+  Future<void> setAdcCredentialsJson(String json) async {
+    await _storage.write(key: _adcJsonKey, value: json.trim());
+  }
+
+  /// Retrieves imported ADC or Service Account JSON
+  Future<String?> getAdcCredentialsJson() async {
+    return await _storage.read(key: _adcJsonKey);
+  }
+
+  /// Saves authentication mode ('adc' or 'api_key')
+  Future<void> setAuthMode(String mode) async {
+    await _storage.write(key: _authModeKey, value: mode.trim());
+  }
+
+  /// Retrieves authentication mode (defaults to 'adc')
+  Future<String> getAuthMode() async {
+    final val = await _storage.read(key: _authModeKey);
+    if (val != null && val.isNotEmpty) return val;
+    return 'adc';
+  }
+
+  /// Checks if assistant is configured to use Google Cloud Application Default Credentials (ADC)
+  Future<bool> isUsingAdc() async {
+    final mode = await getAuthMode();
+    return mode == 'adc';
   }
 
   /// Saves the Nebius Token Factory API Key

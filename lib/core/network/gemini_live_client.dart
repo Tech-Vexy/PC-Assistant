@@ -23,7 +23,11 @@ class GeminiLiveClient {
   static const String liveHost = 'generativelanguage.googleapis.com';
   static const String defaultModel = 'models/gemini-3.8-flash';
 
-  final String apiKey;
+  final String? apiKey;
+  final String? accessToken;
+  final Future<String> Function()? accessTokenProvider;
+  final String? projectId;
+  final String location;
   final String host;
   final String model;
   final List<Map<String, dynamic>> toolDeclarations;
@@ -43,7 +47,11 @@ class GeminiLiveClient {
   bool _isConnected = false;
 
   GeminiLiveClient({
-    required this.apiKey,
+    this.apiKey,
+    this.accessToken,
+    this.accessTokenProvider,
+    this.projectId,
+    this.location = 'us-central1',
     String? host,
     String model = defaultModel,
     this.toolDeclarations = const [],
@@ -77,9 +85,26 @@ class GeminiLiveClient {
   Future<void> connect({Duration timeout = const Duration(seconds: 15)}) async {
     if (_isConnected) return;
 
-    final uri = Uri.parse(
-      'wss://$host/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=$apiKey',
-    );
+    final token = accessTokenProvider != null
+        ? await accessTokenProvider!()
+        : accessToken;
+
+    final Uri uri;
+    if (token != null && token.isNotEmpty) {
+      if (host.contains('aiplatform.googleapis.com')) {
+        uri = Uri.parse(
+          'wss://$host/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent',
+        );
+      } else {
+        uri = Uri.parse(
+          'wss://$host/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?access_token=$token',
+        );
+      }
+    } else {
+      uri = Uri.parse(
+        'wss://$host/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=$apiKey',
+      );
+    }
 
     _setupCompleter = Completer<void>();
     _channel = channelFactory != null
@@ -118,9 +143,17 @@ class GeminiLiveClient {
   }
 
   void _sendSetupMessage() {
+    final cleanModel =
+        model.startsWith('models/') ? model.substring(7) : model;
+    final effectiveModel = (host.contains('aiplatform.googleapis.com') &&
+            projectId != null &&
+            projectId!.isNotEmpty)
+        ? 'projects/$projectId/locations/$location/publishers/google/models/$cleanModel'
+        : model;
+
     final setupPayload = {
       'setup': {
-        'model': model,
+        'model': effectiveModel,
         'generationConfig': {
           'responseModalities': ['AUDIO'],
           'speechConfig': {
@@ -377,7 +410,7 @@ class GeminiLiveClient {
     }
   }
 
-  /// Direct Google Cloud Serverless inference call to Gemini 3.8 Flash
+  /// Direct Google Cloud Serverless inference call to Gemini 3.8 Flash using ADC or API key
   Future<String> generateContent({
     required String prompt,
     String? systemInstruction,
@@ -387,11 +420,41 @@ class GeminiLiveClient {
   }) async {
     final client = httpClient ?? http.Client();
     try {
+      final token = accessTokenProvider != null
+          ? await accessTokenProvider!()
+          : accessToken;
+
       final cleanModel =
           model.startsWith('models/') ? model.substring(7) : model;
-      final uri = Uri.parse(
-        'https://$host/v1beta/models/$cleanModel:generateContent?key=$apiKey',
-      );
+
+      final Uri uri;
+      final headers = <String, String>{
+        'Content-Type': 'application/json',
+      };
+
+      if (host.contains('aiplatform.googleapis.com') &&
+          projectId != null &&
+          projectId!.isNotEmpty) {
+        uri = Uri.parse(
+          'https://$host/v1beta1/projects/$projectId/locations/$location/publishers/google/models/$cleanModel:generateContent',
+        );
+      } else if (token != null && token.isNotEmpty) {
+        uri = Uri.parse(
+          'https://$host/v1beta/models/$cleanModel:generateContent',
+        );
+        headers['Authorization'] = 'Bearer $token';
+        if (projectId != null && projectId!.isNotEmpty) {
+          headers['x-goog-user-project'] = projectId!;
+        }
+      } else {
+        uri = Uri.parse(
+          'https://$host/v1beta/models/$cleanModel:generateContent?key=$apiKey',
+        );
+      }
+
+      if (token != null && token.isNotEmpty) {
+        headers['Authorization'] = 'Bearer $token';
+      }
 
       final payload = {
         'contents': [
@@ -419,7 +482,7 @@ class GeminiLiveClient {
 
       final response = await client.post(
         uri,
-        headers: {'Content-Type': 'application/json'},
+        headers: headers,
         body: jsonEncode(payload),
       );
 
@@ -465,11 +528,41 @@ class GeminiLiveClient {
     final client = httpClient ?? http.Client();
     final stopwatch = Stopwatch()..start();
     try {
+      final token = accessTokenProvider != null
+          ? await accessTokenProvider!()
+          : accessToken;
+
       final cleanModel =
           model.startsWith('models/') ? model.substring(7) : model;
-      final uri = Uri.parse(
-        'https://$host/v1beta/models/$cleanModel:generateContent?key=$apiKey',
-      );
+
+      final Uri uri;
+      final headers = <String, String>{
+        'Content-Type': 'application/json',
+      };
+
+      if (host.contains('aiplatform.googleapis.com') &&
+          projectId != null &&
+          projectId!.isNotEmpty) {
+        uri = Uri.parse(
+          'https://$host/v1beta1/projects/$projectId/locations/$location/publishers/google/models/$cleanModel:generateContent',
+        );
+      } else if (token != null && token.isNotEmpty) {
+        uri = Uri.parse(
+          'https://$host/v1beta/models/$cleanModel:generateContent',
+        );
+        headers['Authorization'] = 'Bearer $token';
+        if (projectId != null && projectId!.isNotEmpty) {
+          headers['x-goog-user-project'] = projectId!;
+        }
+      } else {
+        uri = Uri.parse(
+          'https://$host/v1beta/models/$cleanModel:generateContent?key=$apiKey',
+        );
+      }
+
+      if (token != null && token.isNotEmpty) {
+        headers['Authorization'] = 'Bearer $token';
+      }
 
       final payload = {
         'contents': [
@@ -486,7 +579,7 @@ class GeminiLiveClient {
       final response = await client
           .post(
             uri,
-            headers: {'Content-Type': 'application/json'},
+            headers: headers,
             body: jsonEncode(payload),
           )
           .timeout(const Duration(seconds: 10));
@@ -499,6 +592,8 @@ class GeminiLiveClient {
           'latencyMs': stopwatch.elapsedMilliseconds,
           'model': model,
           'endpoint': host,
+          'auth': token != null ? 'ADC (Bearer Token)' : 'API Key',
+          if (projectId != null) 'projectId': projectId,
         };
       } else {
         return {
@@ -506,6 +601,7 @@ class GeminiLiveClient {
           'statusCode': response.statusCode,
           'error': response.body,
           'latencyMs': stopwatch.elapsedMilliseconds,
+          'auth': token != null ? 'ADC (Bearer Token)' : 'API Key',
         };
       }
     } catch (e) {

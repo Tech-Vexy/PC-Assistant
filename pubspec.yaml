@@ -47,6 +47,7 @@ dependencies:
   hotkey_manager: ^0.2.3
   record: ^7.1.2
   path_provider_android: 2.2.15
+  googleapis_auth: ^2.3.5
 
 dev_dependencies:
   flutter_test:

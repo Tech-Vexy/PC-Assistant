@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import '../../../core/database/local_database.dart';
 import '../../../core/network/discovery_service.dart';
+import '../../../core/network/gcp_adc_auth_service.dart';
 import '../../../core/network/gemini_live_client.dart';
 import '../../../core/network/nebius_client.dart';
 import '../../../core/network/pc_bridge_client.dart';
@@ -25,6 +26,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _geminiCtrl = TextEditingController();
   final _geminiModelCtrl = TextEditingController();
   final _geminiEndpointCtrl = TextEditingController();
+  final _gcpProjectIdCtrl = TextEditingController();
+  final _gcpLocationCtrl = TextEditingController();
+  final _adcJsonCtrl = TextEditingController();
+  String _authMode = 'adc';
+  bool _hasDetectedAdc = false;
+  String _detectedAdcProject = '';
   final _nebiusCtrl = TextEditingController();
   final _nebiusSuperEndpointCtrl = TextEditingController();
   final _nebiusSuperModelCtrl = TextEditingController();
@@ -62,6 +69,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _geminiCtrl.text = (await widget.keyVault.getGeminiApiKey()) ?? '';
     _geminiModelCtrl.text = await widget.keyVault.getGeminiModel();
     _geminiEndpointCtrl.text = await widget.keyVault.getGeminiEndpoint();
+    _gcpProjectIdCtrl.text = await widget.keyVault.getGcpProjectId();
+    _gcpLocationCtrl.text = await widget.keyVault.getGcpLocation();
+    _adcJsonCtrl.text = (await widget.keyVault.getAdcCredentialsJson()) ?? '';
+    _authMode = await widget.keyVault.getAuthMode();
+
+    final adcService = GcpAdcAuthService(keyVault: widget.keyVault);
+    _hasDetectedAdc = await adcService.hasAdcCredentials();
+    _detectedAdcProject = (await adcService.getProjectId()) ?? '';
+    if (_gcpProjectIdCtrl.text.isEmpty && _detectedAdcProject.isNotEmpty) {
+      _gcpProjectIdCtrl.text = _detectedAdcProject;
+    }
+
     _nebiusCtrl.text = (await widget.keyVault.getNebiusApiKey()) ?? '';
     _nebiusSuperEndpointCtrl.text =
         await widget.keyVault.getNebiusSuperEndpoint();
@@ -87,6 +106,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (_geminiEndpointCtrl.text.trim().isNotEmpty) {
         await widget.keyVault
             .setGeminiEndpoint(_geminiEndpointCtrl.text.trim());
+      }
+      await widget.keyVault.setGcpProjectId(_gcpProjectIdCtrl.text.trim());
+      await widget.keyVault.setGcpLocation(_gcpLocationCtrl.text.trim());
+      await widget.keyVault.setAuthMode(_authMode);
+      if (_adcJsonCtrl.text.trim().isNotEmpty) {
+        await widget.keyVault.setAdcCredentialsJson(_adcJsonCtrl.text.trim());
       }
       if (_nebiusCtrl.text.trim().isNotEmpty) {
         await widget.keyVault.setNebiusApiKey(_nebiusCtrl.text.trim());
@@ -223,22 +248,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
 
     try {
-      final key = _geminiCtrl.text.trim();
-      final endpoint = _geminiEndpointCtrl.text.trim();
-      final model = _geminiModelCtrl.text.trim();
+      final adcService = GcpAdcAuthService(keyVault: widget.keyVault);
+      final hasAdc = await adcService.hasAdcCredentials();
 
-      if (key.isEmpty) {
+      if (_authMode == 'adc' && !hasAdc) {
         setState(() {
           _geminiTestResult = {
             'success': false,
-            'error': 'Gemini API Key required to test serverless inference',
+            'error':
+                'No Google Cloud ADC credentials found. On desktop, run `gcloud auth application-default login`. On Android, import your ADC/Service Account JSON below.',
+          };
+        });
+        return;
+      }
+
+      final key = _geminiCtrl.text.trim();
+      final endpoint = _geminiEndpointCtrl.text.trim();
+      final model = _geminiModelCtrl.text.trim();
+      final projectId = _gcpProjectIdCtrl.text.trim();
+      final location = _gcpLocationCtrl.text.trim();
+
+      if (_authMode == 'api_key' && key.isEmpty) {
+        setState(() {
+          _geminiTestResult = {
+            'success': false,
+            'error':
+                'Gemini API Key required when in API Key authentication mode.',
           };
         });
         return;
       }
 
       final client = GeminiLiveClient(
-        apiKey: key,
+        apiKey: _authMode == 'api_key' ? key : null,
+        accessTokenProvider:
+            _authMode == 'adc' ? () => adcService.getAccessToken() : null,
+        projectId: projectId.isNotEmpty ? projectId : null,
+        location: location.isNotEmpty ? location : 'us-central1',
         host: endpoint.isNotEmpty ? endpoint : null,
         model: model.isNotEmpty ? model : 'gemini-3.8-flash',
       );
@@ -375,6 +421,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _geminiCtrl.dispose();
     _geminiModelCtrl.dispose();
     _geminiEndpointCtrl.dispose();
+    _gcpProjectIdCtrl.dispose();
+    _gcpLocationCtrl.dispose();
+    _adcJsonCtrl.dispose();
     _nebiusCtrl.dispose();
     _nebiusSuperEndpointCtrl.dispose();
     _nebiusSuperModelCtrl.dispose();
@@ -692,9 +741,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 28),
 
-          // --- Google Cloud Serverless Inference (Gemini 3.8 Flash) Section ---
+          // --- Google Cloud Serverless Inference (Gemini 3.8 Flash with ADC) Section ---
           _buildSectionHeader(Icons.auto_awesome,
-              'Google Cloud Serverless Inference', 'Gemini 3.8 Flash Live & Multimodal Speech'),
+              'Google Cloud Serverless Inference', 'Gemini 3.8 Flash via Application Default Credentials (ADC)'),
           const SizedBox(height: 12),
           Card(
             shape: RoundedRectangleBorder(
@@ -707,25 +756,123 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Row(
+                  Row(
                     children: [
-                      Icon(Icons.cloud_sync,
+                      const Icon(Icons.cloud_sync,
                           color: Colors.indigoAccent, size: 20),
-                      SizedBox(width: 8),
-                      Text(
+                      const SizedBox(width: 8),
+                      const Text(
                         'Gemini 3.8 Flash (Serverless Inference)',
                         style: TextStyle(
                             fontWeight: FontWeight.bold, fontSize: 13),
                       ),
+                      const Spacer(),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: _hasDetectedAdc
+                              ? Colors.green.withValues(alpha: 0.2)
+                              : Colors.orange.withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: _hasDetectedAdc
+                                ? Colors.greenAccent
+                                : Colors.orangeAccent,
+                            width: 0.8,
+                          ),
+                        ),
+                        child: Text(
+                          _hasDetectedAdc
+                              ? 'ADC Active: ${_detectedAdcProject.isNotEmpty ? _detectedAdcProject : "Found"}'
+                              : 'ADC Not Detected',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            color: _hasDetectedAdc
+                                ? Colors.greenAccent
+                                : Colors.orangeAccent,
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 12),
-                  _buildSecureField(
-                    controller: _geminiCtrl,
-                    label: 'Google Cloud / Gemini API Key',
-                    hint: 'AIzaSy...',
-                    icon: Icons.key,
+                  // Authentication Mode selector
+                  Row(
+                    children: [
+                      const Text('Authentication:',
+                          style: TextStyle(fontSize: 12, color: Colors.grey)),
+                      const SizedBox(width: 10),
+                      ChoiceChip(
+                        label: const Text('ADC (Recommended)',
+                            style: TextStyle(fontSize: 11)),
+                        selected: _authMode == 'adc',
+                        onSelected: (val) {
+                          if (val) setState(() => _authMode = 'adc');
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      ChoiceChip(
+                        label: const Text('API Key',
+                            style: TextStyle(fontSize: 11)),
+                        selected: _authMode == 'api_key',
+                        onSelected: (val) {
+                          if (val) setState(() => _authMode = 'api_key');
+                        },
+                      ),
+                    ],
                   ),
+                  const SizedBox(height: 12),
+                  if (_authMode == 'adc') ...[
+                    TextField(
+                      controller: _gcpProjectIdCtrl,
+                      decoration: InputDecoration(
+                        labelText: 'Google Cloud Project ID',
+                        hintText: 'tafiti-ai-508523',
+                        prefixIcon: const Icon(Icons.business),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                        isDense: true,
+                        helperText:
+                            'Auto-detected from Application Default Credentials',
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _gcpLocationCtrl,
+                      decoration: InputDecoration(
+                        labelText: 'GCP Region / Location',
+                        hintText: 'us-central1',
+                        prefixIcon: const Icon(Icons.place),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                        isDense: true,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _adcJsonCtrl,
+                      maxLines: 2,
+                      decoration: InputDecoration(
+                        labelText: 'ADC / Service Account JSON (Optional)',
+                        hintText: 'Paste custom credentials JSON for Android...',
+                        prefixIcon: const Icon(Icons.code),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                        isDense: true,
+                        helperText:
+                            'On desktop, standard gcloud ADC (~/.config/gcloud/...) is used automatically.',
+                      ),
+                    ),
+                  ] else ...[
+                    _buildSecureField(
+                      controller: _geminiCtrl,
+                      label: 'Google Cloud / Gemini API Key',
+                      hint: 'AIzaSy...',
+                      icon: Icons.key,
+                    ),
+                  ],
                   const SizedBox(height: 10),
                   TextField(
                     controller: _geminiModelCtrl,
@@ -750,7 +897,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       isDense: true,
                     ),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 14),
                   Row(
                     children: [
                       ElevatedButton.icon(
@@ -774,8 +921,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             : const Icon(Icons.network_check, size: 16),
                         label: Text(
                           _isTestingGemini
-                              ? 'Testing...'
-                              : 'Test Gemini 3.8 Flash',
+                              ? 'Testing ADC...'
+                              : 'Test Gemini 3.8 Flash (ADC)',
                           style: const TextStyle(fontSize: 12),
                         ),
                       ),
