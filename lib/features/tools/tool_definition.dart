@@ -251,18 +251,45 @@ class ToolDefinitions {
       },
       {
         'name': 'open_application',
-        'description': 'Launches an installed application by name or package',
+        'description':
+            'Launches an installed application. Use package_name (e.g. com.chrome.dev) when known for exact targeting — '
+            'especially important when multiple variants exist (e.g. Chrome Stable vs Chrome Dev vs Chrome Beta). '
+            'Use list_installed_apps first to find the exact package_name if you are unsure which variant the user wants.',
         'parameters': {
           'type': 'object',
           'properties': {
             'app_name': {
               'type': 'string',
-              'description': 'Name of the app (e.g. Chrome, Settings, Camera)',
+              'description':
+                  'Human-readable app name (e.g. "Google Chrome Dev", "Chrome Beta"). Used when package_name is unknown.',
+            },
+            'package_name': {
+              'type': 'string',
+              'description':
+                  'Exact Android package name (e.g. com.chrome.dev). Preferred over app_name for precise targeting.',
             },
           },
-          'required': ['app_name'],
         },
       },
+      if (isAndroid) ...[
+        {
+          'name': 'list_installed_apps',
+          'description':
+              'Lists all installed launcher apps on the device with their human-readable name and exact package name. '
+              'Call this before open_application when you need to distinguish between similar app variants '
+              '(e.g. Chrome Stable vs Chrome Dev vs Chrome Beta, or multiple browser installs).',
+          'parameters': {
+            'type': 'object',
+            'properties': {
+              'filter': {
+                'type': 'string',
+                'description':
+                    'Optional keyword to filter results (e.g. "chrome" returns only apps with "chrome" in name or package)',
+              },
+            },
+          },
+        },
+      ],
       {
         'name': 'inspect_screen',
         'description':

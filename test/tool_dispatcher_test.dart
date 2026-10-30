@@ -166,6 +166,26 @@ void main() {
       );
       expect(bankRes['status'], equals('blocked'));
       expect(bankRes['security_alert'], contains('blacklist'));
+
+      // Sensitive app check using package_name parameter
+      final pkgRes = await dispatcher.dispatch(
+        toolName: 'open_application',
+        args: {'package_name': 'com.android.stk'},
+      );
+      expect(pkgRes['status'], equals('blocked'));
+      expect(pkgRes['security_alert'], contains('SIM Toolkit'));
+    });
+
+    test('list_installed_apps handles non-Android platform gracefully',
+        () async {
+      final res = await dispatcher.dispatch(
+        toolName: 'list_installed_apps',
+        args: {'filter': 'chrome'},
+      );
+      if (!Platform.isAndroid) {
+        expect(res['status'], equals('error'));
+        expect(res['error'], contains('only available on Android'));
+      }
     });
 
     test('capture_screen respects SensitiveAppGuard', () async {

@@ -47,7 +47,10 @@ class ToolDispatcher {
     try {
       // 1. Sensitive App Shield Check
       if (toolName == 'inspect_screen' || toolName == 'open_application') {
-        final targetPkg = args['app_name'] as String? ?? activePackageName;
+        final targetPkg =
+            (args['package_name'] ?? args['app_name'] ?? args['app'])
+                    as String? ??
+                activePackageName;
         final decision = guard.evaluate(packageName: targetPkg);
         if (decision.isBlocked) {
           db.logAudit(
@@ -137,6 +140,10 @@ class ToolDispatcher {
 
         case 'open_application':
           result = await _handleOpenApp(args);
+          break;
+
+        case 'list_installed_apps':
+          result = await _handleListInstalledApps(args);
           break;
 
         case 'click_element':
@@ -613,40 +620,104 @@ class ToolDispatcher {
   }
 
   Future<Map<String, dynamic>> _handleOpenApp(Map<String, dynamic> args) async {
-    final appName = args['app_name'] as String;
+    // Prefer explicit package_name for precise targeting (e.g. com.chrome.dev vs com.android.chrome)
+    final packageName = (args['package_name'] ?? '').toString().trim();
+    final appName = (args['app_name'] ?? args['app'] ?? '').toString().trim();
+    final query = packageName.isNotEmpty ? packageName : appName;
 
-    if (Platform.isAndroid && androidBridge != null) {
-      // Single-process hygiene: Launch via native Android Intent without spawning OS subprocesses
-      final success = await androidBridge!.launchApp(appName);
-      return {'status': success ? 'launched' : 'app_not_found', 'app': appName};
-    } else if (Platform.isLinux) {
-      // Launch via gtk-launch or background process on desktop
-      await Process.start('gtk-launch', [appName],
-          mode: ProcessStartMode.detached);
-      return {'status': 'launched', 'app': appName};
-    } else if (Platform.isWindows) {
-      await Process.start('cmd', ['/c', 'start', '', appName],
-          mode: ProcessStartMode.detached);
-      return {'status': 'launched', 'app': appName};
+    if (query.isEmpty) {
+      return {
+        'status': 'error',
+        'error': 'Provide app_name or package_name. Use list_installed_apps to find the exact package_name.',
+        'success': false,
+      };
     }
 
-    return {'status': 'unsupported_platform', 'app': appName};
+    if (Platform.isAndroid) {
+      if (androidBridge == null) {
+        return {
+          'status': 'error',
+          'error': 'Android bridge is not yet initialised',
+          'success': false,
+        };
+      }
+      // Pass query directly — native resolveAndLaunchApp handles both exact package IDs
+      // and human-readable labels with scored best-match ranking
+      final success = await androidBridge!.launchApp(query);
+      return {
+        'status': success ? 'launched' : 'app_not_found',
+        'app': query,
+        'success': success,
+        if (packageName.isNotEmpty) 'package_name': packageName,
+        if (!success)
+          'error':
+              'Application "$query" was not found on this device. '
+              'Use list_installed_apps to see all installed apps with their exact package names.',
+      };
+    } else if (Platform.isLinux) {
+      await Process.start('gtk-launch', [query], mode: ProcessStartMode.detached);
+      return {'status': 'launched', 'app': query};
+    } else if (Platform.isWindows) {
+      await Process.start('cmd', ['/c', 'start', '', query],
+          mode: ProcessStartMode.detached);
+      return {'status': 'launched', 'app': query};
+    }
+
+    return {'status': 'unsupported_platform', 'app': query};
   }
 
+  Future<Map<String, dynamic>> _handleListInstalledApps(
+      Map<String, dynamic> args) async {
+    if (!Platform.isAndroid || androidBridge == null) {
+      return {
+        'status': 'error',
+        'error': 'list_installed_apps is only available on Android',
+      };
+    }
+
+    final filter = (args['filter'] ?? '').toString().trim().toLowerCase();
+    final apps = await androidBridge!.getInstalledApps();
+
+    final filtered = filter.isEmpty
+        ? apps
+        : apps.where((app) {
+            final name = (app['appName'] ?? '').toLowerCase();
+            final pkg = (app['packageName'] ?? '').toLowerCase();
+            return name.contains(filter) || pkg.contains(filter);
+          }).toList();
+
+    // Sort alphabetically by app name
+    filtered.sort((a, b) =>
+        (a['appName'] ?? '').compareTo(b['appName'] ?? ''));
+
+    return {
+      'status': 'done',
+      'count': filtered.length,
+      'apps': filtered,
+      'hint': filter.isEmpty
+          ? 'Use package_name from this list as the package_name arg in open_application for precise targeting.'
+          : 'Filtered by "$filter". Use package_name from this list in open_application.',
+    };
+  }
   Future<Map<String, dynamic>> _handleClickElement(
       Map<String, dynamic> args) async {
     final text = args['text'] as String? ?? '';
     final viewId = args['view_id'] as String?;
     if (androidBridge == null) {
       return {
-        'error': 'Mobile accessibility bridge is not available on this platform'
+        'status': 'error',
+        'error': Platform.isAndroid
+            ? 'Android accessibility bridge is not yet initialised'
+            : 'click_element is only available on Android',
       };
     }
     final success = await androidBridge!.clickByText(text, viewId: viewId);
     return {
+      'status': success ? 'done' : 'error',
       'action': 'click',
       'target': text.isNotEmpty ? text : (viewId ?? ''),
-      'success': success
+      'success': success,
+      if (!success) 'error': 'Click failed — element not found or not clickable',
     };
   }
 
@@ -654,7 +725,10 @@ class ToolDispatcher {
       Map<String, dynamic> args) async {
     if (androidBridge == null) {
       return {
-        'error': 'Mobile touch gestures are not available on this platform'
+        'status': 'error',
+        'error': Platform.isAndroid
+            ? 'Android accessibility bridge is not yet initialised'
+            : 'touch_gesture is only available on Android',
       };
     }
     final type = args['type'] as String;
@@ -662,7 +736,14 @@ class ToolDispatcher {
       final x = (args['x'] as num?)?.toDouble() ?? 0.0;
       final y = (args['y'] as num?)?.toDouble() ?? 0.0;
       final success = await androidBridge!.injectTap(x, y);
-      return {'gesture': 'tap', 'x': x, 'y': y, 'success': success};
+      return {
+        'status': success ? 'done' : 'error',
+        'gesture': 'tap',
+        'x': x,
+        'y': y,
+        'success': success,
+        if (!success) 'error': 'Tap gesture was not dispatched',
+      };
     } else if (type == 'swipe') {
       final startX = (args['startX'] as num?)?.toDouble() ?? 0.0;
       final startY = (args['startY'] as num?)?.toDouble() ?? 0.0;
@@ -670,15 +751,25 @@ class ToolDispatcher {
       final endY = (args['endY'] as num?)?.toDouble() ?? 0.0;
       final success =
           await androidBridge!.injectSwipe(startX, startY, endX, endY);
-      return {'gesture': 'swipe', 'success': success};
+      return {
+        'status': success ? 'done' : 'error',
+        'gesture': 'swipe',
+        'success': success,
+        if (!success) 'error': 'Swipe gesture was not dispatched',
+      };
     }
-    return {'error': 'Unknown gesture type: $type'};
+    return {'status': 'error', 'error': 'Unknown gesture type: $type'};
   }
 
   Future<Map<String, dynamic>> _handleNavigate(
       Map<String, dynamic> args) async {
     if (androidBridge == null) {
-      return {'error': 'Mobile navigation is not available on this platform'};
+      return {
+        'status': 'error',
+        'error': Platform.isAndroid
+            ? 'Android accessibility bridge is not yet initialised'
+            : 'navigate is only available on Android',
+      };
     }
     final raw = args['action'];
     int actionCode = 1;
@@ -695,7 +786,13 @@ class ToolDispatcher {
       if (actionStr == 'notifications' || actionStr == '4') actionCode = 4;
     }
     final success = await androidBridge!.performNavigation(actionCode);
-    return {'action': actionStr, 'action_code': actionCode, 'success': success};
+    return {
+      'status': success ? 'done' : 'error',
+      'action': actionStr,
+      'action_code': actionCode,
+      'success': success,
+      if (!success) 'error': 'Navigation action was not performed',
+    };
   }
 
   Future<Map<String, dynamic>> _handleInspectScreen(
@@ -706,14 +803,24 @@ class ToolDispatcher {
     final decision = guard.evaluate(packageName: activePackageName);
     if (decision.isBlocked) {
       return {
+        'status': 'blocked',
+        'security_alert': decision.reason,
         'blocked': true,
         'reason': decision.reason,
       };
     }
 
-    if (Platform.isAndroid && androidBridge != null) {
+    if (Platform.isAndroid) {
+      if (androidBridge == null) {
+        return {
+          'status': 'error',
+          'error':
+              'Android accessibility bridge is not yet initialised. Enable Accessibility Service in Settings.',
+        };
+      }
       final hierarchy = await androidBridge!.dumpWindowHierarchy();
       return {
+        'status': 'done',
         'screen_status': 'inspected_accessibility_tree',
         'active_package': activePackageName,
         'elements_found': hierarchy.length,
@@ -722,6 +829,7 @@ class ToolDispatcher {
     }
 
     return {
+      'status': 'done',
       'screen_status': 'captured',
       'query': query,
       'summary': 'Desktop screen perception processed under security policy.',
@@ -735,12 +843,21 @@ class ToolDispatcher {
 
     if (androidBridge == null) {
       return {
-        'error': 'Text input automation is not available on this platform'
+        'status': 'error',
+        'error': Platform.isAndroid
+            ? 'Android accessibility bridge is not yet initialised'
+            : 'input_text is only available on Android',
       };
     }
 
     final success = await androidBridge!.inputText(text, viewId: viewId);
-    return {'action': 'input_text', 'text': text, 'success': success};
+    return {
+      'status': success ? 'done' : 'error',
+      'action': 'input_text',
+      'text': text,
+      'success': success,
+      if (!success) 'error': 'Text input failed — no editable field focused',
+    };
   }
 
   Future<Map<String, dynamic>> _handleScrollScreen(
@@ -754,11 +871,22 @@ class ToolDispatcher {
     }
 
     if (androidBridge == null) {
-      return {'error': 'Screen scrolling is not available on this platform'};
+      return {
+        'status': 'error',
+        'error': Platform.isAndroid
+            ? 'Android accessibility bridge is not yet initialised'
+            : 'scroll_screen is only available on Android',
+      };
     }
 
     final success = await androidBridge!.scroll(forward: forward);
-    return {'action': 'scroll', 'forward': forward, 'success': success};
+    return {
+      'status': success ? 'done' : 'error',
+      'action': 'scroll',
+      'forward': forward,
+      'success': success,
+      if (!success) 'error': 'Scroll failed — no scrollable view found',
+    };
   }
 
   Future<Map<String, dynamic>> _handleCaptureScreen(
@@ -772,23 +900,37 @@ class ToolDispatcher {
       };
     }
 
-    if (Platform.isAndroid && androidBridge != null) {
-      final bytes = await androidBridge!.takeScreenCapture();
-      if (bytes != null) {
-        onImageCaptured?.call(bytes);
+    if (Platform.isAndroid) {
+      if (androidBridge == null) {
         return {
-          'status': 'captured',
-          'format': 'jpeg',
-          'bytes_length': bytes.length,
-          'message':
-              'Visual screen frame captured and streamed to Gemini Live model under security shield approval',
+          'status': 'error',
+          'error':
+              'Android bridge is not initialised. Screen capture unavailable.',
         };
       }
-      return {
-        'status': 'unavailable',
-        'message':
-            'Screen capture unavailable or blocked by Android FLAG_SECURE',
-      };
+      try {
+        final bytes = await androidBridge!.takeScreenCapture();
+        if (bytes != null) {
+          onImageCaptured?.call(bytes);
+          return {
+            'status': 'captured',
+            'format': 'jpeg',
+            'bytes_length': bytes.length,
+            'message':
+                'Visual screen frame captured and streamed to Gemini Live model under security shield approval',
+          };
+        }
+        return {
+          'status': 'unavailable',
+          'message':
+              'Screen capture unavailable or blocked by Android FLAG_SECURE',
+        };
+      } catch (e) {
+        return {
+          'status': 'error',
+          'error': 'Screen capture failed: $e',
+        };
+      }
     }
 
     return {

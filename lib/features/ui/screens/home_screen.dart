@@ -58,6 +58,7 @@ class _HomeScreenState extends State<HomeScreen>
   String? _activePackage;
   bool _isAccessibilityEnabled = false;
   bool _isBatteryOptimizationIgnored = true;
+  bool _isUsageAccessGranted = true;
   final List<String> _transcripts = [];
   final List<Map<String, dynamic>> _toolHistory = [];
   final List<ChatMessage> _chatMessages = [];
@@ -84,6 +85,12 @@ class _HomeScreenState extends State<HomeScreen>
 
   bool _isHotwordActive = false;
   String _activeHotwordPhrase = 'hey assistant';
+  String _currentVoiceTranscript = '';
+  String _lastAssistantVoiceResponse = '';
+  bool _isTtsSpeaking = false;
+
+  StreamSubscription? _partialTranscriptSub;
+  StreamSubscription? _ttsSub;
 
   late AnimationController _orbController;
 
@@ -116,10 +123,12 @@ class _HomeScreenState extends State<HomeScreen>
     if (_androidBridge == null) return;
     final access = await _androidBridge!.isAccessibilityEnabled();
     final battery = await _androidBridge!.isBatteryOptimizationIgnored();
+    final usageAccess = await _androidBridge!.isUsageAccessGranted();
     if (mounted) {
       setState(() {
         _isAccessibilityEnabled = access;
         _isBatteryOptimizationIgnored = battery;
+        _isUsageAccessGranted = usageAccess;
       });
     }
   }
@@ -152,6 +161,7 @@ class _HomeScreenState extends State<HomeScreen>
       _isAccessibilityEnabled = await _androidBridge!.isAccessibilityEnabled();
       _isBatteryOptimizationIgnored =
           await _androidBridge!.isBatteryOptimizationIgnored();
+      _isUsageAccessGranted = await _androidBridge!.isUsageAccessGranted();
       await _androidBridge!.startForegroundService();
       await _androidBridge!.updateProtectedPackages(
           widget.guard.customProtectedPackages.toList());
@@ -179,7 +189,13 @@ class _HomeScreenState extends State<HomeScreen>
       // Listen to Android top bar tray & QS tile actions
       _trayActionSub = _androidBridge!.trayActionStream.listen((action) {
         if (action == 'toggle_voice') {
-          _toggleConnection();
+          // Defer until after _initClients completes so _dispatcher is ready
+          if (_dispatcher != null) {
+            _toggleConnection();
+          } else {
+            // Post to next frame to let _initClients finish
+            WidgetsBinding.instance.addPostFrameCallback((_) => _toggleConnection());
+          }
         } else if (action == 'exit') {
           _liveClient?.disconnect();
           _audioRecorder.stopStreaming();
@@ -234,6 +250,24 @@ class _HomeScreenState extends State<HomeScreen>
           }
         }
       });
+      _partialTranscriptSub?.cancel();
+      _partialTranscriptSub =
+          _androidBridge!.partialTranscriptStream.listen((partial) {
+        if (mounted && _isLocalSttActive) {
+          setState(() {
+            _currentVoiceTranscript = partial;
+          });
+        }
+      });
+
+      _ttsSub?.cancel();
+      _ttsSub = _androidBridge!.isSpeakingStream.listen((speaking) {
+        if (mounted) {
+          setState(() {
+            _isTtsSpeaking = speaking;
+          });
+        }
+      });
     } else if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
       _desktopDriver = DesktopDriver(onToggleVoice: _toggleConnection);
       await _desktopDriver!.initialize();
@@ -268,22 +302,28 @@ class _HomeScreenState extends State<HomeScreen>
     _workflowScheduler!.start();
 
     if (geminiKey != null && geminiKey.isNotEmpty) {
-      _setupGeminiClient(geminiKey);
+      final geminiModel = await widget.keyVault.getGeminiModel();
+      final geminiEndpoint = await widget.keyVault.getGeminiEndpoint();
+      _setupGeminiClient(geminiKey,
+          model: geminiModel, endpoint: geminiEndpoint);
     }
   }
 
-  void _setupGeminiClient(String apiKey) {
+  void _setupGeminiClient(String apiKey, {String? model, String? endpoint}) {
     _liveClient?.dispose();
     _liveClient = GeminiLiveClient(
       apiKey: apiKey,
+      host: endpoint,
+      model: model ?? GeminiLiveClient.defaultModel,
       toolDeclarations: ToolDefinitions.getAllDeclarations(
-          isAndroid: Theme.of(context).platform == TargetPlatform.android),
+          isAndroid: Platform.isAndroid),
       systemInstruction: '''
-You are Device Assistant, an intelligent cross-platform agent running natively on the device.
+You are Device Assistant, an intelligent on-device agent running natively on Android.
 You have tool access to device controls, memory, task planning, and sub-agents.
 When the user asks to plan a complex multi-step task, use the plan_task tool.
 When the user gives a preference or location, remember it using remember.
 When asked to observe or inspect what is currently on the screen, use capture_screen or inspect_screen.
+When opening apps, use list_installed_apps to find exact package_name when needed, or pass package_name to open_application.
 For autonomous sub-tasks, you can spawn specialized sub-agents with scoped tools using spawn_agent.
 Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
 ''',
@@ -339,10 +379,25 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
 
       setState(() {
         if (_toolHistory.isNotEmpty) {
-          _toolHistory[0]['status'] =
-              result.containsKey('blocked') ? 'blocked' : 'done';
+          final status = result['status'] == 'blocked' ||
+                  result.containsKey('blocked')
+              ? 'blocked'
+              : result['status'] == 'error' ||
+                      result.containsKey('error') ||
+                      result['success'] == false
+                  ? 'error'
+                  : 'done';
+          _toolHistory[0]['status'] = status;
           _toolHistory[0]['result'] = result;
         }
+        final toolStatus = result['status'] == 'blocked' ||
+                result.containsKey('blocked')
+            ? 'blocked'
+            : result['status'] == 'error' ||
+                    result.containsKey('error') ||
+                    result['success'] == false
+                ? 'error'
+                : 'done';
         _chatMessages.add(
           ChatMessage(
             id: 'tool_${DateTime.now().millisecondsSinceEpoch}',
@@ -352,7 +407,7 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
             toolData: {
               'tool': event.name,
               'args': event.arguments,
-              'status': result.containsKey('blocked') ? 'blocked' : 'done',
+              'status': toolStatus,
               'result': result,
             },
           ),
@@ -387,24 +442,50 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
     final hotword = event['hotword'] ?? 'hey assistant';
     final command = event['command'];
 
+    if (command == null || command.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _currentVoiceTranscript = 'Listening...';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: Colors.indigo.shade800,
+            duration: const Duration(seconds: 2),
+            content: Row(
+              children: [
+                const Icon(Icons.bolt, color: Colors.amberAccent),
+                const SizedBox(width: 8),
+                Text('Hotword: "$hotword" detected! Listening for command...'),
+              ],
+            ),
+          ),
+        );
+      }
+      if (Platform.isAndroid && _androidBridge != null) {
+        await _androidBridge!.startHotwordListening(hotwords: ['*']);
+        if (mounted) {
+          setState(() => _isLocalSttActive = true);
+          _androidBridge?.updateTrayStatus(isActive: true);
+        }
+      }
+      return;
+    }
+
+    final cleanCommand = command.trim();
     if (mounted) {
+      setState(() {
+        _currentVoiceTranscript = cleanCommand;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          backgroundColor: Colors.indigo.shade800,
+          backgroundColor: Colors.teal.shade800,
           duration: const Duration(seconds: 3),
           content: Row(
             children: [
-              const Icon(Icons.bolt, color: Colors.amberAccent),
+              const Icon(Icons.mic, color: Colors.tealAccent),
               const SizedBox(width: 8),
               Expanded(
-                child: Text(
-                  command != null && command.isNotEmpty
-                      ? (hotword == '*'
-                          ? 'Local STT: "$command"'
-                          : 'Heard: "$hotword, $command"')
-                      : 'Hotword: "$hotword" detected! Listening...',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
+                child: Text('Heard: "$cleanCommand"'),
               ),
             ],
           ),
@@ -412,10 +493,7 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
       );
     }
 
-    if (command != null && command.isNotEmpty) {
-      final cleanCommand = command.trim();
-      await _handleUserTextInput(cleanCommand);
-    }
+    await _handleUserTextInput(cleanCommand);
   }
 
   Future<void> _handleUserTextInput(String input) async {
@@ -435,96 +513,19 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
       });
     }
 
-    final lower = cleanCommand.toLowerCase();
-
-    // Check if command is a direct local device shortcut for instantaneous action
-    if (lower.startsWith('open ')) {
-      final app = cleanCommand.substring(5).trim();
-      final res = await _dispatcher
-          ?.dispatch(toolName: 'open_application', args: {'app_name': app});
-      final summary = 'Opened application: $app';
-      _recordToolResult('open_application', {'app_name': app}, res ?? {},
-          summaryText: summary);
-      _androidBridge?.speakText(summary);
-      return;
-    } else if (lower == 'take a screenshot' ||
-        lower == 'take screenshot' ||
-        lower == 'screenshot' ||
-        lower == 'capture screen') {
-      final res =
-          await _dispatcher?.dispatch(toolName: 'capture_screen', args: {});
-      final bytes = res?['size_bytes'] ?? 0;
-      final summary = 'Screenshot captured ($bytes bytes).';
-      _recordToolResult('capture_screen', {}, res ?? {}, summaryText: summary);
-      _androidBridge?.speakText(summary);
-      return;
-    } else if (lower == 'scroll down') {
-      final res = await _dispatcher
-          ?.dispatch(toolName: 'scroll', args: {'forward': true});
-      const summary = 'Scrolled screen down.';
-      _recordToolResult('scroll', {'forward': true}, res ?? {},
-          summaryText: summary);
-      return;
-    } else if (lower == 'scroll up') {
-      final res = await _dispatcher
-          ?.dispatch(toolName: 'scroll', args: {'forward': false});
-      const summary = 'Scrolled screen up.';
-      _recordToolResult('scroll', {'forward': false}, res ?? {},
-          summaryText: summary);
-      return;
-    } else if (lower == 'go back' || lower == 'press back' || lower == 'back') {
-      final res = await _dispatcher
-          ?.dispatch(toolName: 'perform_navigation', args: {'action': 1});
-      const summary = 'Navigated back.';
-      _recordToolResult('perform_navigation', {'action': 1}, res ?? {},
-          summaryText: summary);
-      return;
-    } else if (lower == 'go home' || lower == 'press home' || lower == 'home') {
-      final res = await _dispatcher
-          ?.dispatch(toolName: 'perform_navigation', args: {'action': 2});
-      const summary = 'Navigated to home screen.';
-      _recordToolResult('perform_navigation', {'action': 2}, res ?? {},
-          summaryText: summary);
-      return;
-    } else if (lower == 'show recents' ||
-        lower == 'recent apps' ||
-        lower == 'recents') {
-      final res = await _dispatcher
-          ?.dispatch(toolName: 'perform_navigation', args: {'action': 3});
-      const summary = 'Opened recent apps view.';
-      _recordToolResult('perform_navigation', {'action': 3}, res ?? {},
-          summaryText: summary);
-      return;
-    } else if (lower == 'system status' || lower == 'status') {
-      final res =
-          await _dispatcher?.dispatch(toolName: 'system_status', args: {});
-      final os = res?['os'] ?? 'Device';
-      final cores = res?['cores'] ?? 1;
-      final dev = res?['device'] ?? '';
-      final summary = 'System Status: $os ($dev) with $cores CPU cores.';
-      _recordToolResult('system_status', {}, res ?? {}, summaryText: summary);
-      _androidBridge?.speakText(summary);
-      return;
-    } else if (lower == 'list memories' || lower == 'memories') {
-      final res =
-          await _dispatcher?.dispatch(toolName: 'list_memories', args: {});
-      final count = res?['count'] ?? 0;
-      final summary = 'Found $count memories in local encrypted database.';
-      _recordToolResult('list_memories', {}, res ?? {}, summaryText: summary);
-      _androidBridge?.speakText(summary);
-      return;
-    }
-
-    // Process all queries and compound tasks through NVIDIA Nemotron Tool Calling
-    await _processCommandWithNemotron(cleanCommand);
+    // Process through Gemini 3.8 Flash (Serverless) or fallback to Nemotron
+    await _processCommand(cleanCommand);
   }
 
-  Future<void> _processCommandWithNemotron(String command) async {
+  Future<void> _processCommand(String command) async {
     final clean = command.trim();
     if (clean.isEmpty) return;
 
+    final geminiKey = await widget.keyVault.getGeminiApiKey();
     final nebiusKey = await widget.keyVault.getNebiusApiKey();
-    if (nebiusKey == null || nebiusKey.isEmpty) {
+
+    if ((geminiKey == null || geminiKey.isEmpty) &&
+        (nebiusKey == null || nebiusKey.isEmpty)) {
       if (mounted) {
         setState(() {
           _chatMessages.add(
@@ -532,7 +533,7 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
               id: 'err_${DateTime.now().millisecondsSinceEpoch}',
               isUser: false,
               text:
-                  'NVIDIA Nemotron requires a Nebius Token Factory API key. Please configure your key in Settings.',
+                  'Please configure your Google Cloud Gemini or Nebius API key in Settings.',
               timestamp: DateTime.now(),
               isError: true,
             ),
@@ -543,33 +544,22 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
       return;
     }
 
-    final baseEndpoint = await widget.keyVault.getNebiusBaseEndpoint();
-    final superVlEndpoint = await widget.keyVault.getNebiusSuperVlEndpoint();
-    final nanoEndpoint = await widget.keyVault.getNebiusNanoEndpoint();
-    final superVlModel = await widget.keyVault.getNebiusSuperVlModel();
-    final nanoModel = await widget.keyVault.getNebiusNanoModel();
+    final useGemini = geminiKey != null && geminiKey.isNotEmpty;
+    final geminiModel = await widget.keyVault.getGeminiModel();
+    final geminiEndpoint = await widget.keyVault.getGeminiEndpoint();
 
-    _nebiusClient ??= NebiusClient(
-      apiKey: nebiusKey,
-      endpoint: baseEndpoint,
-      superVlEndpoint: superVlEndpoint,
-      nanoEndpoint: nanoEndpoint,
-      superVlModel: superVlModel,
-      nanoModel: nanoModel,
-    );
+    final pendingMsgId = 'assistant_${DateTime.now().millisecondsSinceEpoch}';
+    final modelLabel = useGemini
+        ? 'Gemini 3.8 Flash (Serverless)'
+        : 'Nemotron';
 
-    final complexity = NebiusClient.classifyTask(taskDescription: clean);
-    final activeModel =
-        complexity == TaskComplexity.complex ? superVlModel : nanoModel;
-
-    final pendingMsgId = 'nemotron_${DateTime.now().millisecondsSinceEpoch}';
     if (mounted) {
       setState(() {
         _chatMessages.add(
           ChatMessage(
             id: pendingMsgId,
             isUser: false,
-            text: 'Thinking with Nemotron ($activeModel)...',
+            text: 'Thinking with $modelLabel...',
             timestamp: DateTime.now(),
           ),
         );
@@ -578,18 +568,24 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
 
     try {
       const systemPrompt = '''
-You are Device Assistant running as an on-device intelligent agent.
+You are Device Assistant running as an on-device intelligent agent for Android.
 When a user asks to perform an action on their device or inspect device state, reply ONLY with a single JSON object in this format:
 {"action": "tool_call", "tool": "<tool_name>", "args": {<arguments>}}
 
 Available tools:
 - system_status: {}
-- open_application: {"app_name": "string"}
+- open_application: {"package_name": "string (e.g. com.chrome.dev)", "app_name": "string"}
+- list_installed_apps: {"filter": "optional string"}
+- click_element: {"text": "visible label on screen"}
+- touch_gesture: {"type": "tap"|"swipe", "x": number, "y": number, "startX": number, "startY": number, "endX": number, "endY": number}
+- input_text: {"text": "string to type", "view_id": "optional string"}
+- scroll_screen: {"direction": "down"|"up"}
+- navigate: {"action": "back"|"home"|"recents"|"notifications"}
 - capture_screen: {}
 - inspect_screen: {"query": "string"}
-- remember: {"key": "string", "value": "string"}
+- remember: {"key": "string", "value": "string", "category": "preference"|"location"|"general"}
 - recall: {"key": "string"}
-- list_memories: {}
+- list_memories: {"category": "optional string"}
 - forget: {"key": "string"}
 - plan_task: {"goal": "string"}
 - execute_plan: {"plan_id": "string"}
@@ -597,20 +593,52 @@ Available tools:
 - save_workflow: {"name": "string", "steps": [...]}
 - run_workflow: {"name": "string"}
 - list_workflows: {}
+- delete_workflow: {"name": "string"}
 - web_search: {"query": "string"}
-- scroll: {"forward": true/false}
-- perform_navigation: {"action": 1 for back, 2 for home, 3 for recents}
 
 If the user query is a general knowledge question, conversational request, or explanation, reply directly in natural language without any JSON wrapper.
 ''';
 
-      final response = await _nebiusClient!.chatCompletion(
-        messages: [
-          {'role': 'system', 'content': systemPrompt},
-          {'role': 'user', 'content': clean},
-        ],
-        complexity: complexity,
-      );
+      String response;
+      if (useGemini) {
+        _liveClient ??= GeminiLiveClient(
+          apiKey: geminiKey,
+          host: geminiEndpoint,
+          model: geminiModel,
+          toolDeclarations: ToolDefinitions.getAllDeclarations(
+              isAndroid: Platform.isAndroid),
+        );
+
+        response = await _liveClient!.generateContent(
+          prompt: clean,
+          systemInstruction: systemPrompt,
+        );
+      } else {
+        final baseEndpoint = await widget.keyVault.getNebiusBaseEndpoint();
+        final superVlEndpoint =
+            await widget.keyVault.getNebiusSuperVlEndpoint();
+        final nanoEndpoint = await widget.keyVault.getNebiusNanoEndpoint();
+        final superVlModel = await widget.keyVault.getNebiusSuperVlModel();
+        final nanoModel = await widget.keyVault.getNebiusNanoModel();
+
+        _nebiusClient ??= NebiusClient(
+          apiKey: nebiusKey!,
+          endpoint: baseEndpoint,
+          superVlEndpoint: superVlEndpoint,
+          nanoEndpoint: nanoEndpoint,
+          superVlModel: superVlModel,
+          nanoModel: nanoModel,
+        );
+
+        final complexity = NebiusClient.classifyTask(taskDescription: clean);
+        response = await _nebiusClient!.chatCompletion(
+          messages: [
+            {'role': 'system', 'content': systemPrompt},
+            {'role': 'user', 'content': clean},
+          ],
+          complexity: complexity,
+        );
+      }
 
       final trimmed = response.trim();
       Map<String, dynamic>? toolCall;
@@ -648,6 +676,7 @@ If the user query is a general knowledge question, conversational request, or ex
 
         if (mounted) {
           setState(() {
+            _lastAssistantVoiceResponse = summary;
             final idx = _chatMessages.indexWhere((m) => m.id == pendingMsgId);
             if (idx != -1) {
               _chatMessages[idx] = ChatMessage(
@@ -658,7 +687,13 @@ If the user query is a general knowledge question, conversational request, or ex
                 toolData: {
                   'tool': toolName,
                   'args': toolArgs,
-                  'status': result.containsKey('blocked') ? 'blocked' : 'done',
+                  'status': result.containsKey('blocked')
+                      ? 'blocked'
+                      : (result['status'] == 'app_not_found' ||
+                              result['success'] == false ||
+                              result.containsKey('error')
+                          ? 'error'
+                          : 'done'),
                   'result': result,
                 },
               );
@@ -666,7 +701,13 @@ If the user query is a general knowledge question, conversational request, or ex
             _toolHistory.insert(0, {
               'tool': toolName,
               'args': toolArgs,
-              'status': result.containsKey('blocked') ? 'blocked' : 'done',
+              'status': result.containsKey('blocked')
+                  ? 'blocked'
+                  : (result['status'] == 'app_not_found' ||
+                          result['success'] == false ||
+                          result.containsKey('error')
+                      ? 'error'
+                      : 'done'),
               'result': result,
               'time': DateTime.now(),
             });
@@ -679,6 +720,7 @@ If the user query is a general knowledge question, conversational request, or ex
       // Natural language conversational response
       if (mounted) {
         setState(() {
+          _lastAssistantVoiceResponse = trimmed;
           final idx = _chatMessages.indexWhere((m) => m.id == pendingMsgId);
           if (idx != -1) {
             _chatMessages[idx].text = trimmed;
@@ -689,6 +731,7 @@ If the user query is a general knowledge question, conversational request, or ex
     } catch (e) {
       if (mounted) {
         setState(() {
+          _lastAssistantVoiceResponse = 'Nemotron Error: $e';
           final idx = _chatMessages.indexWhere((m) => m.id == pendingMsgId);
           if (idx != -1) {
             _chatMessages[idx] = ChatMessage(
@@ -725,20 +768,47 @@ If the user query is a general knowledge question, conversational request, or ex
         return 'System Status: $os $ver on $dev ($cores CPU cores).';
 
       case 'open_application':
-        final app = args['app_name'] ?? 'app';
+        final app = args['app_name'] ?? args['package_name'] ?? 'app';
+        if (result['status'] == 'app_not_found' || result['success'] == false) {
+          return 'Could not open "$app": ${result['error'] ?? 'Application not found on this device.'}';
+        }
         return 'Opened $app.';
 
+      case 'list_installed_apps':
+        final count = result['count'] ?? 0;
+        final appsList = result['apps'] as List<dynamic>? ?? [];
+        if (appsList.isEmpty) {
+          final filter = args['filter'];
+          return filter != null
+              ? 'No apps found matching "$filter".'
+              : 'No installed launcher apps found.';
+        }
+        final preview = appsList
+            .take(5)
+            .map((a) => a is Map ? '${a['appName']} (${a['packageName']})' : a.toString())
+            .join(', ');
+        return 'Found $count installed apps: $preview${appsList.length > 5 ? '...' : ''}.';
+
       case 'capture_screen':
-        final bytes = result['size_bytes'] ?? 0;
+        if (result['status'] == 'unavailable') {
+          return 'Screen capture unavailable: ${result['message'] ?? 'FLAG_SECURE active'}';
+        }
+        final bytes = result['bytes_length'] ?? result['size_bytes'] ?? 0;
         return 'Captured screen screenshot ($bytes bytes).';
 
       case 'scroll':
       case 'scroll_screen':
+        if (result['success'] == false) {
+          return 'Failed to scroll screen: ${result['error'] ?? 'accessibility service unavailable'}';
+        }
         final fwd = args['forward'] == true;
         return fwd ? 'Scrolled down.' : 'Scrolled up.';
 
       case 'perform_navigation':
       case 'navigate':
+        if (result['success'] == false) {
+          return 'Failed navigation: ${result['error'] ?? 'accessibility service unavailable'}';
+        }
         final action = args['action'];
         final actionStr = action == 1 || action == 'back'
             ? 'back'
@@ -813,36 +883,6 @@ If the user query is a general knowledge question, conversational request, or ex
       default:
         return 'Executed tool $tool successfully.';
     }
-  }
-
-  void _recordToolResult(
-      String tool, Map<String, dynamic> args, Map<String, dynamic> result,
-      {String? summaryText}) {
-    if (!mounted) return;
-    final summary = summaryText ?? _formatToolResultSummary(tool, args, result);
-    setState(() {
-      _toolHistory.insert(0, {
-        'tool': tool,
-        'args': args,
-        'status': result.containsKey('blocked') ? 'blocked' : 'done',
-        'result': result,
-        'time': DateTime.now(),
-      });
-      _chatMessages.add(
-        ChatMessage(
-          id: 'tool_${DateTime.now().millisecondsSinceEpoch}',
-          isUser: false,
-          text: summary,
-          timestamp: DateTime.now(),
-          toolData: {
-            'tool': tool,
-            'args': args,
-            'status': result.containsKey('blocked') ? 'blocked' : 'done',
-            'result': result,
-          },
-        ),
-      );
-    });
   }
 
   Future<void> _toggleConnection() async {
@@ -1149,6 +1189,8 @@ If the user query is a general knowledge question, conversational request, or ex
     _workflowScheduler?.dispose();
     _audioRecorder.dispose();
     _micPermSub?.cancel();
+    _partialTranscriptSub?.cancel();
+    _ttsSub?.cancel();
     _audioPlayback?.dispose();
     _liveClient?.dispose();
     _desktopDriver?.dispose();
@@ -1373,6 +1415,40 @@ If the user query is a general knowledge question, conversational request, or ex
             ),
           ),
 
+        // Usage Access (Package Usage Stats) Required Banner
+        if (Platform.isAndroid && !_isUsageAccessGranted)
+          Container(
+            color: Colors.blue.shade900.withValues(alpha: 0.3),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              children: [
+                const Icon(Icons.apps_outlined,
+                    color: Colors.lightBlueAccent, size: 20),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'Usage Access needed for precise app targeting (Chrome Dev vs Stable, etc.).',
+                    style: TextStyle(fontSize: 12, color: Colors.white),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () async {
+                    await _androidBridge?.requestUsageAccess();
+                    // Re-check after returning from settings
+                    await Future.delayed(const Duration(milliseconds: 500));
+                    final granted =
+                        await _androidBridge?.isUsageAccessGranted() ?? false;
+                    if (mounted) {
+                      setState(() => _isUsageAccessGranted = granted);
+                    }
+                  },
+                  child: const Text('Grant',
+                      style: TextStyle(color: Colors.lightBlueAccent)),
+                ),
+              ],
+            ),
+          ),
+
         // Security Shield Status Banner
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -1466,7 +1542,88 @@ If the user query is a general knowledge question, conversational request, or ex
                     );
                   },
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
+                // Voice Speech Transcription & TTS Response Card
+                Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 20),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: _isTtsSpeaking
+                        ? Colors.indigo.withValues(alpha: 0.25)
+                        : _isLocalSttActive
+                            ? Colors.teal.withValues(alpha: 0.2)
+                            : Colors.white.withValues(alpha: 0.04),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: _isTtsSpeaking
+                          ? Colors.cyanAccent.withValues(alpha: 0.5)
+                          : _isLocalSttActive
+                              ? Colors.tealAccent.withValues(alpha: 0.5)
+                              : Colors.white12,
+                    ),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            _isTtsSpeaking
+                                ? Icons.volume_up
+                                : _isLocalSttActive
+                                    ? Icons.mic
+                                    : Icons.mic_none,
+                            size: 18,
+                            color: _isTtsSpeaking
+                                ? Colors.cyanAccent
+                                : _isLocalSttActive
+                                    ? Colors.tealAccent
+                                    : Colors.grey,
+                          ),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              _isTtsSpeaking
+                                  ? 'TTS Playing Voice Response...'
+                                  : _isLocalSttActive
+                                      ? (_currentVoiceTranscript.isNotEmpty
+                                          ? 'Heard: "$_currentVoiceTranscript"'
+                                          : 'Listening... Speak your request')
+                                      : 'Tap Orb to Speak with Nemotron',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: _isTtsSpeaking
+                                    ? Colors.cyanAccent
+                                    : _isLocalSttActive
+                                        ? Colors.white
+                                        : Colors.grey.shade400,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (_lastAssistantVoiceResponse.isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          _lastAssistantVoiceResponse,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: _isTtsSpeaking
+                                ? Colors.white
+                                : Colors.grey.shade400,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
                 Text(
                   _isLocalSttActive
                       ? 'Listening via Device STT (NVIDIA Nemotron)'
@@ -1629,24 +1786,31 @@ If the user query is a general knowledge question, conversational request, or ex
                             final item = _toolHistory[idx];
                             final isBlocked = item['status'] == 'blocked';
                             final isExecuting = item['status'] == 'executing';
+                            final isError = item['status'] == 'error';
                             return Card(
                               margin: const EdgeInsets.symmetric(vertical: 4),
                               color: isBlocked
                                   ? Colors.red.withValues(alpha: 0.12)
-                                  : null,
+                                  : isError
+                                      ? Colors.orange.withValues(alpha: 0.12)
+                                      : null,
                               child: ListTile(
                                 dense: true,
                                 leading: Icon(
                                   isBlocked
                                       ? Icons.block
-                                      : isExecuting
-                                          ? Icons.sync
-                                          : Icons.check_circle_outline,
+                                      : isError
+                                          ? Icons.error_outline
+                                          : isExecuting
+                                              ? Icons.sync
+                                              : Icons.check_circle_outline,
                                   color: isBlocked
                                       ? Colors.redAccent
-                                      : isExecuting
-                                          ? Colors.cyanAccent
-                                          : Colors.greenAccent,
+                                      : isError
+                                          ? Colors.orangeAccent
+                                          : isExecuting
+                                              ? Colors.cyanAccent
+                                              : Colors.greenAccent,
                                   size: 20,
                                 ),
                                 title: Text(
@@ -1655,7 +1819,20 @@ If the user query is a general knowledge question, conversational request, or ex
                                       fontWeight: FontWeight.bold),
                                 ),
                                 subtitle: Text(
-                                  'Args: ${item['args']}\n${isBlocked ? "BLOCKED by security guard" : (item['status'] == 'executing' ? "Executing on device..." : "Completed successfully")}',
+                                  () {
+                                    if (isBlocked) {
+                                      return 'Args: ${item['args']}\nBLOCKED by security guard';
+                                    }
+                                    if (isError) {
+                                      final result = item['result'] as Map?;
+                                      final errMsg = result?['error']?.toString() ?? 'Tool call failed';
+                                      return 'Args: ${item['args']}\nERROR: $errMsg';
+                                    }
+                                    if (isExecuting) {
+                                      return 'Args: ${item['args']}\nExecuting on device...';
+                                    }
+                                    return 'Args: ${item['args']}\nCompleted successfully';
+                                  }(),
                                   style: const TextStyle(fontSize: 11),
                                 ),
                                 trailing:

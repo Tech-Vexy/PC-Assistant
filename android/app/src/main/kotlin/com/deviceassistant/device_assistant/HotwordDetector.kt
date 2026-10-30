@@ -12,13 +12,15 @@ import android.speech.SpeechRecognizer
 import java.util.Locale
 
 /**
- * On-device continuous Hotword and Voice Command Detector for Android,
- * providing Google Hotword-like wakefulness ("Hey Assistant", "OK Google", etc.)
- * with zero cloud dependencies and immediate follow-up command extraction.
+ * Robust on-device STT and continuous Hotword Detector for Android.
+ * Collects microphone audio, converts speech to text using Android SpeechRecognizer,
+ * and passes the transcribed text to Flutter for LLM processing.
  */
 class HotwordDetector(
     private val context: Context,
-    private val onHotwordTriggered: (hotword: String, command: String?) -> Unit
+    private val onHotwordTriggered: (hotword: String, command: String?) -> Unit,
+    private val onRmsChangedListener: ((rmsdB: Float) -> Unit)? = null,
+    private val onPartialTranscriptListener: ((text: String) -> Unit)? = null
 ) {
     companion object {
         val DEFAULT_HOTWORDS = listOf(
@@ -37,6 +39,7 @@ class HotwordDetector(
     private var activeHotwords: List<String> = DEFAULT_HOTWORDS
     private var isListening: Boolean = false
     private var isRecognitionActive: Boolean = false
+    private var isPaused: Boolean = false
     private var lastTriggerTimestamp: Long = 0
 
     fun updateHotwords(hotwords: List<String>) {
@@ -49,13 +52,35 @@ class HotwordDetector(
 
     fun isListening(): Boolean = isListening
 
+    fun isPaused(): Boolean = isPaused
+
+    fun pauseListening() {
+        mainHandler.post {
+            isPaused = true
+            try {
+                speechRecognizer?.stopListening()
+            } catch (_: Exception) {}
+            isRecognitionActive = false
+        }
+    }
+
+    fun resumeListening() {
+        mainHandler.post {
+            isPaused = false
+            if (isListening) {
+                beginListeningSession()
+            }
+        }
+    }
+
     fun startListening() {
         mainHandler.post {
-            if (isListening) return@post
+            if (isListening && !isPaused) return@post
             if (context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
                 return@post
             }
             isListening = true
+            isPaused = false
             initAndStartRecognizer()
         }
     }
@@ -63,6 +88,7 @@ class HotwordDetector(
     fun stopListening() {
         mainHandler.post {
             isListening = false
+            isPaused = false
             destroyRecognizer()
         }
     }
@@ -74,12 +100,10 @@ class HotwordDetector(
 
         destroyRecognizer()
 
-        // Use on-device offline recognition when available (Android 12+ API 31+)
-        speechRecognizer = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-            SpeechRecognizer.isOnDeviceRecognitionAvailable(context)) {
-            SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
-        } else {
-            SpeechRecognizer.createSpeechRecognizer(context)
+        try {
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context)
+        } catch (_: Exception) {
+            return
         }
 
         speechRecognizer?.setRecognitionListener(object : RecognitionListener {
@@ -87,8 +111,16 @@ class HotwordDetector(
                 isRecognitionActive = true
             }
 
-            override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBeginningOfSpeech() {
+                isRecognitionActive = true
+            }
+
+            override fun onRmsChanged(rmsdB: Float) {
+                if (!isPaused && rmsdB > 0f) {
+                    onRmsChangedListener?.invoke(rmsdB)
+                }
+            }
+
             override fun onBufferReceived(buffer: ByteArray?) {}
 
             override fun onEndOfSpeech() {
@@ -97,35 +129,53 @@ class HotwordDetector(
 
             override fun onError(error: Int) {
                 isRecognitionActive = false
-                // Stop trying if permission is denied
                 if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
                     isListening = false
                     return
                 }
-                // Schedule restart on error if continuous hotword listening is active
-                if (isListening) {
-                    mainHandler.postDelayed({
-                        if (isListening) {
+
+                // If paused (e.g. during TTS playback), do not restart listening
+                if (!isListening || isPaused) return
+
+                val restartDelay = when (error) {
+                    SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> 600L
+                    SpeechRecognizer.ERROR_NO_MATCH,
+                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> 250L
+                    SpeechRecognizer.ERROR_NETWORK_TIMEOUT,
+                    SpeechRecognizer.ERROR_NETWORK -> 800L
+                    else -> 500L
+                }
+
+                mainHandler.postDelayed({
+                    if (isListening && !isPaused) {
+                        // Re-initialize recognizer if it errored out on client/server state
+                        if (error == SpeechRecognizer.ERROR_CLIENT || error == SpeechRecognizer.ERROR_SERVER) {
+                            initAndStartRecognizer()
+                        } else {
                             beginListeningSession()
                         }
-                    }, 400)
-                }
+                    }
+                }, restartDelay)
             }
 
             override fun onResults(results: Bundle?) {
                 isRecognitionActive = false
-                processMatches(results)
-                if (isListening) {
+                processFinalResults(results)
+                if (isListening && !isPaused) {
                     mainHandler.postDelayed({
-                        if (isListening) {
+                        if (isListening && !isPaused) {
                             beginListeningSession()
                         }
-                    }, 300)
+                    }, 350)
                 }
             }
 
             override fun onPartialResults(partialResults: Bundle?) {
-                processMatches(partialResults)
+                val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                val partial = matches?.firstOrNull()?.trim()
+                if (!partial.isNullOrEmpty()) {
+                    onPartialTranscriptListener?.invoke(partial)
+                }
             }
 
             override fun onEvent(eventType: Int, params: Bundle?) {}
@@ -135,7 +185,7 @@ class HotwordDetector(
     }
 
     private fun beginListeningSession() {
-        if (!isListening || speechRecognizer == null) return
+        if (!isListening || isPaused || speechRecognizer == null) return
 
         try {
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
@@ -144,46 +194,43 @@ class HotwordDetector(
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
                 putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
-                }
             }
             speechRecognizer?.startListening(intent)
         } catch (_: Exception) {
-            // Restart after debounce if startup fails
             mainHandler.postDelayed({
-                if (isListening) beginListeningSession()
+                if (isListening && !isPaused) beginListeningSession()
             }, 600)
         }
     }
 
-    private fun processMatches(bundle: Bundle?) {
-        if (bundle == null) return
+    private fun processFinalResults(bundle: Bundle?) {
+        if (bundle == null || isPaused) return
         val matches = bundle.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) ?: return
+        if (matches.isEmpty()) return
 
         val now = System.currentTimeMillis()
-        if (now - lastTriggerTimestamp < 2000) {
-            return // 2-second debounce to avoid duplicate triggers
+        if (now - lastTriggerTimestamp < 800) {
+            return
         }
 
+        val isSttOnly = activeHotwords.any { it == "*" || it.isEmpty() }
+
+        if (isSttOnly) {
+            val bestText = matches.firstOrNull { it.isNotBlank() }?.trim() ?: return
+            lastTriggerTimestamp = now
+            onHotwordTriggered("stt", bestText)
+            return
+        }
+
+        // Hotword detection mode
         for (rawMatch in matches) {
             val lower = rawMatch.trim().lowercase()
-
             for (hw in activeHotwords) {
-                if (hw == "*" || hw.isEmpty()) {
-                    lastTriggerTimestamp = now
-                    onHotwordTriggered("stt", rawMatch.trim())
-                    return
-                }
-
                 if (lower.startsWith(hw) || lower.contains(hw)) {
                     lastTriggerTimestamp = now
-
-                    // Extract subsequent voice command (e.g. "hey assistant open chrome" -> "open chrome")
                     val hwIndex = lower.indexOf(hw)
                     val afterHotword = lower.substring(hwIndex + hw.length).trim()
                     val command = if (afterHotword.isNotEmpty()) afterHotword else null
-
                     onHotwordTriggered(hw, command)
                     return
                 }

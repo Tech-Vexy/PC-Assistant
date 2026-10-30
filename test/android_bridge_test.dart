@@ -80,6 +80,11 @@ void main() {
           return true;
         case 'isHotwordListening':
           return true;
+        case 'getInstalledApps':
+          return [
+            {'appName': 'Calculator', 'packageName': 'com.android.calculator'},
+            {'appName': 'Chrome', 'packageName': 'com.android.chrome'}
+          ];
         default:
           return null;
       }
@@ -314,6 +319,41 @@ void main() {
       final hotwordEvent = await hotwordFuture;
       expect(hotwordEvent['hotword'], 'hey assistant');
       expect(hotwordEvent['command'], 'open chrome');
+    });
+
+    test('Speech recognition and TTS streams and installed apps list', () async {
+      final bridge = AndroidBridge(isAndroid: true);
+
+      final partialFuture = bridge.partialTranscriptStream.first;
+      final ttsFuture = bridge.isSpeakingStream.first;
+      final rmsFuture = bridge.audioRmsStream.first;
+
+      final partialMessage = channel.codec.encodeMethodCall(
+        const MethodCall('onPartialTranscript', {'text': 'open chr'}),
+      );
+      await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .handlePlatformMessage(channel.name, partialMessage, (_) {});
+
+      final ttsMessage = channel.codec.encodeMethodCall(
+        const MethodCall('onTtsStarted', null),
+      );
+      await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .handlePlatformMessage(channel.name, ttsMessage, (_) {});
+
+      final rmsMessage = channel.codec.encodeMethodCall(
+        const MethodCall('onAudioRmsChanged', {'rms': 12.5}),
+      );
+      await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .handlePlatformMessage(channel.name, rmsMessage, (_) {});
+
+      expect(await partialFuture, 'open chr');
+      expect(await ttsFuture, isTrue);
+      expect(await rmsFuture, 12.5);
+
+      final installedApps = await bridge.getInstalledApps();
+      expect(installedApps.length, 2);
+      expect(installedApps.first['appName'], 'Calculator');
+      expect(installedApps.first['packageName'], 'com.android.calculator');
     });
   });
 }

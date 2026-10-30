@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:stream_channel/stream_channel.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:device_assistant/core/network/gemini_live_client.dart';
@@ -72,19 +74,83 @@ void main() {
       expect(event.arguments['key'], equals('test'));
     });
 
-    test('GeminiLiveClient initializes with default config (gemini-3.8-live)',
+    test('GeminiLiveClient initializes with default config (gemini-3.8-flash)',
         () {
       final client = GeminiLiveClient(apiKey: 'dummy_key');
       expect(client.isConnected, isFalse);
-      expect(client.model, equals('models/gemini-3.8-live'));
+      expect(client.model, equals('models/gemini-3.8-flash'));
       expect(() => client.sendTextMessage('Hello world'), returnsNormally);
       client.dispose();
     });
 
     test('GeminiLiveClient normalizes model without models/ prefix', () {
       final client =
-          GeminiLiveClient(apiKey: 'dummy_key', model: 'gemini-3.8-live');
-      expect(client.model, equals('models/gemini-3.8-live'));
+          GeminiLiveClient(apiKey: 'dummy_key', model: 'gemini-3.8-flash');
+      expect(client.model, equals('models/gemini-3.8-flash'));
+      client.dispose();
+    });
+
+    test('GeminiLiveClient generateContent performs serverless inference',
+        () async {
+      final mockHttpClient = MockClient((request) async {
+        expect(request.url.path, contains('gemini-3.8-flash:generateContent'));
+        expect(request.url.queryParameters['key'], equals('test_key'));
+        final body = jsonDecode(request.body) as Map<String, dynamic>;
+        expect(body['contents'], isNotEmpty);
+
+        return http.Response(
+          jsonEncode({
+            'candidates': [
+              {
+                'content': {
+                  'role': 'model',
+                  'parts': [
+                    {'text': 'Hello from Gemini 3.8 Flash Serverless!'}
+                  ]
+                }
+              }
+            ]
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+
+      final client = GeminiLiveClient(apiKey: 'test_key');
+      final result = await client.generateContent(
+        prompt: 'Hello',
+        httpClient: mockHttpClient,
+      );
+
+      expect(result, equals('Hello from Gemini 3.8 Flash Serverless!'));
+      client.dispose();
+    });
+
+    test('GeminiLiveClient testConnection checks serverless health', () async {
+      final mockHttpClient = MockClient((request) async {
+        return http.Response(
+          jsonEncode({
+            'candidates': [
+              {
+                'content': {
+                  'role': 'model',
+                  'parts': [
+                    {'text': 'OK'}
+                  ]
+                }
+              }
+            ]
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+
+      final client = GeminiLiveClient(apiKey: 'test_key');
+      final result = await client.testConnection(httpClient: mockHttpClient);
+
+      expect(result['success'], isTrue);
+      expect(result['model'], equals('models/gemini-3.8-flash'));
       client.dispose();
     });
 

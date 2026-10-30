@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import '../../../core/database/local_database.dart';
 import '../../../core/network/discovery_service.dart';
+import '../../../core/network/gemini_live_client.dart';
 import '../../../core/network/nebius_client.dart';
 import '../../../core/network/pc_bridge_client.dart';
 import '../../../core/security/key_vault.dart';
@@ -22,6 +23,8 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   final _geminiCtrl = TextEditingController();
+  final _geminiModelCtrl = TextEditingController();
+  final _geminiEndpointCtrl = TextEditingController();
   final _nebiusCtrl = TextEditingController();
   final _nebiusSuperEndpointCtrl = TextEditingController();
   final _nebiusSuperModelCtrl = TextEditingController();
@@ -43,6 +46,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _isTestingNano = false;
   Map<String, dynamic>? _nanoTestResult;
 
+  bool _isTestingGemini = false;
+  Map<String, dynamic>? _geminiTestResult;
+
   bool _isSaving = false;
   bool _hotwordEnabled = true;
 
@@ -54,6 +60,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadCurrentValues() async {
     _geminiCtrl.text = (await widget.keyVault.getGeminiApiKey()) ?? '';
+    _geminiModelCtrl.text = await widget.keyVault.getGeminiModel();
+    _geminiEndpointCtrl.text = await widget.keyVault.getGeminiEndpoint();
     _nebiusCtrl.text = (await widget.keyVault.getNebiusApiKey()) ?? '';
     _nebiusSuperEndpointCtrl.text =
         await widget.keyVault.getNebiusSuperEndpoint();
@@ -72,6 +80,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       if (_geminiCtrl.text.trim().isNotEmpty) {
         await widget.keyVault.setGeminiApiKey(_geminiCtrl.text.trim());
+      }
+      if (_geminiModelCtrl.text.trim().isNotEmpty) {
+        await widget.keyVault.setGeminiModel(_geminiModelCtrl.text.trim());
+      }
+      if (_geminiEndpointCtrl.text.trim().isNotEmpty) {
+        await widget.keyVault
+            .setGeminiEndpoint(_geminiEndpointCtrl.text.trim());
       }
       if (_nebiusCtrl.text.trim().isNotEmpty) {
         await widget.keyVault.setNebiusApiKey(_nebiusCtrl.text.trim());
@@ -201,6 +216,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _testGeminiConnection() async {
+    setState(() {
+      _isTestingGemini = true;
+      _geminiTestResult = null;
+    });
+
+    try {
+      final key = _geminiCtrl.text.trim();
+      final endpoint = _geminiEndpointCtrl.text.trim();
+      final model = _geminiModelCtrl.text.trim();
+
+      if (key.isEmpty) {
+        setState(() {
+          _geminiTestResult = {
+            'success': false,
+            'error': 'Gemini API Key required to test serverless inference',
+          };
+        });
+        return;
+      }
+
+      final client = GeminiLiveClient(
+        apiKey: key,
+        host: endpoint.isNotEmpty ? endpoint : null,
+        model: model.isNotEmpty ? model : 'gemini-3.8-flash',
+      );
+
+      final res = await client.testConnection();
+      if (mounted) setState(() => _geminiTestResult = res);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _geminiTestResult = {
+              'success': false,
+              'error': e.toString(),
+            });
+      }
+    } finally {
+      if (mounted) setState(() => _isTestingGemini = false);
+    }
+  }
+
   Future<void> _testPcConnection() async {
     setState(() {
       _isTestingPc = true;
@@ -294,6 +350,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (confirmed == true) {
       await widget.keyVault.clearAllKeys();
       _geminiCtrl.clear();
+      _geminiModelCtrl.text = 'gemini-3.8-flash';
+      _geminiEndpointCtrl.text = 'generativelanguage.googleapis.com';
       _nebiusCtrl.clear();
       _nebiusSuperEndpointCtrl.text = 'https://api.tokenfactory.nebius.com/v1';
       _nebiusNanoEndpointCtrl.text = 'https://api.tokenfactory.nebius.com/v1';
@@ -315,6 +373,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void dispose() {
     _geminiCtrl.dispose();
+    _geminiModelCtrl.dispose();
+    _geminiEndpointCtrl.dispose();
     _nebiusCtrl.dispose();
     _nebiusSuperEndpointCtrl.dispose();
     _nebiusSuperModelCtrl.dispose();
@@ -632,15 +692,102 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 28),
 
-          // --- Optional Google Gemini Section ---
-          _buildSectionHeader(
-              Icons.key, 'Google Gemini Key (Optional)', 'Live API fallback'),
+          // --- Google Cloud Serverless Inference (Gemini 3.8 Flash) Section ---
+          _buildSectionHeader(Icons.auto_awesome,
+              'Google Cloud Serverless Inference', 'Gemini 3.8 Flash Live & Multimodal Speech'),
           const SizedBox(height: 12),
-          _buildSecureField(
-            controller: _geminiCtrl,
-            label: 'Google Gemini API Key',
-            hint: 'Optional fallback key',
-            icon: Icons.mic,
+          Card(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side:
+                  BorderSide(color: Colors.indigoAccent.withValues(alpha: 0.3)),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.cloud_sync,
+                          color: Colors.indigoAccent, size: 20),
+                      SizedBox(width: 8),
+                      Text(
+                        'Gemini 3.8 Flash (Serverless Inference)',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 13),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  _buildSecureField(
+                    controller: _geminiCtrl,
+                    label: 'Google Cloud / Gemini API Key',
+                    hint: 'AIzaSy...',
+                    icon: Icons.key,
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _geminiModelCtrl,
+                    decoration: InputDecoration(
+                      labelText: 'Model Identifier',
+                      hintText: 'gemini-3.8-flash',
+                      prefixIcon: const Icon(Icons.psychology),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                      isDense: true,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _geminiEndpointCtrl,
+                    decoration: InputDecoration(
+                      labelText: 'Serverless Endpoint / Host',
+                      hintText: 'generativelanguage.googleapis.com',
+                      prefixIcon: const Icon(Icons.cloud),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                      isDense: true,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.indigo.shade800,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 8),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8)),
+                        ),
+                        onPressed:
+                            _isTestingGemini ? null : _testGeminiConnection,
+                        icon: _isTestingGemini
+                            ? const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: Colors.white),
+                              )
+                            : const Icon(Icons.network_check, size: 16),
+                        label: Text(
+                          _isTestingGemini
+                              ? 'Testing...'
+                              : 'Test Gemini 3.8 Flash',
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (_geminiTestResult != null) ...[
+                    const SizedBox(height: 8),
+                    _buildTestStatusCard(_geminiTestResult!),
+                  ],
+                ],
+              ),
+            ),
           ),
           const SizedBox(height: 28),
 

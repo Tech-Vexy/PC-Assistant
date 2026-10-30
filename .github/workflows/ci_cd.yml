@@ -30,24 +30,6 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Install Linux build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            clang \
-            cmake \
-            ninja-build \
-            pkg-config \
-            libgtk-3-dev \
-            libx11-dev \
-            libxi-dev \
-            liblzma-dev \
-            libsecret-1-dev \
-            libjsoncpp-dev \
-            libasound2-dev \
-            libpulse-dev \
-            libkeybinder-3.0-dev
-
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -128,94 +110,11 @@ jobs:
           name: device-assistant-android-arm64-apk
           path: build/app/outputs/flutter-apk/app-release-arm64.apk
 
-  build-linux:
-    name: Build Linux Desktop Bundle
-    needs: analyze-and-test
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
-
-      - name: Install Linux build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            clang \
-            cmake \
-            ninja-build \
-            pkg-config \
-            libgtk-3-dev \
-            libx11-dev \
-            libxi-dev \
-            liblzma-dev \
-            libsecret-1-dev \
-            libjsoncpp-dev \
-            libasound2-dev \
-            libpulse-dev \
-            libkeybinder-3.0-dev
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: 'stable'
-          cache: true
-
-      - name: Enable Linux Desktop
-        run: flutter config --enable-linux-desktop
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Build Linux Release Bundle
-        run: flutter build linux --release --dart-define=GEMINI_API_KEY="$GEMINI_API_KEY" --dart-define=NEBIUS_API_KEY="$NEBIUS_API_KEY"
-
-      - name: Compress Linux Bundle
-        run: |
-          tar -czvf device-assistant-linux-x64.tar.gz -C build/linux/x64/release/bundle .
-
-      - name: Upload Linux Bundle
-        uses: actions/upload-artifact@v7
-        with:
-          name: device-assistant-linux-x64
-          path: device-assistant-linux-x64.tar.gz
-
-  build-windows:
-    name: Build Windows Desktop Executable
-    needs: analyze-and-test
-    runs-on: windows-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v5
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: 'stable'
-          cache: true
-
-      - name: Enable Windows Desktop
-        run: flutter config --enable-windows-desktop
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Build Windows Release Executable
-        run: flutter build windows --release --dart-define=GEMINI_API_KEY="$env:GEMINI_API_KEY" --dart-define=NEBIUS_API_KEY="$env:NEBIUS_API_KEY"
-
-      - name: Compress Windows Release Bundle
-        shell: pwsh
-        run: |
-          Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath device-assistant-windows-x64.zip
-
-      - name: Upload Windows Bundle
-        uses: actions/upload-artifact@v7
-        with:
-          name: device-assistant-windows-x64
-          path: device-assistant-windows-x64.zip
+  # Linux and Windows desktop builds are skipped for now pending desktop stabilization.
 
   create-release:
     name: Create GitHub Release
-    needs: [build-android, build-linux, build-windows]
+    needs: [build-android]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -236,26 +135,12 @@ jobs:
           name: device-assistant-android-arm64-apk
           path: release-assets/
 
-      - name: Download Linux Bundle
-        uses: actions/download-artifact@v8
-        with:
-          name: device-assistant-linux-x64
-          path: release-assets/
-
-      - name: Download Windows Bundle
-        uses: actions/download-artifact@v8
-        with:
-          name: device-assistant-windows-x64
-          path: release-assets/
-
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           files: |
             release-assets/app-release-arm.apk
             release-assets/app-release-arm64.apk
-            release-assets/device-assistant-linux-x64.tar.gz
-            release-assets/device-assistant-windows-x64.zip
           generate_release_notes: true
           draft: false
           prerelease: false

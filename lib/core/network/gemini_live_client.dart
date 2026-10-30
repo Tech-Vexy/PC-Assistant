@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 /// Event representing a tool call request from Gemini Live
@@ -16,12 +17,14 @@ class GeminiToolCallEvent {
   });
 }
 
-/// Client for Google's Gemini Multimodal Live API over bidirectional WebSocket.
+/// Client for Google's Gemini Multimodal Live API and Google Cloud Serverless
+/// inference powered by Gemini 3.8 Flash.
 class GeminiLiveClient {
   static const String liveHost = 'generativelanguage.googleapis.com';
-  static const String defaultModel = 'models/gemini-3.8-live';
+  static const String defaultModel = 'models/gemini-3.8-flash';
 
   final String apiKey;
+  final String host;
   final String model;
   final List<Map<String, dynamic>> toolDeclarations;
   final String systemInstruction;
@@ -41,12 +44,14 @@ class GeminiLiveClient {
 
   GeminiLiveClient({
     required this.apiKey,
+    String? host,
     String model = defaultModel,
     this.toolDeclarations = const [],
     this.systemInstruction =
         'You are Device Assistant, a helpful cross-platform companion.',
     this.channelFactory,
-  }) : model = model.startsWith('models/') ? model : 'models/$model';
+  })  : host = host ?? liveHost,
+        model = model.startsWith('models/') ? model : 'models/$model';
 
   /// Stream of raw 24kHz PCM16 audio chunks returned by Gemini
   Stream<Uint8List> get audioOutputStream => _audioOutputController.stream;
@@ -73,7 +78,7 @@ class GeminiLiveClient {
     if (_isConnected) return;
 
     final uri = Uri.parse(
-      'wss://$liveHost/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=$apiKey',
+      'wss://$host/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=$apiKey',
     );
 
     _setupCompleter = Completer<void>();
@@ -369,6 +374,151 @@ class GeminiLiveClient {
     }
     if (!_connectionStateController.isClosed) {
       _connectionStateController.add(false);
+    }
+  }
+
+  /// Direct Google Cloud Serverless inference call to Gemini 3.8 Flash
+  Future<String> generateContent({
+    required String prompt,
+    String? systemInstruction,
+    List<Map<String, dynamic>>? toolDeclarations,
+    double temperature = 0.7,
+    http.Client? httpClient,
+  }) async {
+    final client = httpClient ?? http.Client();
+    try {
+      final cleanModel =
+          model.startsWith('models/') ? model.substring(7) : model;
+      final uri = Uri.parse(
+        'https://$host/v1beta/models/$cleanModel:generateContent?key=$apiKey',
+      );
+
+      final payload = {
+        'contents': [
+          {
+            'role': 'user',
+            'parts': [
+              {'text': prompt}
+            ]
+          }
+        ],
+        if (systemInstruction != null && systemInstruction.isNotEmpty)
+          'systemInstruction': {
+            'parts': [
+              {'text': systemInstruction}
+            ]
+          },
+        'generationConfig': {
+          'temperature': temperature,
+        },
+        if (toolDeclarations != null && toolDeclarations.isNotEmpty)
+          'tools': [
+            {'functionDeclarations': toolDeclarations}
+          ]
+      };
+
+      final response = await client.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(payload),
+      );
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final candidates = data['candidates'] as List<dynamic>?;
+        if (candidates != null && candidates.isNotEmpty) {
+          final content = candidates[0]['content'] as Map<String, dynamic>?;
+          final parts = content?['parts'] as List<dynamic>?;
+          if (parts != null && parts.isNotEmpty) {
+            for (final part in parts) {
+              if (part is Map<String, dynamic>) {
+                if (part.containsKey('functionCall')) {
+                  final fn = part['functionCall'] as Map<String, dynamic>;
+                  return jsonEncode({
+                    'action': 'tool_call',
+                    'tool': fn['name'],
+                    'args': fn['args'] ?? {},
+                  });
+                }
+                if (part.containsKey('text')) {
+                  return part['text'] as String;
+                }
+              }
+            }
+          }
+        }
+        return '';
+      } else {
+        throw StateError(
+          'Gemini 3.8 Flash inference failed (${response.statusCode}): ${response.body}',
+        );
+      }
+    } finally {
+      if (httpClient == null) {
+        client.close();
+      }
+    }
+  }
+
+  /// Tests Google Cloud Serverless inference connection with Gemini 3.8 Flash
+  Future<Map<String, dynamic>> testConnection({http.Client? httpClient}) async {
+    final client = httpClient ?? http.Client();
+    final stopwatch = Stopwatch()..start();
+    try {
+      final cleanModel =
+          model.startsWith('models/') ? model.substring(7) : model;
+      final uri = Uri.parse(
+        'https://$host/v1beta/models/$cleanModel:generateContent?key=$apiKey',
+      );
+
+      final payload = {
+        'contents': [
+          {
+            'role': 'user',
+            'parts': [
+              {'text': 'Ping test. Reply with: OK'}
+            ]
+          }
+        ],
+        'generationConfig': {'maxOutputTokens': 10}
+      };
+
+      final response = await client
+          .post(
+            uri,
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(payload),
+          )
+          .timeout(const Duration(seconds: 10));
+
+      stopwatch.stop();
+
+      if (response.statusCode == 200) {
+        return {
+          'success': true,
+          'latencyMs': stopwatch.elapsedMilliseconds,
+          'model': model,
+          'endpoint': host,
+        };
+      } else {
+        return {
+          'success': false,
+          'statusCode': response.statusCode,
+          'error': response.body,
+          'latencyMs': stopwatch.elapsedMilliseconds,
+        };
+      }
+    } catch (e) {
+      stopwatch.stop();
+      return {
+        'success': false,
+        'error': e.toString(),
+        'latencyMs': stopwatch.elapsedMilliseconds,
+      };
+    } finally {
+      if (httpClient == null) {
+        client.close();
+      }
     }
   }
 

@@ -8,6 +8,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 /// and SecretService/Keyring on Linux.
 class KeyVault {
   static const _geminiKey = 'KEY_GEMINI_API';
+  static const _geminiModelKey = 'KEY_GEMINI_MODEL';
+  static const _geminiEndpointKey = 'KEY_GEMINI_ENDPOINT';
   static const _nebiusKey = 'KEY_NEBIUS_API';
   static const _nebiusEndpointKey = 'KEY_NEBIUS_ENDPOINT';
   static const _nebiusSuperEndpointKey = 'KEY_NEBIUS_SUPER_ENDPOINT';
@@ -60,6 +62,34 @@ class KeyVault {
       return defineVal;
     }
     return null;
+  }
+
+  /// Saves the Gemini Model identifier (default: gemini-3.8-flash)
+  Future<void> setGeminiModel(String model) async {
+    await _storage.write(key: _geminiModelKey, value: model.trim());
+  }
+
+  /// Retrieves the Gemini Model identifier (default: gemini-3.8-flash)
+  Future<String> getGeminiModel() async {
+    final custom = await _storage.read(key: _geminiModelKey);
+    if (custom != null && custom.isNotEmpty) {
+      return custom;
+    }
+    return 'gemini-3.8-flash';
+  }
+
+  /// Saves the Google Cloud Serverless inference endpoint / host
+  Future<void> setGeminiEndpoint(String endpoint) async {
+    await _storage.write(key: _geminiEndpointKey, value: endpoint.trim());
+  }
+
+  /// Retrieves the Google Cloud Serverless inference endpoint / host (default: generativelanguage.googleapis.com)
+  Future<String> getGeminiEndpoint() async {
+    final custom = await _storage.read(key: _geminiEndpointKey);
+    if (custom != null && custom.isNotEmpty) {
+      return custom;
+    }
+    return 'generativelanguage.googleapis.com';
   }
 
   /// Saves the Nebius Token Factory API Key

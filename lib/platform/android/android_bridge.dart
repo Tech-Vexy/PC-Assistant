@@ -13,6 +13,10 @@ class AndroidBridge {
   static final _hotwordController =
       StreamController<Map<String, String?>>.broadcast();
   static final _micPermissionController = StreamController<bool>.broadcast();
+  static final _partialTranscriptController =
+      StreamController<String>.broadcast();
+  static final _ttsStateController = StreamController<bool>.broadcast();
+  static final _audioRmsController = StreamController<double>.broadcast();
 
   static bool _handlerInitialized = false;
 
@@ -56,6 +60,22 @@ class AndroidBridge {
         }
       } else if (call.method == 'onMicrophonePermissionGranted') {
         _micPermissionController.add(true);
+      } else if (call.method == 'onPartialTranscript') {
+        final args = call.arguments as Map<dynamic, dynamic>?;
+        final text = args?['text'] as String?;
+        if (text != null && text.isNotEmpty) {
+          _partialTranscriptController.add(text);
+        }
+      } else if (call.method == 'onTtsStarted') {
+        _ttsStateController.add(true);
+      } else if (call.method == 'onTtsCompleted') {
+        _ttsStateController.add(false);
+      } else if (call.method == 'onAudioRmsChanged') {
+        final args = call.arguments as Map<dynamic, dynamic>?;
+        final rms = args?['rms'] as num?;
+        if (rms != null) {
+          _audioRmsController.add(rms.toDouble());
+        }
       }
     });
   }
@@ -75,6 +95,50 @@ class AndroidBridge {
   /// Stream emitting when microphone permission is granted at runtime
   Stream<bool> get microphonePermissionStream =>
       _micPermissionController.stream;
+
+  /// Stream of live in-progress speech transcription before sentence completion
+  Stream<String> get partialTranscriptStream =>
+      _partialTranscriptController.stream;
+
+  /// Stream emitting true when on-device TTS is speaking, false when completed
+  Stream<bool> get isSpeakingStream => _ttsStateController.stream;
+
+  /// Stream of raw audio input volume (RMS dB) for reactive voice UI
+  Stream<double> get audioRmsStream => _audioRmsController.stream;
+
+  /// Retrieves list of installed launcher applications (appName, packageName)
+  Future<List<Map<String, String>>> getInstalledApps() async {
+    if (!_isAndroid) return [];
+    try {
+      final List<dynamic>? raw =
+          await _channel.invokeMethod<List<dynamic>>('getInstalledApps');
+      if (raw == null) return [];
+      return raw.map((item) => Map<String, String>.from(item as Map)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Returns true if the user has granted Package Usage Stats (Usage Access) permission.
+  /// This is an AppOps permission that must be granted via Settings — not a runtime permission.
+  Future<bool> isUsageAccessGranted() async {
+    if (!_isAndroid) return true;
+    try {
+      final bool? granted =
+          await _channel.invokeMethod<bool>('isUsageAccessGranted');
+      return granted ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Opens the Android Usage Access Settings page so the user can grant Package Usage Stats.
+  Future<void> requestUsageAccess() async {
+    if (!_isAndroid) return;
+    try {
+      await _channel.invokeMethod('requestUsageAccess');
+    } catch (_) {}
+  }
 
   /// Checks if the AssistantAccessibilityService has been enabled by the user in Android Settings
   Future<bool> isAccessibilityEnabled() async {
