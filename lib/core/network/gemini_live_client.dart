@@ -143,8 +143,7 @@ class GeminiLiveClient {
   }
 
   void _sendSetupMessage() {
-    final cleanModel =
-        model.startsWith('models/') ? model.substring(7) : model;
+    final cleanModel = model.startsWith('models/') ? model.substring(7) : model;
     final effectiveModel = (host.contains('aiplatform.googleapis.com') &&
             projectId != null &&
             projectId!.isNotEmpty)

@@ -77,7 +77,8 @@ class GcpAdcAuthService {
 
         _cachedAccessToken = token;
         _tokenExpiry = DateTime.now().add(Duration(seconds: expiresIn));
-        _cachedProjectId = (creds['quota_project_id'] ?? creds['project_id']) as String?;
+        _cachedProjectId =
+            (creds['quota_project_id'] ?? creds['project_id']) as String?;
 
         return token;
       } else {
@@ -100,7 +101,8 @@ class GcpAdcAuthService {
 
       _cachedAccessToken = token;
       _tokenExpiry = expiry;
-      _cachedProjectId = (creds['project_id'] ?? creds['quota_project_id']) as String?;
+      _cachedProjectId =
+          (creds['project_id'] ?? creds['quota_project_id']) as String?;
 
       return token;
     } else {
@@ -133,7 +135,8 @@ class GcpAdcAuthService {
 
     final creds = await loadAdcCredentialsMap();
     if (creds != null) {
-      final proj = (creds['quota_project_id'] ?? creds['project_id']) as String?;
+      final proj =
+          (creds['quota_project_id'] ?? creds['project_id']) as String?;
       if (proj != null && proj.isNotEmpty) {
         _cachedProjectId = proj;
         return proj;
@@ -195,7 +198,8 @@ class GcpAdcAuthService {
       if (Platform.isLinux || Platform.isMacOS) {
         final home = Platform.environment['HOME'];
         if (home != null && home.isNotEmpty) {
-          return File('$home/.config/gcloud/application_default_credentials.json');
+          return File(
+              '$home/.config/gcloud/application_default_credentials.json');
         }
       } else if (Platform.isWindows) {
         final appData = Platform.environment['APPDATA'];
@@ -217,7 +221,8 @@ class GcpAdcAuthService {
 
       return {
         'success': true,
-        'tokenPrefix': token.length > 10 ? '${token.substring(0, 10)}...' : token,
+        'tokenPrefix':
+            token.length > 10 ? '${token.substring(0, 10)}...' : token,
         'projectId': projectId ?? 'Unknown',
         'latencyMs': stopwatch.elapsedMilliseconds,
       };

@@ -31,7 +31,8 @@ class _MockKeyVault extends KeyVault {
 
 void main() {
   group('GcpAdcAuthService Tests', () {
-    test('Refreshes authorized_user ADC token and caches valid token', () async {
+    test('Refreshes authorized_user ADC token and caches valid token',
+        () async {
       int tokenRequests = 0;
 
       final mockHttp = MockClient((request) async {
@@ -90,7 +91,8 @@ void main() {
       expect(connTest['tokenPrefix'], contains('ya29.test_'));
     });
 
-    test('Throws informative error when no ADC credentials available', () async {
+    test('Throws informative error when no ADC credentials available',
+        () async {
       final mockVault = _MockKeyVault();
       final service = GcpAdcAuthService(
         keyVault: mockVault,

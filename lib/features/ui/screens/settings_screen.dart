@@ -742,8 +742,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 28),
 
           // --- Google Cloud Serverless Inference (Gemini 3.8 Flash with ADC) Section ---
-          _buildSectionHeader(Icons.auto_awesome,
-              'Google Cloud Serverless Inference', 'Gemini 3.8 Flash via Application Default Credentials (ADC)'),
+          _buildSectionHeader(
+              Icons.auto_awesome,
+              'Google Cloud Serverless Inference',
+              'Gemini 3.8 Flash via Application Default Credentials (ADC)'),
           const SizedBox(height: 12),
           Card(
             shape: RoundedRectangleBorder(
@@ -856,7 +858,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       maxLines: 2,
                       decoration: InputDecoration(
                         labelText: 'ADC / Service Account JSON (Optional)',
-                        hintText: 'Paste custom credentials JSON for Android...',
+                        hintText:
+                            'Paste custom credentials JSON for Android...',
                         prefixIcon: const Icon(Icons.code),
                         border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(10)),

@@ -195,7 +195,8 @@ class _HomeScreenState extends State<HomeScreen>
             _toggleConnection();
           } else {
             // Post to next frame to let _initClients finish
-            WidgetsBinding.instance.addPostFrameCallback((_) => _toggleConnection());
+            WidgetsBinding.instance
+                .addPostFrameCallback((_) => _toggleConnection());
           }
         } else if (action == 'exit') {
           _liveClient?.disconnect();
@@ -341,8 +342,8 @@ class _HomeScreenState extends State<HomeScreen>
       location: location ?? 'us-central1',
       host: endpoint,
       model: model ?? GeminiLiveClient.defaultModel,
-      toolDeclarations: ToolDefinitions.getAllDeclarations(
-          isAndroid: Platform.isAndroid),
+      toolDeclarations:
+          ToolDefinitions.getAllDeclarations(isAndroid: Platform.isAndroid),
       systemInstruction: '''
 You are Device Assistant, an intelligent on-device agent running natively on Android.
 You have tool access to device controls, memory, task planning, and sub-agents.
@@ -405,25 +406,25 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
 
       setState(() {
         if (_toolHistory.isNotEmpty) {
-          final status = result['status'] == 'blocked' ||
-                  result.containsKey('blocked')
-              ? 'blocked'
-              : result['status'] == 'error' ||
-                      result.containsKey('error') ||
-                      result['success'] == false
-                  ? 'error'
-                  : 'done';
+          final status =
+              result['status'] == 'blocked' || result.containsKey('blocked')
+                  ? 'blocked'
+                  : result['status'] == 'error' ||
+                          result.containsKey('error') ||
+                          result['success'] == false
+                      ? 'error'
+                      : 'done';
           _toolHistory[0]['status'] = status;
           _toolHistory[0]['result'] = result;
         }
-        final toolStatus = result['status'] == 'blocked' ||
-                result.containsKey('blocked')
-            ? 'blocked'
-            : result['status'] == 'error' ||
-                    result.containsKey('error') ||
-                    result['success'] == false
-                ? 'error'
-                : 'done';
+        final toolStatus =
+            result['status'] == 'blocked' || result.containsKey('blocked')
+                ? 'blocked'
+                : result['status'] == 'error' ||
+                        result.containsKey('error') ||
+                        result['success'] == false
+                    ? 'error'
+                    : 'done';
         _chatMessages.add(
           ChatMessage(
             id: 'tool_${DateTime.now().millisecondsSinceEpoch}',
@@ -643,8 +644,8 @@ If the user query is a general knowledge question, conversational request, or ex
           location: location,
           host: geminiEndpoint,
           model: geminiModel,
-          toolDeclarations: ToolDefinitions.getAllDeclarations(
-              isAndroid: Platform.isAndroid),
+          toolDeclarations:
+              ToolDefinitions.getAllDeclarations(isAndroid: Platform.isAndroid),
         );
 
         response = await _liveClient!.generateContent(
@@ -823,7 +824,9 @@ If the user query is a general knowledge question, conversational request, or ex
         }
         final preview = appsList
             .take(5)
-            .map((a) => a is Map ? '${a['appName']} (${a['packageName']})' : a.toString())
+            .map((a) => a is Map
+                ? '${a['appName']} (${a['packageName']})'
+                : a.toString())
             .join(', ');
         return 'Found $count installed apps: $preview${appsList.length > 5 ? '...' : ''}.';
 
@@ -1863,7 +1866,9 @@ If the user query is a general knowledge question, conversational request, or ex
                                     }
                                     if (isError) {
                                       final result = item['result'] as Map?;
-                                      final errMsg = result?['error']?.toString() ?? 'Tool call failed';
+                                      final errMsg =
+                                          result?['error']?.toString() ??
+                                              'Tool call failed';
                                       return 'Args: ${item['args']}\nERROR: $errMsg';
                                     }
                                     if (isExecuting) {

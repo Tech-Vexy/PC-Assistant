@@ -47,10 +47,10 @@ class ToolDispatcher {
     try {
       // 1. Sensitive App Shield Check
       if (toolName == 'inspect_screen' || toolName == 'open_application') {
-        final targetPkg =
-            (args['package_name'] ?? args['app_name'] ?? args['app'])
-                    as String? ??
-                activePackageName;
+        final targetPkg = (args['package_name'] ??
+                args['app_name'] ??
+                args['app']) as String? ??
+            activePackageName;
         final decision = guard.evaluate(packageName: targetPkg);
         if (decision.isBlocked) {
           db.logAudit(
@@ -628,7 +628,8 @@ class ToolDispatcher {
     if (query.isEmpty) {
       return {
         'status': 'error',
-        'error': 'Provide app_name or package_name. Use list_installed_apps to find the exact package_name.',
+        'error':
+            'Provide app_name or package_name. Use list_installed_apps to find the exact package_name.',
         'success': false,
       };
     }
@@ -650,12 +651,12 @@ class ToolDispatcher {
         'success': success,
         if (packageName.isNotEmpty) 'package_name': packageName,
         if (!success)
-          'error':
-              'Application "$query" was not found on this device. '
+          'error': 'Application "$query" was not found on this device. '
               'Use list_installed_apps to see all installed apps with their exact package names.',
       };
     } else if (Platform.isLinux) {
-      await Process.start('gtk-launch', [query], mode: ProcessStartMode.detached);
+      await Process.start('gtk-launch', [query],
+          mode: ProcessStartMode.detached);
       return {'status': 'launched', 'app': query};
     } else if (Platform.isWindows) {
       await Process.start('cmd', ['/c', 'start', '', query],
@@ -687,8 +688,7 @@ class ToolDispatcher {
           }).toList();
 
     // Sort alphabetically by app name
-    filtered.sort((a, b) =>
-        (a['appName'] ?? '').compareTo(b['appName'] ?? ''));
+    filtered.sort((a, b) => (a['appName'] ?? '').compareTo(b['appName'] ?? ''));
 
     return {
       'status': 'done',
@@ -699,6 +699,7 @@ class ToolDispatcher {
           : 'Filtered by "$filter". Use package_name from this list in open_application.',
     };
   }
+
   Future<Map<String, dynamic>> _handleClickElement(
       Map<String, dynamic> args) async {
     final text = args['text'] as String? ?? '';
@@ -717,7 +718,8 @@ class ToolDispatcher {
       'action': 'click',
       'target': text.isNotEmpty ? text : (viewId ?? ''),
       'success': success,
-      if (!success) 'error': 'Click failed — element not found or not clickable',
+      if (!success)
+        'error': 'Click failed — element not found or not clickable',
     };
   }
 

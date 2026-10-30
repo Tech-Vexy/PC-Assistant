@@ -253,8 +253,8 @@ class ToolDefinitions {
         'name': 'open_application',
         'description':
             'Launches an installed application. Use package_name (e.g. com.chrome.dev) when known for exact targeting — '
-            'especially important when multiple variants exist (e.g. Chrome Stable vs Chrome Dev vs Chrome Beta). '
-            'Use list_installed_apps first to find the exact package_name if you are unsure which variant the user wants.',
+                'especially important when multiple variants exist (e.g. Chrome Stable vs Chrome Dev vs Chrome Beta). '
+                'Use list_installed_apps first to find the exact package_name if you are unsure which variant the user wants.',
         'parameters': {
           'type': 'object',
           'properties': {
@@ -276,8 +276,8 @@ class ToolDefinitions {
           'name': 'list_installed_apps',
           'description':
               'Lists all installed launcher apps on the device with their human-readable name and exact package name. '
-              'Call this before open_application when you need to distinguish between similar app variants '
-              '(e.g. Chrome Stable vs Chrome Dev vs Chrome Beta, or multiple browser installs).',
+                  'Call this before open_application when you need to distinguish between similar app variants '
+                  '(e.g. Chrome Stable vs Chrome Dev vs Chrome Beta, or multiple browser installs).',
           'parameters': {
             'type': 'object',
             'properties': {

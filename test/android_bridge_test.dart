@@ -321,7 +321,8 @@ void main() {
       expect(hotwordEvent['command'], 'open chrome');
     });
 
-    test('Speech recognition and TTS streams and installed apps list', () async {
+    test('Speech recognition and TTS streams and installed apps list',
+        () async {
       final bridge = AndroidBridge(isAndroid: true);
 
       final partialFuture = bridge.partialTranscriptStream.first;
