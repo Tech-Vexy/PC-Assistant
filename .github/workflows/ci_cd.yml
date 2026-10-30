@@ -1,5 +1,4 @@
 name: Flutter CI/CD
-
 on:
   push:
     branches: [ main ]
@@ -7,15 +6,12 @@ on:
   pull_request:
     branches: [ main ]
   workflow_dispatch:
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-
 env:
   GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
   NEBIUS_API_KEY: ${{ secrets.NEBIUS_API_KEY }}
-
 jobs:
   analyze-and-test:
     name: Code Analysis & Unit Tests
@@ -23,19 +19,16 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
-
       - name: Set up Java
         uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '17'
-
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
           cache: true
-
       - name: Cache pub dependencies
         uses: actions/cache@v5
         with:
@@ -44,19 +37,18 @@ jobs:
           key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.lock') }}
           restore-keys: |
             ${{ runner.os }}-pub-
-
+      - name: Install Linux test dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y libgtk-3-dev libx11-dev libxi-dev pkg-config
       - name: Install dependencies
         run: flutter pub get
-
       - name: Verify formatting
         run: dart format --output=none --set-exit-if-changed .
-
       - name: Run static analysis
         run: dart analyze --fatal-infos
-
       - name: Run unit & integration tests
         run: flutter test --coverage
-
       - name: Upload code coverage
         uses: actions/upload-artifact@v7
         if: always()
@@ -64,7 +56,6 @@ jobs:
           name: coverage-report
           path: coverage/lcov.info
           if-no-files-found: ignore
-
   build-android:
     name: Build Android APKs (ARM & ARM64)
     needs: analyze-and-test
@@ -72,46 +63,36 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
-
       - name: Set up Java 17
         uses: actions/setup-java@v5
         with:
           distribution: 'temurin'
           java-version: '17'
-
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
           cache: true
-
       - name: Install dependencies
         run: flutter pub get
-
       - name: Build Android ARM Release APK
         run: |
           flutter build apk --release --target-platform android-arm --dart-define=GEMINI_API_KEY="$GEMINI_API_KEY" --dart-define=NEBIUS_API_KEY="$NEBIUS_API_KEY"
           mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/app-release-arm.apk
-
       - name: Build Android ARM64 Release APK
         run: |
           flutter build apk --release --target-platform android-arm64 --dart-define=GEMINI_API_KEY="$GEMINI_API_KEY" --dart-define=NEBIUS_API_KEY="$NEBIUS_API_KEY"
           mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/app-release-arm64.apk
-
       - name: Upload ARM Release APK
         uses: actions/upload-artifact@v7
         with:
           name: device-assistant-android-arm-apk
           path: build/app/outputs/flutter-apk/app-release-arm.apk
-
       - name: Upload ARM64 Release APK
         uses: actions/upload-artifact@v7
         with:
           name: device-assistant-android-arm64-apk
           path: build/app/outputs/flutter-apk/app-release-arm64.apk
-
-  # Linux and Windows desktop builds are skipped for now pending desktop stabilization.
-
   create-release:
     name: Create GitHub Release
     needs: [build-android]
@@ -122,19 +103,16 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
-
       - name: Download Android ARM APK
         uses: actions/download-artifact@v8
         with:
           name: device-assistant-android-arm-apk
           path: release-assets/
-
       - name: Download Android ARM64 APK
         uses: actions/download-artifact@v8
         with:
           name: device-assistant-android-arm64-apk
           path: release-assets/
-
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
         with:
