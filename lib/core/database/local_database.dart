@@ -247,6 +247,26 @@ class LocalDatabase {
       CREATE INDEX IF NOT EXISTS idx_conv_messages_session
         ON conversation_messages(session_id);
     ''');
+
+    // ── Notifications archive (for triaging, history & ambient executive summary) ──
+    _db!.execute('''
+      CREATE TABLE IF NOT EXISTS notifications_archive (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        key          TEXT UNIQUE,
+        package_name TEXT NOT NULL,
+        app_name     TEXT NOT NULL DEFAULT '',
+        title        TEXT NOT NULL DEFAULT '',
+        content      TEXT NOT NULL DEFAULT '',
+        timestamp    INTEGER NOT NULL,
+        is_read      INTEGER NOT NULL DEFAULT 0,
+        category     TEXT NOT NULL DEFAULT 'general'
+      );
+    ''');
+
+    _db!.execute('''
+      CREATE INDEX IF NOT EXISTS idx_notif_archive_pkg
+        ON notifications_archive(package_name, timestamp DESC);
+    ''');
   }
 
   /// Runs schema migrations for existing databases.
@@ -1106,6 +1126,70 @@ class LocalDatabase {
     final res = stmt.select([agentId]);
     stmt.close();
     return res.map((r) => Map<String, dynamic>.from(r)).toList();
+  }
+
+  // ── Notifications Archive Operations ──────────────────────────────────────
+
+  void archiveNotification({
+    required String key,
+    required String packageName,
+    String appName = '',
+    String title = '',
+    String content = '',
+    int? timestamp,
+    String category = 'general',
+  }) {
+    final ts = timestamp ?? DateTime.now().millisecondsSinceEpoch;
+    final stmt = _db!.prepare('''
+      INSERT INTO notifications_archive (key, package_name, app_name, title, content, timestamp, category)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET
+        title = excluded.title,
+        content = excluded.content,
+        timestamp = excluded.timestamp;
+    ''');
+    stmt.execute([key, packageName, appName, title, content, ts, category]);
+    stmt.close();
+  }
+
+  List<Map<String, dynamic>> getArchivedNotifications({
+    int limit = 50,
+    bool unreadOnly = false,
+    String? appFilter,
+  }) {
+    String sql = 'SELECT * FROM notifications_archive';
+    final conditions = <String>[];
+    final params = <dynamic>[];
+
+    if (unreadOnly) {
+      conditions.add('is_read = 0');
+    }
+    if (appFilter != null && appFilter.trim().isNotEmpty) {
+      conditions.add('(lower(package_name) LIKE ? OR lower(app_name) LIKE ?)');
+      params.add('%${appFilter.toLowerCase().trim()}%');
+      params.add('%${appFilter.toLowerCase().trim()}%');
+    }
+
+    if (conditions.isNotEmpty) {
+      sql += ' WHERE ${conditions.join(' AND ')}';
+    }
+    sql += ' ORDER BY timestamp DESC LIMIT ?';
+    params.add(limit);
+
+    final stmt = _db!.prepare(sql);
+    final res = stmt.select(params);
+    stmt.close();
+    return res.map((r) => Map<String, dynamic>.from(r)).toList();
+  }
+
+  void markNotificationRead(String key) {
+    final stmt = _db!.prepare('UPDATE notifications_archive SET is_read = 1 WHERE key = ?');
+    stmt.execute([key]);
+    stmt.close();
+  }
+
+  void clearArchivedNotifications() {
+    _db!.execute('DELETE FROM notifications_archive');
   }
 
   void close() {

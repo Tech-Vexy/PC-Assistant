@@ -569,4 +569,54 @@ class AndroidBridge {
       await _channel.invokeMethod('openDefaultAssistantSettings');
     } catch (_) {}
   }
+
+  /// Checks if Notification Listener Service permission is granted
+  Future<bool> isNotificationListenerEnabled() async {
+    if (!_isAndroid) return false;
+    try {
+      final bool? enabled =
+          await _channel.invokeMethod<bool>('isNotificationListenerEnabled');
+      return enabled ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Opens the system Notification Listener Access settings screen
+  Future<void> openNotificationListenerSettings() async {
+    if (!_isAndroid) return;
+    try {
+      await _channel.invokeMethod('openNotificationListenerSettings');
+    } catch (_) {}
+  }
+
+  /// Fetches currently active incoming notifications posted by device applications
+  Future<List<Map<String, dynamic>>> getActiveNotifications() async {
+    if (!_isAndroid) return [];
+    try {
+      final List<dynamic>? raw =
+          await _channel.invokeMethod<List<dynamic>>('getActiveNotifications');
+      if (raw == null) return [];
+      return raw.map((item) => Map<String, dynamic>.from(item as Map)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Directly sends an inline reply to a notification using its RemoteInput action
+  Future<bool> replyToNotification(String key, String replyText) async {
+    if (!_isAndroid) return false;
+    try {
+      final bool? replied = await _channel.invokeMethod<bool>(
+        'replyToNotification',
+        {
+          'key': key,
+          'replyText': replyText,
+        },
+      );
+      return replied ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
 }

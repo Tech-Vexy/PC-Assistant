@@ -6,6 +6,7 @@ import '../../core/database/local_database.dart';
 import '../../core/memory/memory_extractor.dart';
 import '../../core/memory/memory_recall.dart';
 import '../../core/memory/memory_vector.dart';
+import '../../core/messaging/notification_messaging_service.dart';
 import '../../core/network/gemini_live_client.dart';
 import '../../core/network/nebius_client.dart';
 import '../../core/network/pc_bridge_client.dart';
@@ -33,8 +34,10 @@ class ToolDispatcher {
   late final MemoryExtractor _extractor;
   late final DynamicSkillGenerator _skillGen;
   late final HermesWorkflowManager _hermesWorkflow;
+  late final NotificationMessagingService _notifService;
 
   MemoryExtractor get memoryExtractor => _extractor;
+  NotificationMessagingService get notificationService => _notifService;
 
   ToolDispatcher({
     required this.db,
@@ -58,6 +61,11 @@ class ToolDispatcher {
       nebiusClient: nebiusClient,
     );
     _hermesWorkflow = HermesWorkflowManager(db);
+    _notifService = NotificationMessagingService(
+      androidBridge: androidBridge,
+      db: db,
+      guard: guard,
+    );
   }
 
   /// Evaluates whether a prompt is a screen visual perception request
@@ -436,6 +444,22 @@ class ToolDispatcher {
 
         case 'set_default_assistant':
           result = await _handleSetDefaultAssistant();
+          break;
+
+        case 'list_notifications':
+          result = await _handleListNotifications(args);
+          break;
+
+        case 'triage_notifications':
+          result = await _handleTriageNotifications(args);
+          break;
+
+        case 'reply_to_notification':
+          result = await _handleReplyToNotification(args);
+          break;
+
+        case 'read_notifications_summary':
+          result = await _handleReadNotificationsSummary();
           break;
 
         case 'generate_skill':
@@ -1977,6 +2001,63 @@ class ToolDispatcher {
     return {
       'status': 'opened',
       'message': 'Default Digital Assistant system settings opened.',
+    };
+  }
+
+  // --- NOTIFICATION & MESSAGING HANDLERS ---
+
+  Future<Map<String, dynamic>> _handleListNotifications(
+      Map<String, dynamic> args) async {
+    final unreadOnly = args['unread_only'] as bool? ?? false;
+    final app = args['app'] as String?;
+    final limit = (args['limit'] as num?)?.toInt() ?? 10;
+
+    final items = await _notifService.getNotifications(
+      unreadOnly: unreadOnly,
+      appFilter: app,
+      limit: limit,
+    );
+
+    return {
+      'count': items.length,
+      'notifications': items.map((i) => i.toJson()).toList(),
+    };
+  }
+
+  Future<Map<String, dynamic>> _handleTriageNotifications(
+      Map<String, dynamic> args) async {
+    final limit = (args['limit'] as num?)?.toInt() ?? 25;
+    final triage = await _notifService.triageNotifications(limit: limit);
+    return triage.toJson();
+  }
+
+  Future<Map<String, dynamic>> _handleReplyToNotification(
+      Map<String, dynamic> args) async {
+    final key = args['notification_key'] as String? ?? '';
+    final text = args['reply_text'] as String? ?? '';
+
+    if (key.isEmpty || text.isEmpty) {
+      return {'status': 'error', 'error': 'notification_key and reply_text are required.'};
+    }
+
+    final ok = await _notifService.replyToNotification(key, text);
+    return {
+      'status': ok ? 'replied' : 'failed',
+      'key': key,
+      'reply_text': text,
+      if (!ok)
+        'error':
+            'Could not send inline reply. Notification may have expired or app does not allow inline replies.',
+    };
+  }
+
+  Future<Map<String, dynamic>> _handleReadNotificationsSummary() async {
+    final triage = await _notifService.triageNotifications();
+    return {
+      'summary': triage.executiveSummary,
+      'urgent_count': triage.urgentMessages.length,
+      'info_count': triage.informational.length,
+      'low_count': triage.lowPriority.length,
     };
   }
 }

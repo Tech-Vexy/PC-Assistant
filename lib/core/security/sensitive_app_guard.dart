@@ -86,6 +86,9 @@ class SensitiveAppGuard {
     return evaluate(packageName: packageName).isBlocked;
   }
 
+  /// Alias for isPackageProtected
+  bool isPackageSensitive(String packageName) => isPackageProtected(packageName);
+
   /// Returns whether a given application package or category is protected.
   /// If protected, screen capture, UI inspection, and automated input must be rejected.
   SecurityDecision evaluate({

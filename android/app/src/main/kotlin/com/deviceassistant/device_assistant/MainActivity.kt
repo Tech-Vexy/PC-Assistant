@@ -290,6 +290,31 @@ class MainActivity : FlutterActivity() {
                         }
                     }
 
+                    "isNotificationListenerEnabled" -> {
+                        result.success(AssistantNotificationListenerService.isEnabled(this@MainActivity))
+                    }
+
+                    "openNotificationListenerSettings" -> {
+                        AssistantNotificationListenerService.openSettings(this@MainActivity)
+                        result.success(true)
+                    }
+
+                    "getActiveNotifications" -> {
+                        val list = AssistantNotificationListenerService.getNotificationsList()
+                        result.success(list)
+                    }
+
+                    "replyToNotification" -> {
+                        val key = call.argument<String>("key") ?: ""
+                        val replyText = call.argument<String>("replyText") ?: ""
+                        if (key.isBlank() || replyText.isBlank()) {
+                            result.success(false)
+                        } else {
+                            val replied = AssistantNotificationListenerService.reply(this@MainActivity, key, replyText)
+                            result.success(replied)
+                        }
+                    }
+
                     "updateTrayStatus" -> {
                         val isActive = call.argument<Boolean>("isActive") ?: false
                         val statusText = call.argument<String>("statusText")

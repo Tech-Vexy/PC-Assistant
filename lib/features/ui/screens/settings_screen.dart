@@ -62,6 +62,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _activeProvider = 'nebius';
 
   bool _isDeviceAdminActive = false;
+  bool _isNotificationListenerActive = false;
   final AndroidBridge _androidBridge = AndroidBridge();
 
   @override
@@ -99,6 +100,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _hotwordPhraseCtrl.text = await widget.keyVault.getCustomHotword();
     if (Platform.isAndroid) {
       _isDeviceAdminActive = await _androidBridge.isDeviceAdminActive();
+      _isNotificationListenerActive =
+          await _androidBridge.isNotificationListenerEnabled();
     }
     if (mounted) setState(() {});
   }
@@ -521,6 +524,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 if (mounted) setState(() => _isDeviceAdminActive = active);
                               },
                               child: const Text('Grant Admin'),
+                            ),
+                    ),
+                    const Divider(height: 24),
+                    ListTile(
+                      leading: Icon(
+                        Icons.notifications_active,
+                        color: _isNotificationListenerActive
+                            ? Colors.green
+                            : Colors.amberAccent,
+                      ),
+                      title: const Text('Notification Listener & Inline Reply'),
+                      subtitle: Text(
+                        _isNotificationListenerActive
+                            ? 'Notification triage active: Executive briefings and inline message replies enabled.'
+                            : 'Required to read, summarize notifications, and reply without opening foreground apps.',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      trailing: _isNotificationListenerActive
+                          ? const Chip(
+                              label: Text('Active', style: TextStyle(fontSize: 11)),
+                              backgroundColor: Colors.green,
+                            )
+                          : ElevatedButton(
+                              onPressed: () async {
+                                await _androidBridge.openNotificationListenerSettings();
+                                final active = await _androidBridge
+                                    .isNotificationListenerEnabled();
+                                if (mounted) {
+                                  setState(
+                                      () => _isNotificationListenerActive = active);
+                                }
+                              },
+                              child: const Text('Configure'),
                             ),
                     ),
                   ],

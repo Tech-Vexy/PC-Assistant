@@ -590,6 +590,89 @@ class ToolDefinitions {
           },
         },
         {
+          'name': 'list_notifications',
+          'description':
+              'Retrieves active and recent device notifications from apps (WhatsApp, Telegram, Slack, Gmail, Messages, Calendar, etc.).',
+          'parameters': {
+            'type': 'object',
+            'properties': {
+              'unread_only': {
+                'type': 'boolean',
+                'description': 'If true, returns only unread/active notifications (default false)',
+              },
+              'app': {
+                'type': 'string',
+                'description': 'Filter by application name or package (e.g. "whatsapp", "slack", "gmail")',
+              },
+              'limit': {
+                'type': 'number',
+                'description': 'Maximum notifications to return (default 10)',
+              },
+            },
+          },
+        },
+        {
+          'name': 'triage_notifications',
+          'description':
+              'Performs an intelligent triage of incoming device notifications, grouping them into Urgent Messages, Informational Updates, and Low-Priority alerts with an executive narrative summary.',
+          'parameters': {
+            'type': 'object',
+            'properties': {
+              'limit': {
+                'type': 'number',
+                'description': 'Max notifications to evaluate (default 25)',
+              },
+            },
+          },
+        },
+        {
+          'name': 'reply_to_notification',
+          'description':
+              'Directly sends an inline message reply to an active notification (e.g. WhatsApp, Slack, Telegram, Signal, SMS) without opening the app.',
+          'parameters': {
+            'type': 'object',
+            'properties': {
+              'notification_key': {
+                'type': 'string',
+                'description': 'The unique key of the target notification (from list_notifications or triage_notifications)',
+              },
+              'reply_text': {
+                'type': 'string',
+                'description': 'The text reply to send',
+              },
+            },
+            'required': ['notification_key', 'reply_text'],
+          },
+        },
+        {
+          'name': 'send_sms',
+          'description':
+              'Sends an SMS text message directly to a phone number or recipient.',
+          'parameters': {
+            'type': 'object',
+            'properties': {
+              'phone_number': {
+                'type': 'string',
+                'description': 'Recipient phone number',
+              },
+              'message': {
+                'type': 'string',
+                'description': 'Text message body to send',
+              },
+            },
+            'required': ['phone_number', 'message'],
+          },
+        },
+        {
+          'name': 'read_notifications_summary',
+          'description':
+              'Generates a conversational executive audio briefing of unread and missed messages.',
+          'parameters': {
+            'type': 'object',
+            'properties': {},
+          },
+        },
+        {
           'name': 'click_element',
           'description':
               'Clicks a visible UI element on mobile by its visible label',
