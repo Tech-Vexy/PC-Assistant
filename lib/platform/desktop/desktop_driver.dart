@@ -105,8 +105,7 @@ class DesktopDriver with TrayListener, WindowListener {
         await windowManager.focus();
         break;
       case 'toggle_voice':
-        await windowManager.show();
-        await windowManager.focus();
+        // Activate voice assistant in background without forcing main window to foreground
         onToggleVoice();
         break;
       case 'exit_app':

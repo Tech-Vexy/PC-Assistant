@@ -216,17 +216,19 @@ class _HomeScreenState extends State<HomeScreen>
         }
       });
 
-      // On-Device Hotword Detection — configured but NOT auto-started.
-      // The mic only activates when the user explicitly taps the orb,
-      // the notification "Start Listening" button, or the accessibility button.
+      // On-Device Hotword Detection — configured and auto-armed in background
+      // so the wake word or background triggers work without moving app to foreground.
       final hotwordEnabled = await widget.keyVault.isHotwordEnabled();
       if (hotwordEnabled) {
-        // Pre-flight: ensure permission is present so the first tap is instant.
         final hasMic = await _androidBridge!.isMicrophonePermissionGranted();
         if (!hasMic) {
           await _androidBridge!.requestMicrophonePermission();
+        } else {
+          final customPhrase = await widget.keyVault.getCustomHotword();
+          await _androidBridge!.startHotwordListening(
+            hotwords: [customPhrase, 'hey assistant', 'ok assistant', 'device assistant', 'jarvis'],
+          );
         }
-        // Do NOT call startHotwordListening here — mic stays off until user touch.
       }
 
       // Initialize telephony service
@@ -829,6 +831,12 @@ If the user query is a general knowledge question, conversational request, or ex
           timestamp: DateTime.now(),
         ));
       });
+
+      // If response was triggered from background (e.g. quick tile, accessibility button, or wake word),
+      // speak the reply via on-device TTS so the user hears it without looking at the screen.
+      if (Platform.isAndroid && _androidBridge != null) {
+        _androidBridge!.speakText(response);
+      }
 
       if (_currentSessionId != null) {
         widget.database.addConversationMessage(
