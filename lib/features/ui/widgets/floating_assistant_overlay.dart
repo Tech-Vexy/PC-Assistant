@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
+import 'glass_container.dart';
 
-/// Floating overlay pill widget providing ambient visual feedback when the assistant
+/// Floating glassmorphic overlay pill providing ambient visual feedback when the assistant
 /// is actively listening or executing commands in the background without foregrounding.
 class FloatingAssistantOverlay extends StatelessWidget {
   final bool isListening;
@@ -22,47 +23,46 @@ class FloatingAssistantOverlay extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
+    final accentColor = isListening
+        ? Colors.tealAccent
+        : isSpeaking
+            ? Colors.amberAccent
+            : Colors.cyanAccent;
+
     return Positioned(
       top: 48,
       left: 16,
       right: 16,
       child: Material(
         color: Colors.transparent,
-        child: Container(
+        child: GlassContainer(
+          blur: 20,
+          opacity: 0.12,
+          borderRadius: BorderRadius.circular(28),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          decoration: BoxDecoration(
-            color: const Color(0xE61E293B), // Translucent slate
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(
-              color: isListening
-                  ? Colors.tealAccent
-                  : isSpeaking
-                      ? Colors.amberAccent
-                      : Colors.white24,
-              width: 1.5,
-            ),
-            boxShadow: const [
-              BoxShadow(
-                color: Colors.black45,
-                blurRadius: 12,
-                offset: Offset(0, 4),
-              ),
-            ],
+          border: Border.all(
+            color: accentColor.withValues(alpha: 0.4),
+            width: 1.3,
           ),
+          shadows: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.35),
+              blurRadius: 16,
+              offset: const Offset(0, 6),
+            ),
+            BoxShadow(
+              color: accentColor.withValues(alpha: 0.2),
+              blurRadius: 12,
+              spreadRadius: 1,
+            ),
+          ],
           child: Row(
             children: [
-              // Pulsing/animated status dot
-              Container(
-                width: 12,
-                height: 12,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: isListening
-                      ? Colors.tealAccent
-                      : isSpeaking
-                          ? Colors.amberAccent
-                          : Colors.grey,
-                ),
+              // Voice activity soundwave visualizer
+              AnimatedVoiceVisualizer(
+                isActive: isListening || isSpeaking,
+                color: accentColor,
+                height: 18,
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -78,11 +78,13 @@ class FloatingAssistantOverlay extends StatelessWidget {
                     color: Colors.white,
                     fontSize: 13,
                     fontWeight: FontWeight.w500,
+                    letterSpacing: 0.2,
                   ),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
+              const SizedBox(width: 8),
               IconButton(
                 icon: const Icon(Icons.close, size: 16, color: Colors.white70),
                 onPressed: onDismiss,

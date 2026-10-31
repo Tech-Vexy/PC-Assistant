@@ -27,6 +27,8 @@ import 'security_shield_tab.dart';
 import 'settings_screen.dart';
 import 'chat_tab.dart';
 import '../widgets/floating_assistant_overlay.dart';
+import '../widgets/glass_container.dart';
+import '../widgets/animated_glass_orb.dart';
 
 class HomeScreen extends StatefulWidget {
   final KeyVault keyVault;
@@ -1013,76 +1015,110 @@ If the user query is a general knowledge question, conversational request, or ex
         }
       },
       child: Scaffold(
-        backgroundColor: const Color(0xFF12141A),
-        appBar: AppBar(
-          backgroundColor: const Color(0xFF181B22),
-          elevation: 0,
-          title: Row(
-            children: [
-              const Icon(Icons.hub_outlined, color: Colors.indigoAccent),
-              const SizedBox(width: 8),
-              const Expanded(
-                child: Text(
-                  'Device Assistant',
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-              ),
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: _statusColor.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: _statusColor),
+        backgroundColor: Colors.transparent,
+        appBar: PreferredSize(
+          preferredSize: const Size.fromHeight(66),
+          child: SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 8, 14, 4),
+              child: GlassContainer(
+                blur: 20,
+                opacity: 0.12,
+                borderRadius: BorderRadius.circular(22),
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.18),
+                  width: 1.2,
                 ),
                 child: Row(
-                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    CircleAvatar(radius: 4, backgroundColor: _statusColor),
-                    const SizedBox(width: 6),
-                    Text(
-                      _statusLabel,
-                      style: TextStyle(fontSize: 12, color: _statusColor),
+                    Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: const BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: LinearGradient(
+                          colors: [Colors.cyanAccent, Colors.indigoAccent],
+                        ),
+                      ),
+                      child: const Icon(Icons.hub_outlined, color: Colors.white, size: 18),
+                    ),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Text(
+                        'Device Assistant',
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: _statusColor.withValues(alpha: 0.18),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: _statusColor.withValues(alpha: 0.5)),
+                        boxShadow: [
+                          BoxShadow(
+                            color: _statusColor.withValues(alpha: 0.25),
+                            blurRadius: 8,
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          CircleAvatar(radius: 4, backgroundColor: _statusColor),
+                          const SizedBox(width: 6),
+                          Text(
+                            _statusLabel,
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _statusColor),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    IconButton(
+                      icon: const Icon(Icons.shield_outlined, color: Colors.white70),
+                      tooltip: 'Privacy Shield',
+                      onPressed: _openShield,
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.settings_outlined, color: Colors.white70),
+                      tooltip: 'Settings & Keys',
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => SettingsScreen(
+                              keyVault: widget.keyVault,
+                              database: widget.database,
+                            ),
+                          ),
+                        ).then((_) => _initClients());
+                      },
                     ),
                   ],
                 ),
               ),
+            ),
+          ),
+        ),
+        body: AnimatedAuroraBackground(
+          child: Stack(
+            children: [
+              _buildGeminiLiveView(theme),
+              FloatingAssistantOverlay(
+                isListening: _isLocalSttActive || _isConnected,
+                isSpeaking: _isTtsSpeaking,
+                transcript: _currentVoiceTranscript,
+                onDismiss: () => setState(() => _currentVoiceTranscript = ''),
+              ),
             ],
           ),
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.shield_outlined),
-              tooltip: 'Privacy Shield',
-              onPressed: _openShield,
-            ),
-            IconButton(
-              icon: const Icon(Icons.settings_outlined),
-              tooltip: 'Settings & Keys',
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => SettingsScreen(
-                      keyVault: widget.keyVault,
-                      database: widget.database,
-                    ),
-                  ),
-                ).then((_) => _initClients());
-              },
-            ),
-          ],
-        ),
-        body: Stack(
-          children: [
-            _buildGeminiLiveView(theme),
-            FloatingAssistantOverlay(
-              isListening: _isLocalSttActive || _isConnected,
-              isSpeaking: _isTtsSpeaking,
-              transcript: _currentVoiceTranscript,
-              onDismiss: () => setState(() => _currentVoiceTranscript = ''),
-            ),
-          ],
         ),
       ),
     );
@@ -1157,54 +1193,72 @@ If the user query is a general knowledge question, conversational request, or ex
     final extra = _pendingPcApprovals.length - 1;
 
     return Container(
-      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.amber.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.amberAccent.withValues(alpha: 0.4)),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.devices, color: Colors.amberAccent, size: 22),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  extra > 0
-                      ? 'PC approval required (+$extra more)'
-                      : 'PC approval required',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.amberAccent,
-                  ),
-                ),
-                Text(
-                  args == null ? '$tool' : '$tool: $args',
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 11, color: Colors.white70),
-                ),
-              ],
-            ),
-          ),
-          TextButton(
-            onPressed: () => _resolvePcApproval(id, false),
-            child: const Text('Deny', style: TextStyle(color: Colors.white54)),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Colors.amber,
-              foregroundColor: Colors.black,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-            ),
-            onPressed: () => _resolvePcApproval(id, true),
-            child: const Text('Approve'),
+      margin: const EdgeInsets.fromLTRB(14, 6, 14, 0),
+      child: GlassContainer(
+        blur: 18,
+        opacity: 0.15,
+        color: Colors.amber,
+        borderRadius: BorderRadius.circular(18),
+        padding: const EdgeInsets.all(12),
+        border: Border.all(color: Colors.amberAccent.withValues(alpha: 0.5), width: 1.2),
+        shadows: [
+          BoxShadow(
+            color: Colors.amberAccent.withValues(alpha: 0.2),
+            blurRadius: 14,
+            spreadRadius: 1,
           ),
         ],
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.amber.withValues(alpha: 0.2),
+              ),
+              child: const Icon(Icons.devices, color: Colors.amberAccent, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    extra > 0
+                        ? 'PC approval required (+$extra more)'
+                        : 'PC approval required',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.amberAccent,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    args == null ? '$tool' : '$tool: $args',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 11, color: Colors.white70),
+                  ),
+                ],
+              ),
+            ),
+            TextButton(
+              onPressed: () => _resolvePcApproval(id, false),
+              child: const Text('Deny', style: TextStyle(color: Colors.white54)),
+            ),
+            const SizedBox(width: 4),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.amber,
+                foregroundColor: Colors.black,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+              ),
+              onPressed: () => _resolvePcApproval(id, true),
+              child: const Text('Approve', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1212,130 +1266,99 @@ If the user query is a general knowledge question, conversational request, or ex
   Widget _buildStatusBanner(Color bgColor, IconData icon, Color iconColor,
       String message, String buttonText, VoidCallback onButtonPressed) {
     return Container(
-      color: bgColor.withValues(alpha: 0.3),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(
-        children: [
-          Icon(icon, color: iconColor, size: 20),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              message,
-              style: const TextStyle(fontSize: 12, color: Colors.white),
+      margin: const EdgeInsets.fromLTRB(14, 6, 14, 0),
+      child: GlassContainer(
+        blur: 16,
+        opacity: 0.14,
+        color: bgColor,
+        borderRadius: BorderRadius.circular(16),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        border: Border.all(color: iconColor.withValues(alpha: 0.45), width: 1.2),
+        child: Row(
+          children: [
+            Icon(icon, color: iconColor, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                message,
+                style: const TextStyle(fontSize: 12, color: Colors.white),
+              ),
             ),
-          ),
-          TextButton(
-            onPressed: onButtonPressed,
-            child: Text(buttonText, style: TextStyle(color: iconColor)),
-          ),
-        ],
+            TextButton(
+              onPressed: onButtonPressed,
+              style: TextButton.styleFrom(
+                foregroundColor: iconColor,
+                textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+              ),
+              child: Text(buttonText),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildEmptyState() {
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          AnimatedBuilder(
-            animation: _orbController,
-            builder: (context, child) {
-              final isActive = _isConnected || _isLocalSttActive;
-              final scale =
-                  isActive ? 1.0 + (_orbController.value * 0.12) : 1.0;
-              return Transform.scale(
-                scale: scale,
-                child: Container(
-                  width: 160,
-                  height: 160,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: RadialGradient(
-                      colors: _isConnected
-                          ? [
-                              Colors.cyanAccent,
-                              Colors.indigo,
-                              Colors.blueAccent
-                            ]
-                          : _isLocalSttActive
-                              ? [
-                                  Colors.tealAccent,
-                                  Colors.teal.shade800,
-                                  Colors.indigo.shade900
-                                ]
-                              : [Colors.grey.shade400, Colors.grey.shade700],
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: _isConnected
-                            ? Colors.cyanAccent.withValues(alpha: 0.4)
-                            : _isLocalSttActive
-                                ? Colors.tealAccent.withValues(alpha: 0.4)
-                                : Colors.black12,
-                        blurRadius: _isConnected || _isLocalSttActive ? 30 : 10,
-                        spreadRadius: _isConnected || _isLocalSttActive ? 8 : 2,
-                      ),
-                    ],
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            AnimatedGlassOrb(
+              isConnected: _isConnected,
+              isListening: _isLocalSttActive,
+              isSpeaking: _isTtsSpeaking,
+              isConnecting: _isConnecting,
+              onTap: _toggleConnection,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              _isConnected
+                  ? 'Listening to your voice...'
+                  : _isLocalSttActive
+                      ? 'Listening on device'
+                      : _isTtsSpeaking
+                          ? 'Speaking...'
+                          : 'Tap the orb to speak',
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+                letterSpacing: 0.3,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 40),
+              child: Text(
+                'Ask me to remember something, plan a task, or run a workflow routine.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12, color: Colors.white54),
+              ),
+            ),
+            if (_currentVoiceTranscript.isNotEmpty) ...[
+              const SizedBox(height: 18),
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 28),
+                child: GlassContainer(
+                  blur: 16,
+                  opacity: 0.12,
+                  borderRadius: BorderRadius.circular(16),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                  border: Border.all(
+                    color: Colors.tealAccent.withValues(alpha: 0.4),
+                    width: 1.2,
                   ),
-                  child: IconButton(
-                    iconSize: 64,
-                    icon: _isConnecting
-                        ? const CircularProgressIndicator(
-                            color: Colors.white, strokeWidth: 3)
-                        : Icon(
-                            _isConnected || _isLocalSttActive
-                                ? Icons.mic
-                                : Icons.mic_none,
-                            color: Colors.white,
-                          ),
-                    onPressed: _toggleConnection,
+                  child: Text(
+                    _currentVoiceTranscript,
+                    style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w500),
+                    textAlign: TextAlign.center,
                   ),
                 ),
-              );
-            },
-          ),
-          const SizedBox(height: 24),
-          Text(
-            _isConnected
-                ? 'Listening...'
-                : _isLocalSttActive
-                    ? 'Listening on device'
-                    : _isTtsSpeaking
-                        ? 'Speaking...'
-                        : 'Tap the orb to talk',
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w500,
-              color: Colors.white70,
-            ),
-          ),
-          const SizedBox(height: 8),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 40),
-            child: Text(
-              'Ask me to remember something, plan a task, or run a routine.',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, color: Colors.white38),
-            ),
-          ),
-          if (_currentVoiceTranscript.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            Container(
-              margin: const EdgeInsets.symmetric(horizontal: 32),
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.05),
-                borderRadius: BorderRadius.circular(12),
               ),
-              child: Text(
-                _currentVoiceTranscript,
-                style: const TextStyle(color: Colors.white70, fontSize: 16),
-                textAlign: TextAlign.center,
-              ),
-            ),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
@@ -1343,7 +1366,7 @@ If the user query is a general knowledge question, conversational request, or ex
   Widget _buildConversationList() {
     return ListView.builder(
       reverse: true,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       itemCount: _chatMessages.length,
       itemBuilder: (context, index) {
         final message = _chatMessages[_chatMessages.length - 1 - index];
@@ -1373,13 +1396,13 @@ If the user query is a general knowledge question, conversational request, or ex
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withValues(alpha: 0.3)),
-        ),
+      child: GlassContainer(
+        blur: 14,
+        opacity: 0.08,
+        color: color,
+        borderRadius: BorderRadius.circular(16),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        border: Border.all(color: color.withValues(alpha: 0.35), width: 1.2),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1393,14 +1416,15 @@ If the user query is a general knowledge question, conversational request, or ex
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
                     color: color,
+                    letterSpacing: 0.2,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 6),
             Text(
               _summarizeToolResult(result),
-              style: const TextStyle(fontSize: 12, color: Colors.white70),
+              style: const TextStyle(fontSize: 12, color: Colors.white70, height: 1.4),
             ),
           ],
         ),
@@ -1476,40 +1500,53 @@ If the user query is a general knowledge question, conversational request, or ex
       child: Row(
         mainAxisAlignment:
             isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           if (!isUser) ...[
             Container(
-              width: 36,
-              height: 36,
+              width: 34,
+              height: 34,
               decoration: const BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: LinearGradient(
-                  colors: [Colors.cyanAccent, Colors.indigo],
+                  colors: [Colors.cyanAccent, Colors.indigoAccent],
                 ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.cyanAccent,
+                    blurRadius: 8,
+                    spreadRadius: -2,
+                  ),
+                ],
               ),
-              child: const Icon(Icons.smart_toy, color: Colors.white, size: 20),
+              child: const Icon(Icons.smart_toy, color: Colors.white, size: 18),
             ),
             const SizedBox(width: 8),
           ],
           Flexible(
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: isUser
-                    ? Colors.indigo.withValues(alpha: 0.3)
-                    : Colors.white.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(
-                  color: isUser
-                      ? Colors.indigo.withValues(alpha: 0.5)
-                      : Colors.white.withValues(alpha: 0.1),
-                ),
+            child: GlassContainer(
+              blur: 16,
+              opacity: isUser ? 0.16 : 0.09,
+              color: isUser ? Colors.indigoAccent : Colors.white,
+              borderRadius: BorderRadius.only(
+                topLeft: const Radius.circular(18),
+                topRight: const Radius.circular(18),
+                bottomLeft: Radius.circular(isUser ? 18 : 4),
+                bottomRight: Radius.circular(isUser ? 4 : 18),
               ),
+              border: Border.all(
+                color: isUser
+                    ? Colors.indigoAccent.withValues(alpha: 0.5)
+                    : Colors.white.withValues(alpha: 0.18),
+                width: 1.2,
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Text(
                 message.text,
                 style: TextStyle(
-                  color: isUser ? Colors.white : Colors.white70,
-                  fontSize: 15,
+                  color: isUser ? Colors.white : Colors.white.withValues(alpha: 0.9),
+                  fontSize: 14.5,
+                  height: 1.35,
                 ),
               ),
             ),
@@ -1517,13 +1554,17 @@ If the user query is a general knowledge question, conversational request, or ex
           if (isUser) ...[
             const SizedBox(width: 8),
             Container(
-              width: 36,
-              height: 36,
+              width: 34,
+              height: 34,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: Colors.indigo.withValues(alpha: 0.3),
+                color: Colors.indigo.withValues(alpha: 0.4),
+                border: Border.all(
+                  color: Colors.indigoAccent.withValues(alpha: 0.5),
+                  width: 1.2,
+                ),
               ),
-              child: const Icon(Icons.person, color: Colors.white70, size: 20),
+              child: const Icon(Icons.person, color: Colors.white, size: 18),
             ),
           ],
         ],
@@ -1541,118 +1582,70 @@ If the user query is a general knowledge question, conversational request, or ex
   Widget _buildBottomInputArea() {
     final isActive = _isConnected || _isLocalSttActive;
 
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF181B22),
-        border: Border(
-          top: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
-        ),
-      ),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 6, 14, 14),
       child: SafeArea(
         top: false,
-        child: Row(
-          children: [
-            _buildInputAction(
-              icon:
-                  _isCameraStreaming ? Icons.videocam : Icons.videocam_outlined,
-              tooltip: _isCameraStreaming
-                  ? 'Stop camera vision'
-                  : 'Start camera vision',
-              active: _isCameraStreaming,
-              onPressed: _toggleCameraStreaming,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: TextField(
-                controller: _textController,
-                style: const TextStyle(color: Colors.white, fontSize: 14),
-                minLines: 1,
-                maxLines: 4,
-                textInputAction: TextInputAction.send,
-                onSubmitted: (_) => _sendTypedMessage(),
-                decoration: InputDecoration(
-                  hintText: 'Message Device Assistant',
-                  hintStyle: const TextStyle(color: Colors.white38),
-                  filled: true,
-                  fillColor: Colors.white.withValues(alpha: 0.06),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(24),
-                    borderSide: BorderSide.none,
-                  ),
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            _buildInputAction(
-              icon: Icons.arrow_upward_rounded,
-              tooltip: 'Send',
-              primary: true,
-              onPressed: _sendTypedMessage,
-            ),
-            const SizedBox(width: 8),
-            _buildInputAction(
-              tooltip: isActive ? 'Stop listening' : 'Start listening',
-              active: isActive,
-              primary: !isActive,
-              onPressed: _toggleConnection,
-              child: _isConnecting
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : Icon(
-                      isActive ? Icons.mic : Icons.mic_none,
-                      color: isActive
-                          ? (_isConnected
-                              ? Colors.cyanAccent
-                              : Colors.tealAccent)
-                          : Colors.white,
-                      size: 24,
-                    ),
+        child: GlassContainer(
+          blur: 24,
+          opacity: 0.12,
+          borderRadius: BorderRadius.circular(30),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.2),
+            width: 1.2,
+          ),
+          shadows: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.35),
+              blurRadius: 20,
+              offset: const Offset(0, 8),
             ),
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildInputAction({
-    IconData? icon,
-    required String tooltip,
-    required VoidCallback onPressed,
-    bool active = false,
-    bool primary = false,
-    Widget? child,
-  }) {
-    final background = primary
-        ? Colors.indigo
-        : active
-            ? Colors.cyanAccent.withValues(alpha: 0.18)
-            : Colors.white.withValues(alpha: 0.06);
-    final foreground =
-        active ? Colors.cyanAccent : (primary ? Colors.white : Colors.white54);
-
-    return Tooltip(
-      message: tooltip,
-      child: Material(
-        color: background,
-        shape: const CircleBorder(),
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: onPressed,
-          child: SizedBox(
-            width: 46,
-            height: 46,
-            child: Center(
-              child: child ?? Icon(icon, size: 22, color: foreground),
-            ),
+          child: Row(
+            children: [
+              GlassActionButton(
+                icon: _isCameraStreaming ? Icons.videocam : Icons.videocam_outlined,
+                tooltip: _isCameraStreaming ? 'Stop camera vision' : 'Start camera vision',
+                active: _isCameraStreaming,
+                onPressed: _toggleCameraStreaming,
+                size: 42,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: TextField(
+                  controller: _textController,
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  minLines: 1,
+                  maxLines: 4,
+                  textInputAction: TextInputAction.send,
+                  onSubmitted: (_) => _sendTypedMessage(),
+                  decoration: const InputDecoration(
+                    hintText: 'Ask or command Device Assistant...',
+                    hintStyle: TextStyle(color: Colors.white38, fontSize: 13),
+                    border: InputBorder.none,
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              GlassActionButton(
+                icon: Icons.arrow_upward_rounded,
+                tooltip: 'Send message',
+                primary: true,
+                onPressed: _sendTypedMessage,
+                size: 42,
+              ),
+              const SizedBox(width: 6),
+              GlassActionButton(
+                icon: isActive ? Icons.stop_rounded : Icons.mic_rounded,
+                tooltip: isActive ? 'Stop listening' : 'Start listening',
+                active: isActive,
+                onPressed: _toggleConnection,
+                size: 42,
+              ),
+            ],
           ),
         ),
       ),
