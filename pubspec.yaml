@@ -48,6 +48,12 @@ dependencies:
   record: ^7.1.2
   path_provider_android: 2.2.15
   googleapis_auth: ^2.3.5
+  telephony: ^0.2.0
+
+  # Dartantic Agent Framework & Firebase AI Provider
+  firebase_core: ^4.11.0
+  dartantic_ai: ^3.4.2
+  dartantic_firebase_ai: ^0.2.2
 
 dev_dependencies:
   flutter_test:

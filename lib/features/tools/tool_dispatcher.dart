@@ -3,11 +3,17 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import '../../core/agent/dartantic_agent.dart';
 import '../../core/database/local_database.dart';
+import '../../core/memory/memory_extractor.dart';
+import '../../core/memory/memory_recall.dart';
+import '../../core/memory/memory_vector.dart';
 import '../../core/network/gemini_live_client.dart';
 import '../../core/network/nebius_client.dart';
 import '../../core/network/pc_bridge_client.dart';
 import '../../core/security/sensitive_app_guard.dart';
+import '../../core/skills/skill_generator.dart';
+import '../../core/workflow/workflow_manager.dart';
 import '../../platform/android/android_bridge.dart';
+import '../../platform/desktop/desktop_driver.dart';
 
 /// Central dispatcher for executing assistant tools across platforms
 /// with built-in security gating, sensitive app shielding, and undo journaling.
@@ -18,9 +24,15 @@ class ToolDispatcher {
   final GeminiLiveClient? geminiClient;
   final AndroidBridge? androidBridge;
   final PcBridgeClient? pcBridgeClient;
+  final DesktopDriver? desktopDriver;
   String? activePackageName; // Tracked foreground app on Android
   final void Function(Uint8List jpegBytes)? onImageCaptured;
   SubAgentManager? subAgentManager;
+
+  late final MemoryRecallEngine _recall;
+  late final MemoryExtractor _extractor;
+  late final DynamicSkillGenerator _skillGen;
+  late final HermesWorkflowManager _hermesWorkflow;
 
   ToolDispatcher({
     required this.db,
@@ -29,10 +41,22 @@ class ToolDispatcher {
     this.geminiClient,
     this.androidBridge,
     this.pcBridgeClient,
+    this.desktopDriver,
     this.activePackageName,
     this.onImageCaptured,
     this.subAgentManager,
-  });
+  }) {
+    _recall = MemoryRecallEngine(db);
+    _extractor = MemoryExtractor(
+      geminiClient: geminiClient,
+      nebiusClient: nebiusClient,
+    );
+    _skillGen = DynamicSkillGenerator(
+      geminiClient: geminiClient,
+      nebiusClient: nebiusClient,
+    );
+    _hermesWorkflow = HermesWorkflowManager(db);
+  }
 
   /// Evaluates whether a prompt is a screen visual perception request
   /// ("what is on my screen", "explain this image", "read my screen")
@@ -178,6 +202,22 @@ class ToolDispatcher {
           result = _handleForget(args);
           break;
 
+        case 'search_memories':
+          result = _handleSearchMemories(args);
+          break;
+
+        case 'save_memory':
+          result = _handleSaveMemory(args);
+          break;
+
+        case 'forget_topic':
+          result = _handleForgetTopic(args);
+          break;
+
+        case 'memory_summary':
+          result = _handleMemorySummary();
+          break;
+
         case 'undo_last':
           result = _handleUndoLast();
           break;
@@ -196,6 +236,26 @@ class ToolDispatcher {
 
         case 'save_workflow':
           result = _handleSaveWorkflow(args);
+          break;
+
+        case 'save_workflow_skill':
+          result = _handleSaveWorkflowSkill(args);
+          break;
+
+        case 'patch_workflow_skill':
+          result = _handlePatchWorkflowSkill(args);
+          break;
+
+        case 'view_workflow_skill':
+          result = _handleViewWorkflowSkill(args);
+          break;
+
+        case 'list_workflow_skills':
+          result = _handleListWorkflowSkills();
+          break;
+
+        case 'rollback_workflow_skill':
+          result = _handleRollbackWorkflowSkill(args);
           break;
 
         case 'run_workflow':
@@ -308,6 +368,66 @@ class ToolDispatcher {
           result = await _handleComputerUse(args);
           break;
 
+        case 'move_mouse':
+          result = await _handleMoveMouse(args);
+          break;
+
+        case 'click_mouse':
+          result = await _handleClickMouse(args);
+          break;
+
+        case 'type_text_keyboard':
+          result = await _handleTypeTextKeyboard(args);
+          break;
+
+        case 'press_key':
+          result = await _handlePressKey(args);
+          break;
+
+        case 'hotkey':
+          result = await _handleHotkey(args);
+          break;
+
+        case 'scroll_mouse':
+          result = await _handleScrollMouse(args);
+          break;
+
+        case 'get_screen_size':
+          result = await _handleGetScreenSize(args);
+          break;
+
+        case 'list_running_apps':
+          result = await _handleListRunningApps(args);
+          break;
+
+        case 'close_app':
+          result = await _handleCloseApp(args);
+          break;
+
+        case 'send_sms':
+          result = await _handleSendSms(args);
+          break;
+
+        case 'get_sms_messages':
+          result = await _handleGetSmsMessages(args);
+          break;
+
+        case 'make_call':
+          result = await _handleMakeCall(args);
+          break;
+
+        case 'get_network_info':
+          result = await _handleGetNetworkInfo(args);
+          break;
+
+        case 'generate_skill':
+          result = await _handleGenerateSkill(args);
+          break;
+
+        case 'learn_skill':
+          result = await _handleLearnSkill(args);
+          break;
+
         default:
           result = {'error': 'Unknown tool: $toolName'};
       }
@@ -388,6 +508,144 @@ class ToolDispatcher {
     final category = args['category'] as String?;
     final memories = db.listMemories(category: category);
     return {'count': memories.length, 'memories': memories};
+  }
+
+  // ── Rich memory handlers ───────────────────────────────────────────────────
+
+  /// Saves a rich memory fact (content-addressed, auto-deduplicated, indexed in FTS5 + vector).
+  Map<String, dynamic> _handleSaveMemory(Map<String, dynamic> args) {
+    final content = args['content'] as String? ?? args['value'] as String? ?? '';
+    if (content.trim().isEmpty) return {'error': 'content is required'};
+    final category = (args['category'] as String?) ?? 'general';
+    final importance = (args['importance'] as num?)?.toDouble() ?? 0.5;
+
+    final embedding = MemoryVectorEngine.serializeEmbedding(
+      MemoryVectorEngine.generateEmbedding(content),
+    );
+
+    final id = db.saveMemory(
+      content: content,
+      category: category,
+      source: 'manual',
+      importance: importance,
+      embedding: embedding,
+    );
+
+    if (id == -1) {
+      return {'status': 'duplicate', 'message': 'A similar memory already exists'};
+    }
+    return {'status': 'saved', 'id': id, 'content': content, 'category': category};
+  }
+
+  /// Hybrid BM25 + vector recall search across all memories.
+  Map<String, dynamic> _handleSearchMemories(Map<String, dynamic> args) {
+    final query = args['query'] as String? ?? args['key'] as String? ?? '';
+    if (query.trim().isEmpty) {
+      final all = db.listRichMemories();
+      return {'count': all.length, 'memories': all};
+    }
+    final recalled = _recall.hybridRecall(query);
+    return {
+      'count': recalled.length,
+      'memories': recalled.map((m) => m.toJson()).toList(),
+    };
+  }
+
+  /// Deletes all memories matching a natural language topic.
+  Map<String, dynamic> _handleForgetTopic(Map<String, dynamic> args) {
+    final topic = args['topic'] as String? ?? args['key'] as String? ?? '';
+    if (topic.trim().isEmpty) return {'error': 'topic is required'};
+    final count = _recall.forgetMemoriesMatching(topic);
+    return {
+      'status': count > 0 ? 'forgotten' : 'not_found',
+      'topic': topic,
+      'forgotten_count': count,
+    };
+  }
+
+  /// Returns all core memories — what the assistant knows about the user.
+  Map<String, dynamic> _handleMemorySummary() {
+    final core = _recall.coreMemories(limit: 20);
+    if (core.isEmpty) {
+      return {
+        'message': 'No memories saved yet. I will learn about you as we interact.',
+        'count': 0,
+        'memories': [],
+      };
+    }
+    return {
+      'count': core.length,
+      'memories': core.map((m) => m.toJson()).toList(),
+    };
+  }
+
+  // ── Skill generation handlers ─────────────────────────────────────────────
+
+  /// Generates a new workflow skill from a natural language description.
+  Future<Map<String, dynamic>> _handleGenerateSkill(
+      Map<String, dynamic> args) async {
+    final description = args['description'] as String? ?? '';
+    if (description.trim().isEmpty) return {'error': 'description is required'};
+    final isAndroid = args['platform'] == 'android';
+
+    final skill = await _skillGen.generateFromDescription(
+      description: description,
+      isAndroid: isAndroid,
+    );
+
+    if (skill == null) {
+      return {'error': 'Could not generate skill. Check LLM configuration.'};
+    }
+
+    // Auto-save as a workflow
+    db.saveWorkflow(skill.name,
+        description: skill.description, steps: skill.steps);
+
+    return {
+      'status': 'generated',
+      'skill': skill.toJson(),
+      'message':
+          'Skill "${skill.name}" generated and saved as a workflow. '
+          'Call run_workflow with name "${skill.name}" to execute it.',
+    };
+  }
+
+  /// Learns a skill from a recent tool-call history.
+  Future<Map<String, dynamic>> _handleLearnSkill(
+      Map<String, dynamic> args) async {
+    final skillName = args['name'] as String? ?? '';
+    if (skillName.trim().isEmpty) return {'error': 'name is required'};
+    final rawHistory = args['history'] as List<dynamic>? ?? [];
+    final history =
+        rawHistory.map((h) => Map<String, dynamic>.from(h as Map)).toList();
+
+    if (history.isEmpty) {
+      // Fall back to recent audit log
+      final audits = db.getRecentAudits(limit: 20);
+      history.addAll(audits.map((a) => {
+            'tool': a['tool_name'],
+            'args': jsonDecode(a['args_json'] as String? ?? '{}'),
+          }));
+    }
+
+    final skill = await _skillGen.learnFromHistory(
+      history: history,
+      skillName: skillName,
+    );
+
+    if (skill == null) {
+      return {'error': 'Could not synthesize a skill from the provided history.'};
+    }
+
+    db.saveWorkflow(skill.name,
+        description: skill.description, steps: skill.steps);
+
+    return {
+      'status': 'learned',
+      'skill': skill.toJson(),
+      'message':
+          'Skill "${skill.name}" learned from history and saved as a workflow.',
+    };
   }
 
   Map<String, dynamic> _handleUndoLast() {
@@ -572,6 +830,86 @@ class ToolDispatcher {
     );
 
     return {'status': 'saved', 'name': name, 'steps_count': steps.length};
+  }
+
+  // ── Hermes-Style Workflow Skill Handlers ───────────────────────────────────
+
+  Map<String, dynamic> _handleSaveWorkflowSkill(Map<String, dynamic> args) {
+    final name = args['name'] as String? ?? 'unnamed_workflow';
+    final description = args['description'] as String? ?? '';
+    final markdownContent = args['markdown_content'] as String? ??
+        args['instructions'] as String? ??
+        '# $name\n\n$description';
+    final version = args['version'] as String? ?? '1.0.0';
+    final platforms = (args['platforms'] as List<dynamic>? ??
+            ['android', 'linux', 'windows', 'macos'])
+        .cast<String>();
+    final parameters = (args['parameters'] as Map<String, dynamic>? ?? {});
+    final rawSteps = args['steps'] as List<dynamic>? ?? [];
+    final steps =
+        rawSteps.map((s) => Map<String, dynamic>.from(s as Map)).toList();
+    final tags = (args['tags'] as List<dynamic>? ?? []).cast<String>();
+    final changeSummary =
+        args['change_summary'] as String? ?? 'Created via workflow tool';
+
+    return _hermesWorkflow.saveSkill(
+      name: name,
+      description: description,
+      markdownContent: markdownContent,
+      version: version,
+      platforms: platforms,
+      parameters: parameters,
+      steps: steps,
+      tags: tags,
+      changeSummary: changeSummary,
+    );
+  }
+
+  Map<String, dynamic> _handlePatchWorkflowSkill(Map<String, dynamic> args) {
+    final name = args['name'] as String? ?? '';
+    final searchTarget = args['search_target'] as String? ?? '';
+    final replacement = args['replacement'] as String? ?? '';
+    final changeSummary = args['change_summary'] as String?;
+
+    if (name.isEmpty || searchTarget.isEmpty) {
+      return {'error': 'name and search_target are required for patch.'};
+    }
+
+    return _hermesWorkflow.patchSkill(
+      name: name,
+      searchTarget: searchTarget,
+      replacement: replacement,
+      changeSummary: changeSummary,
+    );
+  }
+
+  Map<String, dynamic> _handleViewWorkflowSkill(Map<String, dynamic> args) {
+    final name = args['name'] as String? ?? '';
+    if (name.isEmpty) return {'error': 'name is required'};
+
+    final skill = _hermesWorkflow.viewSkill(name);
+    if (skill == null) {
+      return {'found': false, 'error': 'Workflow skill "$name" not found.'};
+    }
+    return {'found': true, 'skill': skill};
+  }
+
+  Map<String, dynamic> _handleListWorkflowSkills() {
+    final summary = _hermesWorkflow.listSkillsSummary();
+    return {
+      'count': summary.length,
+      'skills': summary,
+      'message': 'Lightweight skills summary (Progressive Disclosure L1). Call view_workflow_skill for full instructions.',
+    };
+  }
+
+  Map<String, dynamic> _handleRollbackWorkflowSkill(Map<String, dynamic> args) {
+    final name = args['name'] as String? ?? '';
+    final versionId = (args['version_id'] as num?)?.toInt() ?? 0;
+    if (name.isEmpty || versionId <= 0) {
+      return {'error': 'name and valid version_id are required for rollback.'};
+    }
+    return _hermesWorkflow.rollbackSkill(name, versionId);
   }
 
   Future<Map<String, dynamic>> _handleRunWorkflow(
@@ -1345,5 +1683,226 @@ class ToolDispatcher {
       'agent_id': agentId,
       'message': message,
     };
+  }
+
+  // --- DESKTOP AUTOMATION HANDLERS ---
+
+  Future<Map<String, dynamic>> _handleMoveMouse(Map<String, dynamic> args) async {
+    if (desktopDriver == null) {
+      return {'error': 'Desktop automation is not available on this platform'};
+    }
+
+    final x = (args['x'] as num?)?.toDouble() ?? 0.0;
+    final y = (args['y'] as num?)?.toDouble() ?? 0.0;
+
+    final success = await desktopDriver!.moveMouse(x, y);
+    return {
+      'status': success ? 'done' : 'error',
+      'x': x,
+      'y': y,
+      'success': success,
+      if (!success) 'error': 'Failed to move mouse',
+    };
+  }
+
+  Future<Map<String, dynamic>> _handleClickMouse(Map<String, dynamic> args) async {
+    if (desktopDriver == null) {
+      return {'error': 'Desktop automation is not available on this platform'};
+    }
+
+    final buttonStr = (args['button'] as String?)?.toLowerCase() ?? 'left';
+    final button = buttonStr == 'right'
+        ? MouseButton.right
+        : buttonStr == 'middle'
+            ? MouseButton.middle
+            : MouseButton.left;
+
+    final success = await desktopDriver!.clickMouse(button: button);
+    return {
+      'status': success ? 'done' : 'error',
+      'button': buttonStr,
+      'success': success,
+      if (!success) 'error': 'Failed to click mouse',
+    };
+  }
+
+  Future<Map<String, dynamic>> _handleTypeTextKeyboard(
+      Map<String, dynamic> args) async {
+    if (desktopDriver == null) {
+      return {'error': 'Desktop automation is not available on this platform'};
+    }
+
+    final text = args['text'] as String? ?? '';
+    if (text.isEmpty) {
+      return {'error': 'text parameter is required'};
+    }
+
+    final success = await desktopDriver!.typeText(text);
+    return {
+      'status': success ? 'done' : 'error',
+      'text': text,
+      'success': success,
+      if (!success) 'error': 'Failed to type text',
+    };
+  }
+
+  Future<Map<String, dynamic>> _handlePressKey(Map<String, dynamic> args) async {
+    if (desktopDriver == null) {
+      return {'error': 'Desktop automation is not available on this platform'};
+    }
+
+    final key = args['key'] as String? ?? '';
+    if (key.isEmpty) {
+      return {'error': 'key parameter is required'};
+    }
+
+    final success = await desktopDriver!.pressKey(key);
+    return {
+      'status': success ? 'done' : 'error',
+      'key': key,
+      'success': success,
+      if (!success) 'error': 'Failed to press key',
+    };
+  }
+
+  Future<Map<String, dynamic>> _handleHotkey(Map<String, dynamic> args) async {
+    if (desktopDriver == null) {
+      return {'error': 'Desktop automation is not available on this platform'};
+    }
+
+    final keys = args['keys'] as String? ?? '';
+    if (keys.isEmpty) {
+      return {'error': 'keys parameter is required (e.g., "ctrl+c")'};
+    }
+
+    final success = await desktopDriver!.hotkey(keys);
+    return {
+      'status': success ? 'done' : 'error',
+      'keys': keys,
+      'success': success,
+      if (!success) 'error': 'Failed to execute hotkey',
+    };
+  }
+
+  Future<Map<String, dynamic>> _handleScrollMouse(Map<String, dynamic> args) async {
+    if (desktopDriver == null) {
+      return {'error': 'Desktop automation is not available on this platform'};
+    }
+
+    final deltaX = (args['delta_x'] as num?)?.toInt() ?? 0;
+    final deltaY = (args['delta_y'] as num?)?.toInt() ?? 0;
+
+    final success = await desktopDriver!.scrollMouse(deltaX: deltaX, deltaY: deltaY);
+    return {
+      'status': success ? 'done' : 'error',
+      'delta_x': deltaX,
+      'delta_y': deltaY,
+      'success': success,
+      if (!success) 'error': 'Failed to scroll mouse',
+    };
+  }
+
+  Future<Map<String, dynamic>> _handleGetScreenSize(
+      Map<String, dynamic> args) async {
+    if (desktopDriver == null) {
+      return {'error': 'Desktop automation is not available on this platform'};
+    }
+
+    final size = await desktopDriver!.getScreenSize();
+    if (size != null) {
+      return {
+        'status': 'done',
+        'width': size['width'],
+        'height': size['height'],
+      };
+    }
+    return {'error': 'Failed to get screen size'};
+  }
+
+  Future<Map<String, dynamic>> _handleListRunningApps(
+      Map<String, dynamic> args) async {
+    if (desktopDriver == null) {
+      return {'error': 'Desktop automation is not available on this platform'};
+    }
+
+    final apps = await desktopDriver!.getRunningApps();
+    return {
+      'status': 'done',
+      'count': apps.length,
+      'apps': apps,
+    };
+  }
+
+  Future<Map<String, dynamic>> _handleCloseApp(Map<String, dynamic> args) async {
+    if (desktopDriver == null) {
+      return {'error': 'Desktop automation is not available on this platform'};
+    }
+
+    final identifier = args['identifier'] as String? ?? '';
+    if (identifier.isEmpty) {
+      return {'error': 'identifier (app name or PID) is required'};
+    }
+
+    final success = await desktopDriver!.closeApp(identifier);
+    return {
+      'status': success ? 'done' : 'error',
+      'identifier': identifier,
+      'success': success,
+      if (!success) 'error': 'Failed to close application',
+    };
+  }
+
+  // --- TELEPHONY HANDLERS ---
+
+  Future<Map<String, dynamic>> _handleSendSms(Map<String, dynamic> args) async {
+    if (androidBridge == null) {
+      return {'error': 'Telephony is not available on this platform'};
+    }
+
+    final phoneNumber = args['phone_number'] as String? ?? '';
+    final message = args['message'] as String? ?? '';
+
+    if (phoneNumber.isEmpty || message.isEmpty) {
+      return {'error': 'phone_number and message are required'};
+    }
+
+    return await androidBridge!.sendSms(
+      phoneNumber: phoneNumber,
+      message: message,
+    );
+  }
+
+  Future<Map<String, dynamic>> _handleGetSmsMessages(
+      Map<String, dynamic> args) async {
+    if (androidBridge == null) {
+      return {'error': 'Telephony is not available on this platform'};
+    }
+
+    final kind = (args['kind'] as String?)?.toLowerCase() ?? 'inbox';
+    final limit = (args['limit'] as num?)?.toInt() ?? 50;
+
+    return await androidBridge!.getSmsMessages(kind: kind, limit: limit);
+  }
+
+  Future<Map<String, dynamic>> _handleMakeCall(Map<String, dynamic> args) async {
+    if (androidBridge == null) {
+      return {'error': 'Telephony is not available on this platform'};
+    }
+
+    final phoneNumber = args['phone_number'] as String? ?? '';
+    if (phoneNumber.isEmpty) {
+      return {'error': 'phone_number is required'};
+    }
+
+    return await androidBridge!.makeCall(phoneNumber);
+  }
+
+  Future<Map<String, dynamic>> _handleGetNetworkInfo(
+      Map<String, dynamic> args) async {
+    if (androidBridge == null) {
+      return {'error': 'Telephony is not available on this platform'};
+    }
+
+    return await androidBridge!.getNetworkInfo();
   }
 }

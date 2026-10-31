@@ -54,6 +54,5 @@ flutter test test/pc_bridge_client_test.dart
 - **PC Bridge Client (`lib/core/network/pc_bridge_client.dart`)**: Connects to the PC Assistant host for remote delegation, shared memories/workflows, and 1-tap mobile confirmation of dangerous PC actions.
 
 ### 5. UI Architecture (`lib/features/ui/`)
-- **`HomeScreen` (`lib/features/ui/screens/home_screen.dart`)**: Voice interaction visualizer, approval queue cards, active session states, and floating camera vision indicators.
-- **`PlansWorkflowsTab` (`lib/features/ui/screens/plans_workflows_tab.dart`)**: Task plans, workflow routines, and interactive recurring schedule configuration modal.
-- **`MemoryTab` (`lib/features/ui/screens/memory_tab.dart`)**: Semantic memory search, categorization, and editing.
+- **`HomeScreen` (`lib/features/ui/screens/home_screen.dart`)**: Single-page Gemini Live-style UI — animated voice orb, live transcript, camera/mic/text controls, and PC approval cards. Shield and Settings open as pushed routes rather than tabs.
+- **Agent-managed features**: Memory, task plans, and recurring workflows intentionally have no dedicated tabs. They are exposed to the model through `ToolDefinitions` and executed by `ToolDispatcher`.

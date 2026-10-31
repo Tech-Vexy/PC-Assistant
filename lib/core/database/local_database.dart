@@ -37,10 +37,55 @@ class LocalDatabase {
 
     _db!.execute('PRAGMA foreign_keys = ON;');
     _createTables();
+    _migrateSchema();
     _isInitialized = true;
   }
 
   void _createTables() {
+    // ── Memories (rich schema with FTS5 + vector support) ──────────────────
+    // First-time creation uses the full new schema.
+    // Existing DBs are migrated in _migrateSchema().
+    _db!.execute('''
+      CREATE TABLE IF NOT EXISTS memories_v2 (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        content     TEXT NOT NULL,
+        category    TEXT NOT NULL DEFAULT 'general',
+        source      TEXT NOT NULL DEFAULT 'manual',
+        importance  REAL NOT NULL DEFAULT 0.5,
+        embedding   TEXT,
+        created_at  INTEGER NOT NULL,
+        updated_at  INTEGER NOT NULL
+      );
+    ''');
+
+    // FTS5 virtual table for BM25 keyword search over memory content
+    _db!.execute('''
+      CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
+        USING fts5(content, content=memories_v2, content_rowid=id);
+    ''');
+
+    // Triggers to keep FTS5 index in sync with memories_v2
+    _db!.execute('''
+      CREATE TRIGGER IF NOT EXISTS memories_v2_ai
+        AFTER INSERT ON memories_v2 BEGIN
+          INSERT INTO memories_fts(rowid, content) VALUES (new.id, new.content);
+        END;
+    ''');
+    _db!.execute('''
+      CREATE TRIGGER IF NOT EXISTS memories_v2_au
+        AFTER UPDATE ON memories_v2 BEGIN
+          INSERT INTO memories_fts(memories_fts, rowid, content) VALUES ('delete', old.id, old.content);
+          INSERT INTO memories_fts(rowid, content) VALUES (new.id, new.content);
+        END;
+    ''');
+    _db!.execute('''
+      CREATE TRIGGER IF NOT EXISTS memories_v2_ad
+        AFTER DELETE ON memories_v2 BEGIN
+          INSERT INTO memories_fts(memories_fts, rowid, content) VALUES ('delete', old.id, old.content);
+        END;
+    ''');
+
+    // ── Legacy memories table (kept for backward compat, migrated on open) ──
     _db!.execute('''
       CREATE TABLE IF NOT EXISTS memories (
         key TEXT PRIMARY KEY,
@@ -58,6 +103,39 @@ class LocalDatabase {
         steps_json TEXT NOT NULL,
         created_at INTEGER NOT NULL
       );
+    ''');
+
+    // ── Hermes-Style Workflow Skills & Version Ledger ─────────────────────────
+    _db!.execute('''
+      CREATE TABLE IF NOT EXISTS workflow_skills (
+        name TEXT PRIMARY KEY,
+        description TEXT,
+        version TEXT NOT NULL DEFAULT '1.0.0',
+        platforms_json TEXT NOT NULL DEFAULT '["android","linux","windows","macos"]',
+        parameters_json TEXT NOT NULL DEFAULT '{}',
+        content_markdown TEXT NOT NULL,
+        steps_json TEXT NOT NULL DEFAULT '[]',
+        tags_json TEXT NOT NULL DEFAULT '[]',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+    ''');
+
+    _db!.execute('''
+      CREATE TABLE IF NOT EXISTS workflow_versions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        workflow_name TEXT NOT NULL,
+        version TEXT NOT NULL,
+        content_markdown TEXT NOT NULL,
+        change_summary TEXT,
+        author TEXT NOT NULL DEFAULT 'assistant',
+        timestamp INTEGER NOT NULL
+      );
+    ''');
+
+    _db!.execute('''
+      CREATE INDEX IF NOT EXISTS idx_workflow_versions_name
+        ON workflow_versions(workflow_name);
     ''');
 
     _db!.execute('''
@@ -143,7 +221,270 @@ class LocalDatabase {
         timestamp INTEGER NOT NULL
       );
     ''');
+
+    // ── Conversation sessions & messages (for context + repetition guard) ──
+    _db!.execute('''
+      CREATE TABLE IF NOT EXISTS conversation_sessions (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        title      TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+    ''');
+
+    _db!.execute('''
+      CREATE TABLE IF NOT EXISTS conversation_messages (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id  INTEGER NOT NULL
+                      REFERENCES conversation_sessions(id) ON DELETE CASCADE,
+        role        TEXT NOT NULL,
+        content     TEXT NOT NULL,
+        created_at  INTEGER NOT NULL
+      );
+    ''');
+
+    _db!.execute('''
+      CREATE INDEX IF NOT EXISTS idx_conv_messages_session
+        ON conversation_messages(session_id);
+    ''');
   }
+
+  /// Runs schema migrations for existing databases.
+  void _migrateSchema() {
+    // Migrate legacy flat memories → memories_v2 (run once)
+    final hasMigrated = _db!
+        .select("SELECT COUNT(*) AS c FROM memories_v2")
+        .first['c'] as int;
+    if (hasMigrated == 0) {
+      try {
+        final legacyRows = _db!.select('SELECT * FROM memories');
+        if (legacyRows.isNotEmpty) {
+          final now = DateTime.now().millisecondsSinceEpoch;
+          for (final row in legacyRows) {
+            final content = '${row["key"]}: ${row["value"]}';
+            final stmt = _db!.prepare('''
+              INSERT INTO memories_v2
+                (content, category, source, importance, created_at, updated_at)
+              VALUES (?, ?, 'manual', 0.5, ?, ?)
+            ''');
+            stmt.execute([content, row['category'] ?? 'general', now, now]);
+            stmt.close();
+          }
+        }
+      } catch (_) {
+        // Legacy table may not exist in fresh installs — safe to skip
+      }
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // RAW QUERY HELPERS (used by MemoryRecallEngine)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  List<Map<String, dynamic>> rawSelect(String sql, List<Object?> params) {
+    final stmt = _db!.prepare(sql);
+    final result = stmt.select(params);
+    stmt.close();
+    return result.map((row) => Map<String, dynamic>.from(row)).toList();
+  }
+
+  void rawExecute(String sql, List<Object?> params) {
+    final stmt = _db!.prepare(sql);
+    stmt.execute(params);
+    stmt.close();
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // RICH MEMORY OPERATIONS (memories_v2 + FTS5 + vector)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /// Saves a distilled memory fact. Returns the new memory's id.
+  ///
+  /// Performs fuzzy deduplication before inserting:
+  ///   - Exact match → skipped (returns -1)
+  ///   - Jaccard similarity ≥ 0.82 → duplicate, skipped (returns -1)
+  ///   - Jaccard similarity 0.55–0.82 → stale superseded, new record inserted
+  int saveMemory({
+    required String content,
+    String category = 'general',
+    String source = 'manual',
+    double importance = 0.5,
+    String? embedding,
+  }) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final trimmed = content.trim().substring(0, content.length > 200 ? 200 : content.length);
+    if (trimmed.isEmpty) return -1;
+
+    // Fuzzy dedup check
+    final existing = _db!.select(
+      'SELECT id, content FROM memories_v2 ORDER BY id DESC LIMIT 80',
+    );
+
+    final newWords = _keywordSet(trimmed);
+    int? supersededId;
+
+    for (final row in existing) {
+      final ex = row['content'] as String;
+      if (ex == trimmed) return -1; // exact duplicate
+
+      final exWords = _keywordSet(ex);
+      if (exWords.isEmpty || newWords.isEmpty) continue;
+
+      final overlap = newWords.intersection(exWords).length;
+      final similarity = overlap / (exWords.length > newWords.length ? exWords.length : newWords.length);
+
+      if (similarity >= 0.82) return -1; // near-duplicate
+      if (similarity >= 0.55) {
+        supersededId = row['id'] as int; // stale memory — supersede
+        break;
+      }
+    }
+
+    // Remove stale superseded record
+    if (supersededId != null) {
+      _db!.execute('DELETE FROM memories_v2 WHERE id = ?', [supersededId]);
+    }
+
+    final stmt = _db!.prepare('''
+      INSERT INTO memories_v2
+        (content, category, source, importance, embedding, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    ''');
+    stmt.execute([trimmed, category, source, importance, embedding, now, now]);
+    final id = _db!.lastInsertRowId;
+    stmt.close();
+    return id;
+  }
+
+  /// Retrieves a memory by id.
+  Map<String, dynamic>? getMemoryById(int id) {
+    final result = _db!.select(
+      'SELECT * FROM memories_v2 WHERE id = ?',
+      [id],
+    );
+    if (result.isEmpty) return null;
+    return Map<String, dynamic>.from(result.first);
+  }
+
+  /// Updates the embedding of an existing memory.
+  void updateMemoryEmbedding(int id, String embeddingJson) {
+    final stmt = _db!.prepare(
+      'UPDATE memories_v2 SET embedding = ? WHERE id = ?',
+    );
+    stmt.execute([embeddingJson, id]);
+    stmt.close();
+  }
+
+  /// Deletes a memory and removes it from the FTS index.
+  bool deleteMemory(int id) {
+    _db!.execute('DELETE FROM memories_v2 WHERE id = ?', [id]);
+    return _db!.updatedRows > 0;
+  }
+
+  /// Lists rich memories with optional category filter.
+  List<Map<String, dynamic>> listRichMemories({String? category, int limit = 100}) {
+    if (category != null) {
+      final stmt = _db!.prepare(
+        'SELECT * FROM memories_v2 WHERE category = ? ORDER BY importance DESC, updated_at DESC LIMIT ?',
+      );
+      final result = stmt.select([category, limit]);
+      stmt.close();
+      return result.map((r) => Map<String, dynamic>.from(r)).toList();
+    }
+    final stmt = _db!.prepare(
+      'SELECT * FROM memories_v2 ORDER BY importance DESC, updated_at DESC LIMIT ?',
+    );
+    final result = stmt.select([limit]);
+    stmt.close();
+    return result.map((r) => Map<String, dynamic>.from(r)).toList();
+  }
+
+  Set<String> _keywordSet(String text) {
+    return text
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9\s]'), ' ')
+        .split(RegExp(r'\s+'))
+        .where((w) => w.length >= 3)
+        .toSet();
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // CONVERSATION SESSION & MESSAGE OPERATIONS
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /// Creates a new conversation session and returns its id.
+  int createConversationSession({String title = ''}) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final stmt = _db!.prepare('''
+      INSERT INTO conversation_sessions (title, created_at, updated_at)
+      VALUES (?, ?, ?)
+    ''');
+    stmt.execute([title, now, now]);
+    final id = _db!.lastInsertRowId;
+    stmt.close();
+    return id;
+  }
+
+  /// Updates the title of a conversation session.
+  void updateSessionTitle(int sessionId, String title) {
+    final stmt = _db!.prepare(
+      'UPDATE conversation_sessions SET title = ?, updated_at = ? WHERE id = ?',
+    );
+    stmt.execute([title, DateTime.now().millisecondsSinceEpoch, sessionId]);
+    stmt.close();
+  }
+
+  /// Appends a message to a conversation session.
+  int addConversationMessage({
+    required int sessionId,
+    required String role,
+    required String content,
+  }) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final stmt = _db!.prepare('''
+      INSERT INTO conversation_messages (session_id, role, content, created_at)
+      VALUES (?, ?, ?, ?)
+    ''');
+    stmt.execute([sessionId, role, content, now]);
+    final id = _db!.lastInsertRowId;
+    stmt.close();
+    // Touch session updated_at
+    _db!.execute(
+      'UPDATE conversation_sessions SET updated_at = ? WHERE id = ?',
+      [now, sessionId],
+    );
+    return id;
+  }
+
+  /// Returns messages for a session, oldest first.
+  List<Map<String, dynamic>> getConversationMessages(int sessionId,
+      {int limit = 50}) {
+    final stmt = _db!.prepare('''
+      SELECT * FROM conversation_messages
+      WHERE session_id = ?
+      ORDER BY created_at ASC
+      LIMIT ?
+    ''');
+    final result = stmt.select([sessionId, limit]);
+    stmt.close();
+    return result.map((r) => Map<String, dynamic>.from(r)).toList();
+  }
+
+  /// Returns recent sessions, newest first.
+  List<Map<String, dynamic>> listConversationSessions({int limit = 20}) {
+    final stmt = _db!.prepare('''
+      SELECT * FROM conversation_sessions
+      ORDER BY updated_at DESC
+      LIMIT ?
+    ''');
+    final result = stmt.select([limit]);
+    stmt.close();
+    return result.map((r) => Map<String, dynamic>.from(r)).toList();
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // LEGACY MEMORY OPERATIONS (backward compat — kept for ToolDispatcher)
+  // ─────────────────────────────────────────────────────────────────────────
 
   // --- MEMORY OPERATIONS ---
 
@@ -313,7 +654,152 @@ class LocalDatabase {
     stmt.execute([name]);
     final changes = _db!.updatedRows;
     stmt.close();
+
+    // Also clean up skill tables if present
+    _db!.execute('DELETE FROM workflow_skills WHERE name = ?', [name]);
     return changes > 0;
+  }
+
+  // ── Hermes-Style Workflow Skill CRUD & Version Ledger ──────────────────────
+
+  /// Saves or updates a Hermes-format workflow skill with version ledger tracking.
+  void saveWorkflowSkill({
+    required String name,
+    required String description,
+    required String contentMarkdown,
+    String version = '1.0.0',
+    List<String> platforms = const ['android', 'linux', 'windows', 'macos'],
+    Map<String, dynamic> parameters = const {},
+    List<Map<String, dynamic>> steps = const [],
+    List<String> tags = const [],
+    String changeSummary = 'Initial skill creation',
+    String author = 'assistant',
+  }) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+
+    // 1. Upsert into main workflow_skills table
+    final stmt = _db!.prepare('''
+      INSERT INTO workflow_skills (
+        name, description, version, platforms_json, parameters_json,
+        content_markdown, steps_json, tags_json, created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(name) DO UPDATE SET
+        description = excluded.description,
+        version = excluded.version,
+        platforms_json = excluded.platforms_json,
+        parameters_json = excluded.parameters_json,
+        content_markdown = excluded.content_markdown,
+        steps_json = excluded.steps_json,
+        tags_json = excluded.tags_json,
+        updated_at = excluded.updated_at;
+    ''');
+    stmt.execute([
+      name,
+      description,
+      version,
+      jsonEncode(platforms),
+      jsonEncode(parameters),
+      contentMarkdown,
+      jsonEncode(steps),
+      jsonEncode(tags),
+      now,
+      now,
+    ]);
+    stmt.close();
+
+    // 2. Also sync to legacy `workflows` table for backward compatibility with executor
+    saveWorkflow(name, description: description, steps: steps);
+
+    // 3. Record in append-only version ledger
+    final ledgerStmt = _db!.prepare('''
+      INSERT INTO workflow_versions (
+        workflow_name, version, content_markdown, change_summary, author, timestamp
+      )
+      VALUES (?, ?, ?, ?, ?, ?);
+    ''');
+    ledgerStmt.execute([
+      name,
+      version,
+      contentMarkdown,
+      changeSummary,
+      author,
+      now,
+    ]);
+    ledgerStmt.close();
+  }
+
+  /// Retrieves a workflow skill with metadata and full markdown instructions.
+  Map<String, dynamic>? getWorkflowSkill(String name) {
+    final stmt = _db!.prepare('SELECT * FROM workflow_skills WHERE name = ?');
+    final result = stmt.select([name]);
+    stmt.close();
+    if (result.isNotEmpty) {
+      final row = Map<String, dynamic>.from(result.first);
+      try {
+        row['platforms'] = jsonDecode(row['platforms_json'] as String? ?? '[]');
+        row['parameters'] = jsonDecode(row['parameters_json'] as String? ?? '{}');
+        row['steps'] = jsonDecode(row['steps_json'] as String? ?? '[]');
+        row['tags'] = jsonDecode(row['tags_json'] as String? ?? '[]');
+      } catch (_) {}
+      return row;
+    }
+    return null;
+  }
+
+  /// Lists all skills in compact form for progressive disclosure (names + brief description).
+  List<Map<String, dynamic>> listWorkflowSkillsSummary() {
+    final result = _db!.select('''
+      SELECT name, description, version, tags_json, updated_at
+      FROM workflow_skills
+      ORDER BY updated_at DESC
+    ''');
+    return result.map((r) {
+      final map = Map<String, dynamic>.from(r);
+      try {
+        map['tags'] = jsonDecode(map['tags_json'] as String? ?? '[]');
+      } catch (_) {
+        map['tags'] = [];
+      }
+      return map;
+    }).toList();
+  }
+
+  /// Retrieves version history from the audit ledger for a specific workflow.
+  List<Map<String, dynamic>> getWorkflowVersions(String name) {
+    final stmt = _db!.prepare('''
+      SELECT * FROM workflow_versions
+      WHERE workflow_name = ?
+      ORDER BY id DESC
+    ''');
+    final result = stmt.select([name]);
+    stmt.close();
+    return result.map((r) => Map<String, dynamic>.from(r)).toList();
+  }
+
+  /// Rolls back a workflow skill to a specific historical version from the ledger.
+  bool rollbackWorkflowSkill(String name, int versionId) {
+    final stmt = _db!.prepare('''
+      SELECT * FROM workflow_versions
+      WHERE workflow_name = ? AND id = ?
+    ''');
+    final result = stmt.select([name, versionId]);
+    stmt.close();
+    if (result.isEmpty) return false;
+
+    final targetVersion = result.first;
+    final contentMarkdown = targetVersion['content_markdown'] as String;
+    final ver = targetVersion['version'] as String;
+
+    saveWorkflowSkill(
+      name: name,
+      description: 'Rolled back to version #$versionId ($ver)',
+      contentMarkdown: contentMarkdown,
+      version: '$ver-rollback',
+      changeSummary: 'Rollback to ledger ID #$versionId',
+      author: 'rollback',
+    );
+    return true;
   }
 
   // --- SCHEDULED WORKFLOW OPERATIONS ---

@@ -1,15 +1,18 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../../../core/agent/dartantic_agent.dart';
 import '../../../core/audio/audio_playback_service.dart';
 import '../../../core/audio/audio_recording_service.dart';
 import '../../../core/audio/self_echo_guard.dart';
 import '../../../core/database/local_database.dart';
+import '../../../core/memory/memory_extractor.dart';
+import '../../../core/memory/memory_recall.dart';
+import '../../../core/memory/memory_vector.dart';
 import '../../../core/network/gcp_adc_auth_service.dart';
 import '../../../core/network/gemini_live_client.dart';
+import '../../../core/network/dartantic_firebase_agent.dart';
 import '../../../core/network/nebius_client.dart';
 import '../../../core/network/pc_bridge_client.dart';
 import '../../../core/security/key_vault.dart';
@@ -20,8 +23,6 @@ import '../../tools/tool_definition.dart';
 import '../../tools/tool_dispatcher.dart';
 import '../../../core/video/camera_streaming_service.dart';
 import '../../../core/workflow/workflow_scheduler_service.dart';
-import 'memories_tab.dart';
-import 'plans_workflows_tab.dart';
 import 'security_shield_tab.dart';
 import 'settings_screen.dart';
 import 'chat_tab.dart';
@@ -48,9 +49,9 @@ class _HomeScreenState extends State<HomeScreen>
   final SelfEchoGuard _selfEchoGuard = SelfEchoGuard();
   DateTime? _lastAudioChunkAt;
   AudioPlaybackService? _audioPlayback;
-  int _activeTabIndex = 0;
 
   GeminiLiveClient? _liveClient;
+  DartanticFirebaseAgent? _dartanticAgent;
   NebiusClient? _nebiusClient;
   ToolDispatcher? _dispatcher;
   AndroidBridge? _androidBridge;
@@ -64,8 +65,6 @@ class _HomeScreenState extends State<HomeScreen>
   bool _isAccessibilityEnabled = false;
   bool _isBatteryOptimizationIgnored = true;
   bool _isUsageAccessGranted = true;
-  final List<String> _transcripts = [];
-  final List<Map<String, dynamic>> _toolHistory = [];
   final List<ChatMessage> _chatMessages = [];
 
   StreamSubscription? _transcriptSub;
@@ -88,19 +87,24 @@ class _HomeScreenState extends State<HomeScreen>
   bool _isCameraStreaming = false;
   StreamSubscription? _cameraStreamSub;
 
-  bool _isHotwordActive = false;
   String _currentVoiceTranscript = '';
-  String _lastAssistantVoiceResponse = '';
   bool _isTtsSpeaking = false;
+  final TextEditingController _textController = TextEditingController();
 
   StreamSubscription? _partialTranscriptSub;
   StreamSubscription? _ttsSub;
 
   late AnimationController _orbController;
 
+  late final MemoryRecallEngine _memoryRecall;
+  int? _currentSessionId;
+  String _lastLiveUserUtterance = '';
+
   @override
   void initState() {
     super.initState();
+    _memoryRecall = MemoryRecallEngine(widget.database);
+    _ensureSession();
     WidgetsBinding.instance.addObserver(this);
     _cameraStreaming = CameraStreamingService(guard: widget.guard);
     _cameraStreamSub = _cameraStreaming.streamingStateStream.listen((active) {
@@ -138,7 +142,6 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _initClients() async {
-    final geminiKey = await widget.keyVault.getGeminiApiKey();
     final nebiusKey = await widget.keyVault.getNebiusApiKey();
 
     if (nebiusKey != null && nebiusKey.isNotEmpty) {
@@ -218,7 +221,6 @@ class _HomeScreenState extends State<HomeScreen>
       // the notification "Start Listening" button, or the accessibility button.
       final hotwordEnabled = await widget.keyVault.isHotwordEnabled();
       if (hotwordEnabled) {
-        _isHotwordActive = true;
         // Pre-flight: ensure permission is present so the first tap is instant.
         final hasMic = await _androidBridge!.isMicrophonePermissionGranted();
         if (!hasMic) {
@@ -226,6 +228,9 @@ class _HomeScreenState extends State<HomeScreen>
         }
         // Do NOT call startHotwordListening here — mic stays off until user touch.
       }
+
+      // Initialize telephony service
+      await _androidBridge!.initializeTelephony();
       _hotwordSub?.cancel();
       _hotwordSub =
           _androidBridge!.hotwordStream.listen(_handleHotwordDetected);
@@ -274,6 +279,7 @@ class _HomeScreenState extends State<HomeScreen>
       geminiClient: _liveClient,
       androidBridge: _androidBridge,
       pcBridgeClient: _pcBridgeClient,
+      desktopDriver: _desktopDriver,
       activePackageName: _activePackage,
       onImageCaptured: (bytes) {
         _liveClient?.sendImageFrame(bytes);
@@ -287,527 +293,390 @@ class _HomeScreenState extends State<HomeScreen>
     );
     _dispatcher!.setSubAgentManager(subAgentManager);
 
+    _dartanticAgent = DartanticFirebaseAgent(
+      dispatcher: _dispatcher!,
+      database: widget.database,
+      modelName: 'gemini-2.5-flash',
+    );
+    await _dartanticAgent!.initialize();
+
     _workflowScheduler?.dispose();
     _workflowScheduler = WorkflowSchedulerService(
       database: widget.database,
       dispatcher: _dispatcher!,
     );
     _workflowScheduler!.start();
+  }
 
-    final adcService = GcpAdcAuthService(keyVault: widget.keyVault);
-    final hasAdc = await adcService.hasAdcCredentials();
-    final authMode = await widget.keyVault.getAuthMode();
+  /// True briefly after the last Live audio chunk while the speaker is audible.
+  bool get _isAssistantAudioAudible =>
+      _lastAudioChunkAt != null &&
+      DateTime.now().difference(_lastAudioChunkAt!) <
+          const Duration(milliseconds: 900);
 
-    if ((authMode == 'adc' && hasAdc) ||
-        (geminiKey != null && geminiKey.isNotEmpty)) {
-      final geminiModel = await widget.keyVault.getGeminiModel();
-      final geminiEndpoint = await widget.keyVault.getGeminiEndpoint();
-      final projectId = await widget.keyVault.getGcpProjectId();
-      final location = await widget.keyVault.getGcpLocation();
+  Color get _statusColor {
+    if (_isConnected) return Colors.green;
+    if (_isLocalSttActive) return Colors.teal;
+    if (_isTtsSpeaking) return Colors.amberAccent;
+    return Colors.grey;
+  }
 
-      _setupGeminiClient(
-        apiKey: authMode == 'api_key' ? geminiKey : null,
-        accessTokenProvider:
-            authMode == 'adc' ? () => adcService.getAccessToken() : null,
-        projectId: projectId,
-        location: location,
-        model: geminiModel,
-        endpoint: geminiEndpoint,
+  String get _statusLabel {
+    if (_isConnected) return 'Live';
+    if (_isLocalSttActive) return 'Listening';
+    if (_isTtsSpeaking) return 'Speaking';
+    return 'Ready';
+  }
+
+  void _handleHotwordDetected(Map<String, String?> data) {
+    final hotword = data['hotword'] ?? 'hey assistant';
+    final command = data['command'] ?? '';
+
+    final heard = hotword == 'stt' ? command : '$hotword $command'.trim();
+    if (_selfEchoGuard.isLikelyEcho(heard) || _isAssistantAudioAudible) {
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        _currentVoiceTranscript = command.isNotEmpty ? command : 'Listening...';
+      });
+    }
+
+    if (command.isNotEmpty) {
+      _processAssistantQuery(command);
+      return;
+    }
+
+    if (Platform.isAndroid && _androidBridge != null) {
+      _androidBridge!.startHotwordListening(hotwords: ['*']);
+      if (mounted) setState(() => _isLocalSttActive = true);
+    }
+  }
+
+  void _toggleConnection() async {
+    if (_isConnecting) return;
+
+    setState(() => _isConnecting = true);
+
+    try {
+      final geminiKey = await widget.keyVault.getGeminiApiKey();
+      final nebiusKey = await widget.keyVault.getNebiusApiKey();
+      final authMode = await widget.keyVault.getAuthMode();
+
+      if (_isConnected || _isLocalSttActive) {
+        await _liveClient?.disconnect();
+        await _audioRecorder.stopStreaming();
+        if (Platform.isAndroid && _androidBridge != null) {
+          await _androidBridge!.stopHotwordListening();
+          await _androidBridge!.updateTrayStatus(isActive: false);
+        }
+        if (mounted) {
+          setState(() {
+            _isConnected = false;
+            _isLocalSttActive = false;
+            _currentVoiceTranscript = '';
+          });
+        }
+        return;
+      }
+
+      final adcService = GcpAdcAuthService(keyVault: widget.keyVault);
+      final hasAdc = authMode == 'adc' && await adcService.hasAdcCredentials();
+      final hasGemini = hasAdc || (geminiKey != null && geminiKey.isNotEmpty);
+
+      if (hasGemini) {
+        final projectId = await widget.keyVault.getGcpProjectId();
+        final location = await widget.keyVault.getGcpLocation();
+        final geminiModel = await widget.keyVault.getGeminiModel();
+        final geminiEndpoint = await widget.keyVault.getGeminiEndpoint();
+
+        await _liveClient?.disconnect();
+        final coreMemories = _memoryRecall.coreMemories(limit: 6);
+        final liveInstruction = _buildLiveSystemInstruction(coreMemories);
+
+        _liveClient = GeminiLiveClient(
+          apiKey: authMode == 'api_key' ? geminiKey : null,
+          accessTokenProvider:
+              authMode == 'adc' ? () => adcService.getAccessToken() : null,
+          projectId: projectId,
+          location: location,
+          host: geminiEndpoint,
+          model: geminiModel,
+          toolDeclarations:
+              ToolDefinitions.getAllDeclarations(isAndroid: Platform.isAndroid),
+          systemInstruction: liveInstruction,
+        );
+        _attachLiveClientStreams(_liveClient!);
+
+        await _liveClient!.connect();
+
+        final micReady = await _audioRecorder.startStreaming(
+          onAudioChunk: (chunk) => _liveClient?.sendAudioChunk(chunk),
+          onBargeIn: () {
+            _audioPlayback?.flush();
+            _audioRecorder.notifyPlaybackEnded();
+          },
+        );
+        if (!micReady && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content:
+                  Text('Microphone permission denied. Use text input instead.'),
+            ),
+          );
+        }
+        _androidBridge?.updateTrayStatus(isActive: true);
+      } else if (Platform.isAndroid && _androidBridge != null) {
+        final ok = await _androidBridge!.startHotwordListening(hotwords: ['*']);
+        if (mounted) {
+          setState(() => _isLocalSttActive = ok);
+          _androidBridge?.updateTrayStatus(isActive: ok);
+        }
+      } else {
+        final hasNebius = nebiusKey != null && nebiusKey.isNotEmpty;
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                hasNebius
+                    ? 'Live voice needs a Gemini key. Type below to chat with Nemotron.'
+                    : 'No API key configured. Add a Gemini or Nebius key in settings.',
+              ),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Connection error: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isConnecting = false);
+    }
+  }
+
+  void _ensureSession() {
+    if (_currentSessionId == null) {
+      _currentSessionId = widget.database.createConversationSession(
+        title: 'Session ${DateTime.now().toIso8601String().substring(0, 16)}',
       );
     }
   }
 
-  void _setupGeminiClient({
-    String? apiKey,
-    Future<String> Function()? accessTokenProvider,
-    String? projectId,
-    String? location,
-    String? model,
-    String? endpoint,
-  }) {
-    _liveClient?.dispose();
-    _liveClient = GeminiLiveClient(
-      apiKey: apiKey,
-      accessTokenProvider: accessTokenProvider,
-      projectId: projectId,
-      location: location ?? 'us-central1',
-      host: endpoint,
-      model: model ?? GeminiLiveClient.defaultModel,
-      toolDeclarations:
-          ToolDefinitions.getAllDeclarations(isAndroid: Platform.isAndroid),
-      systemInstruction: '''
-You are Device Assistant, an intelligent on-device agent running natively on Android.
-You have tool access to device controls, memory, task planning, and sub-agents.
-When the user asks to plan a complex multi-step task, use the plan_task tool.
-When the user gives a preference or location, remember it using remember.
-When asked to observe or inspect what is currently on the screen, use capture_screen or inspect_screen.
-When opening apps, use list_installed_apps to find exact package_name when needed, or pass package_name to open_application.
-For autonomous sub-tasks, you can spawn specialized sub-agents with scoped tools using spawn_agent.
+  String _buildLiveSystemInstruction(List<RecalledMemory> coreMemories) {
+    final memoryBlock = coreMemories.isEmpty
+        ? ''
+        : '''
+--- WHAT YOU KNOW ABOUT THIS USER (AMBIENT MEMORY) ---
+${coreMemories.map((m) => '• ${m.content}').join('\n')}
+--- END AMBIENT MEMORY ---
+''';
+
+    return '''
+You are Device Assistant, an intelligent on-device agent.
+$memoryBlock
+Memory, task plans, and recurring workflows are managed by you through tools:
+- save_memory: Save durable user facts/preferences (auto-deduplicated, semantic indexing).
+- search_memories: Hybrid semantic + keyword search across long-term memories.
+- forget_topic: Erase memories related to a topic ("forget about my workout routine").
+- memory_summary: Return all known user facts ("what do you know about me?").
+- remember / recall / list_memories / forget: Key-value memory primitives.
+- generate_skill: Turn natural language task requests into reusable workflow skills.
+- learn_skill: Convert recent tool calls into a named workflow.
+- save_workflow_skill: Save Hermes-format procedural skills (markdown, parameters, safety-guarded, version ledger).
+- patch_workflow_skill: Surgical search-and-replace edit of a workflow skill without rewrite.
+- view_workflow_skill: Progressive disclosure L2 - retrieve full markdown instructions and rules.
+- list_workflow_skills: Progressive disclosure L1 - compact skill list to minimize tokens.
+- rollback_workflow_skill: Revert a workflow skill to a previous version from the ledger.
+- plan_task / execute_plan / list_plans: Multi-step task planning.
+- save_workflow / run_workflow / list_workflows / delete_workflow: Procedural routines.
+- schedule_workflow / list_scheduled_workflows / cancel_scheduled_workflow: Recurring runs.
+Use capture_screen or inspect_screen to observe the screen, and device tools to act.
 Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
-''',
-    );
+''';
+  }
 
-    _transcriptSub = _liveClient!.transcriptStream.listen((text) {
-      if (text.isEmpty) return;
-      if (_isAssistantAudioAudible) _selfEchoGuard.noteSpoken(text);
-      if (mounted) {
-        setState(() {
-          if (_chatMessages.isNotEmpty &&
-              !_chatMessages.last.isUser &&
-              !_chatMessages.last.isError &&
-              _chatMessages.last.toolData == null) {
-            _chatMessages.last.text += text;
-          } else {
-            _chatMessages.add(
-              ChatMessage(
-                id: 'assistant_${DateTime.now().millisecondsSinceEpoch}',
-                isUser: false,
-                text: text,
-                timestamp: DateTime.now(),
-              ),
-            );
-          }
-        });
-      }
-    });
+  static const String _liveSystemInstruction = '''
+You are Device Assistant, an intelligent on-device agent.
+Memory, task plans, and recurring workflows are managed by you through tools —
+there is no UI for them, so call the appropriate tool whenever the user asks:
+- remember / recall / list_memories / forget for durable user memory.
+- plan_task / execute_plan / list_plans for multi-step task planning.
+- save_workflow / run_workflow / list_workflows / delete_workflow for routines.
+- schedule_workflow / list_scheduled_workflows / cancel_scheduled_workflow for recurring runs.
+Use capture_screen or inspect_screen to observe the screen, and device tools to act.
+Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
+''';
 
-    _audioOutputSub = _liveClient!.audioOutputStream.listen((chunk) {
-      _lastAudioChunkAt = DateTime.now();
-      _audioRecorder.notifyPlaybackStarted();
-      _audioPlayback?.playChunk(chunk);
-    });
-
-    _interruptionSub = _liveClient!.interruptionStream.listen((_) {
-      _audioPlayback?.flush();
-      _audioRecorder.notifyPlaybackEnded();
-    });
-
-    _toolCallSub = _liveClient!.toolCallStream.listen((event) async {
-      setState(() {
-        _toolHistory.insert(0, {
-          'tool': event.name,
-          'args': event.arguments,
-          'status': 'executing',
-          'time': DateTime.now(),
-        });
-      });
-
-      final result = await _dispatcher!.dispatch(
-        toolName: event.name,
-        args: event.arguments,
-      );
-
-      setState(() {
-        if (_toolHistory.isNotEmpty) {
-          final status =
-              result['status'] == 'blocked' || result.containsKey('blocked')
-                  ? 'blocked'
-                  : result['status'] == 'error' ||
-                          result.containsKey('error') ||
-                          result['success'] == false
-                      ? 'error'
-                      : 'done';
-          _toolHistory[0]['status'] = status;
-          _toolHistory[0]['result'] = result;
-        }
-        final toolStatus =
-            result['status'] == 'blocked' || result.containsKey('blocked')
-                ? 'blocked'
-                : result['status'] == 'error' ||
-                        result.containsKey('error') ||
-                        result['success'] == false
-                    ? 'error'
-                    : 'done';
-        _chatMessages.add(
-          ChatMessage(
-            id: 'tool_${DateTime.now().millisecondsSinceEpoch}',
-            isUser: false,
-            text: 'Executed tool: ${event.name}',
-            timestamp: DateTime.now(),
-            toolData: {
-              'tool': event.name,
-              'args': event.arguments,
-              'status': toolStatus,
-              'result': result,
-            },
-          ),
-        );
-      });
-
-      _liveClient!.sendToolResponse(
-        callId: event.callId,
-        name: event.name,
-        result: result,
-      );
-    });
-
-    _connSub = _liveClient!.connectionStateStream.listen((connected) {
+  void _attachLiveClientStreams(GeminiLiveClient client) {
+    _connSub?.cancel();
+    _connSub = client.connectionStateStream.listen((connected) {
       if (mounted) {
         setState(() {
           _isConnected = connected;
           _isConnecting = false;
-          if (connected) {
-            _isLocalSttActive = false;
-          }
+          if (connected) _isLocalSttActive = false;
         });
-        _androidBridge?.updateTrayStatus(isActive: connected);
       }
+      _androidBridge?.updateTrayStatus(isActive: connected);
       if (!connected && _audioRecorder.isRecording) {
         _audioRecorder.stopStreaming();
       }
       if (!connected) _selfEchoGuard.reset();
     });
+
+    _transcriptSub?.cancel();
+    _transcriptSub = client.transcriptStream.listen((text) {
+      if (text.isEmpty) return;
+      if (_isAssistantAudioAudible) _selfEchoGuard.noteSpoken(text);
+      if (!mounted) return;
+      setState(() {
+        if (_chatMessages.isNotEmpty &&
+            !_chatMessages.last.isUser &&
+            !_chatMessages.last.isError &&
+            _chatMessages.last.toolData == null) {
+          _chatMessages.last.text += text;
+        } else {
+          _chatMessages.add(ChatMessage(
+            id: 'assistant_${DateTime.now().millisecondsSinceEpoch}',
+            isUser: false,
+            text: text,
+            timestamp: DateTime.now(),
+          ));
+        }
+      });
+    });
+
+    _audioOutputSub?.cancel();
+    _audioOutputSub = client.audioOutputStream.listen((chunk) {
+      _lastAudioChunkAt = DateTime.now();
+      _audioRecorder.notifyPlaybackStarted();
+      _audioPlayback?.playChunk(chunk);
+    });
+
+    _interruptionSub?.cancel();
+    _interruptionSub = client.interruptionStream.listen((_) {
+      _audioPlayback?.flush();
+      _audioRecorder.notifyPlaybackEnded();
+    });
+
+    _toolCallSub?.cancel();
+    _toolCallSub = client.toolCallStream.listen((event) async {
+      final dispatcher = _dispatcher;
+      if (dispatcher == null) return;
+      final result = await dispatcher.dispatch(
+        toolName: event.name,
+        args: event.arguments,
+      );
+      client.sendToolResponse(
+        callId: event.callId,
+        name: event.name,
+        result: result,
+      );
+      if (!mounted) return;
+      setState(() {
+        _chatMessages.add(ChatMessage(
+          id: 'tool_${DateTime.now().millisecondsSinceEpoch}',
+          isUser: false,
+          text: 'Executed tool: ${event.name}',
+          timestamp: DateTime.now(),
+          toolData: {
+            'tool': event.name,
+            'args': event.arguments,
+            'status': _toolStatus(result),
+            'result': result,
+          },
+        ));
+      });
+    });
   }
 
-  /// The speaker stays "audible" briefly after the last Live audio chunk.
-  bool get _isAssistantAudioAudible => _lastAudioChunkAt != null &&
-      DateTime.now().difference(_lastAudioChunkAt!) <
-          const Duration(milliseconds: 900);
-
-  void _handleHotwordDetected(Map<String, String?> event) async {
-    final hotword = event['hotword'] ?? 'hey assistant';
-    final command = event['command'];
-
-    final heard = hotword == 'stt'
-        ? (command ?? '')
-        : [hotword, command ?? ''].where((s) => s.isNotEmpty).join(' ');
-    if (_selfEchoGuard.isLikelyEcho(heard)) return;
-
-    if (command == null || command.isEmpty) {
-      if (mounted) {
-        setState(() {
-          _currentVoiceTranscript = 'Listening...';
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: Colors.indigo.shade800,
-            duration: const Duration(seconds: 2),
-            content: Row(
-              children: [
-                const Icon(Icons.bolt, color: Colors.amberAccent),
-                const SizedBox(width: 8),
-                Text('Hotword: "$hotword" detected! Listening for command...'),
-              ],
-            ),
-          ),
-        );
-      }
-      if (Platform.isAndroid && _androidBridge != null) {
-        await _androidBridge!.startHotwordListening(hotwords: ['*']);
-        if (mounted) {
-          setState(() => _isLocalSttActive = true);
-          _androidBridge?.updateTrayStatus(isActive: true);
-        }
-      }
-      return;
+  String _toolStatus(Map<String, dynamic> result) {
+    if (result['status'] == 'blocked' || result.containsKey('blocked')) {
+      return 'blocked';
     }
+    if (result['status'] == 'error' ||
+        result.containsKey('error') ||
+        result['success'] == false) {
+      return 'error';
+    }
+    return 'done';
+  }
 
-    final cleanCommand = command.trim();
-    if (mounted) {
-      setState(() {
-        _currentVoiceTranscript = cleanCommand;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor: Colors.teal.shade800,
-          duration: const Duration(seconds: 3),
-          content: Row(
-            children: [
-              const Icon(Icons.mic, color: Colors.tealAccent),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text('Heard: "$cleanCommand"'),
-              ),
-            ],
-          ),
-        ),
+  Future<void> _processAssistantQuery(String userQuery) async {
+    if (_dispatcher == null) return;
+
+    final clean = userQuery.trim();
+    if (clean.isEmpty) return;
+
+    // Add user message to chat
+    final userMsgId = DateTime.now().millisecondsSinceEpoch.toString();
+    setState(() {
+      _chatMessages.add(ChatMessage(
+        id: userMsgId,
+        isUser: true,
+        text: clean,
+        timestamp: DateTime.now(),
+      ));
+    });
+
+    _ensureSession();
+    if (_currentSessionId != null) {
+      widget.database.addConversationMessage(
+        sessionId: _currentSessionId!,
+        role: 'user',
+        content: clean,
       );
     }
 
-    await _handleUserTextInput(cleanCommand);
-  }
-
-  Future<void> _handleUserTextInput(String input) async {
-    final cleanCommand = input.trim();
-    if (cleanCommand.isEmpty) return;
-
-    if (mounted) {
-      setState(() {
-        _chatMessages.add(
-          ChatMessage(
-            id: 'user_${DateTime.now().millisecondsSinceEpoch}',
-            isUser: true,
-            text: cleanCommand,
-            timestamp: DateTime.now(),
-          ),
-        );
-      });
-    }
-
-    // Process through Gemini 3.8 Flash (Serverless) or fallback to Nemotron
-    await _processCommand(cleanCommand);
-  }
-
-  Future<void> _processCommand(String command) async {
-    final clean = command.trim();
-    if (clean.isEmpty) return;
-
-    final activeProvider = await widget.keyVault.getActiveProvider();
-    final adcService = GcpAdcAuthService(keyVault: widget.keyVault);
-    final hasAdc = await adcService.hasAdcCredentials();
-    final authMode = await widget.keyVault.getAuthMode();
     final geminiKey = await widget.keyVault.getGeminiApiKey();
     final nebiusKey = await widget.keyVault.getNebiusApiKey();
+    final authMode = await widget.keyVault.getAuthMode();
 
-    final canUseGemini = (authMode == 'adc' && hasAdc) ||
-        (geminiKey != null && geminiKey.isNotEmpty);
-    final canUseNebius = nebiusKey != null && nebiusKey.isNotEmpty;
+    // While the Live session is running, keep text turns inside that session so
+    // memory/plan/workflow tool calls flow through the same agent loop.
+    if (_isConnected && _liveClient != null) {
+      _lastLiveUserUtterance = clean;
+      _liveClient!.sendTextMessage(clean);
+      return;
+    }
 
-    // 1. Direct Visual Screen Comprehension powered by NVIDIA Nemotron-3.5-Super-VL
-    // Handles scenarios like "what is on my screen?", "explain my screen", "read my screen"
     final isScreenVision = ToolDispatcher.isScreenVisionRequest(clean);
-    if (isScreenVision) {
-      if (!canUseNebius) {
-        if (mounted) {
-          setState(() {
-            _chatMessages.add(
-              ChatMessage(
-                id: 'err_${DateTime.now().millisecondsSinceEpoch}',
-                isUser: false,
-                text:
-                    'Visual screen comprehension requires Nebius Token Factory (Nemotron-3.5-Super-VL). Please configure your Nebius API key in Settings.',
-                timestamp: DateTime.now(),
-                isError: true,
-              ),
-            );
-          });
-        }
-        _showKeyDialog();
-        return;
-      }
-
-      final pendingMsgId = 'assistant_${DateTime.now().millisecondsSinceEpoch}';
-      if (mounted) {
-        setState(() {
-          _chatMessages.add(
-            ChatMessage(
-              id: pendingMsgId,
-              isUser: false,
-              text: 'Analyzing screen with Nemotron 3.5 Super VL...',
-              timestamp: DateTime.now(),
-            ),
-          );
-        });
-      }
-
-      try {
-        Uint8List? screenBytes;
-        if (Platform.isAndroid && _androidBridge != null) {
-          screenBytes = await _androidBridge!.takeScreenCapture();
-        }
-
-        if (screenBytes == null) {
-          final fallbackResult = await _dispatcher?.dispatch(
-            toolName: 'inspect_screen',
-            args: {'query': clean},
-          );
-          final summary = fallbackResult?['summary']?.toString() ??
-              'Screen capture unavailable or protected by security shield.';
-          if (mounted) {
-            setState(() {
-              _lastAssistantVoiceResponse = summary;
-              final idx = _chatMessages.indexWhere((m) => m.id == pendingMsgId);
-              if (idx != -1) _chatMessages[idx].text = summary;
-            });
-          }
-          _androidBridge?.speakText(summary);
-          return;
-        }
-
-        final superEndpoint = await widget.keyVault.getNebiusSuperVlEndpoint();
-        final superModel = await widget.keyVault.getNebiusSuperVlModel();
-        _nebiusClient ??= NebiusClient(
-          apiKey: nebiusKey,
-          superVlEndpoint: superEndpoint,
-          superVlModel: superModel,
-        );
-
-        final visualResponse = await _nebiusClient!.inspectVisualFrame(
-          imageBytes: screenBytes,
-          prompt: clean,
-        );
-
-        if (mounted) {
-          setState(() {
-            _lastAssistantVoiceResponse = visualResponse;
-            final idx = _chatMessages.indexWhere((m) => m.id == pendingMsgId);
-            if (idx != -1) _chatMessages[idx].text = visualResponse;
-          });
-        }
-        _androidBridge?.speakText(visualResponse);
-        return;
-      } catch (e) {
-        if (mounted) {
-          setState(() {
-            final idx = _chatMessages.indexWhere((m) => m.id == pendingMsgId);
-            if (idx != -1) {
-              _chatMessages[idx] = ChatMessage(
-                id: pendingMsgId,
-                isUser: false,
-                text: 'Visual screen analysis failed: $e',
-                timestamp: DateTime.now(),
-                isError: true,
-              );
-            }
-          });
-        }
-        return;
-      }
-    }
-
-    // 2. Action-oriented Computer Use vs Everything Else
     final isComputerUse = ToolDispatcher.isComputerUseRequest(clean);
+    final useNebius = nebiusKey != null &&
+        nebiusKey.isNotEmpty &&
+        (isScreenVision || geminiKey == null || geminiKey.isEmpty);
 
-    bool useNebius;
-    if (activeProvider == 'role_based') {
-      // Role-Based: Google is used for Computer Use ONLY. Everything else uses Nebius Token Factory.
-      if (isComputerUse) {
-        if (!canUseGemini) {
-          if (mounted) {
-            setState(() {
-              _chatMessages.add(
-                ChatMessage(
-                  id: 'err_${DateTime.now().millisecondsSinceEpoch}',
-                  isUser: false,
-                  text:
-                      'Computer Use requires Google Cloud Application Default Credentials (ADC) or Gemini API key. Please configure in Settings.',
-                  timestamp: DateTime.now(),
-                  isError: true,
-                ),
-              );
-            });
-          }
-          _showKeyDialog();
-          return;
-        }
-        useNebius = false;
-      } else {
-        // Everything else uses Nebius Token Factory
-        if (!canUseNebius) {
-          if (mounted) {
-            setState(() {
-              _chatMessages.add(
-                ChatMessage(
-                  id: 'err_${DateTime.now().millisecondsSinceEpoch}',
-                  isUser: false,
-                  text:
-                      'Please configure your Nebius Token Factory API key in Settings.',
-                  timestamp: DateTime.now(),
-                  isError: true,
-                ),
-              );
-            });
-          }
-          _showKeyDialog();
-          return;
-        }
-        useNebius = true;
-      }
-    } else if (activeProvider == 'nebius') {
-      if (!canUseNebius) {
-        if (mounted) {
-          setState(() {
-            _chatMessages.add(
-              ChatMessage(
-                id: 'err_${DateTime.now().millisecondsSinceEpoch}',
-                isUser: false,
-                text:
-                    'Please configure your Nebius Token Factory API key in Settings.',
-                timestamp: DateTime.now(),
-                isError: true,
-              ),
-            );
-          });
-        }
-        _showKeyDialog();
-        return;
-      }
-      useNebius = true;
-    } else if (activeProvider == 'google') {
-      if (!canUseGemini) {
-        if (mounted) {
-          setState(() {
-            _chatMessages.add(
-              ChatMessage(
-                id: 'err_${DateTime.now().millisecondsSinceEpoch}',
-                isUser: false,
-                text:
-                    'Please configure Google Cloud Application Default Credentials (ADC) or Gemini API key in Settings.',
-                timestamp: DateTime.now(),
-                isError: true,
-              ),
-            );
-          });
-        }
-        _showKeyDialog();
-        return;
-      }
-      useNebius = false;
-    } else {
-      // 'auto' mode: Use Google for Computer Use if available, otherwise Nebius
-      if (isComputerUse && canUseGemini) {
-        useNebius = false;
-      } else if (canUseNebius) {
-        useNebius = true;
-      } else if (canUseGemini) {
-        useNebius = false;
-      } else {
-        if (mounted) {
-          setState(() {
-            _chatMessages.add(
-              ChatMessage(
-                id: 'err_${DateTime.now().millisecondsSinceEpoch}',
-                isUser: false,
-                text:
-                    'Please configure Nebius Token Factory API key or Google Cloud ADC in Settings.',
-                timestamp: DateTime.now(),
-                isError: true,
-              ),
-            );
-          });
-        }
-        _showKeyDialog();
-        return;
-      }
-    }
-
-    final pendingMsgId = 'assistant_${DateTime.now().millisecondsSinceEpoch}';
-    final modelLabel = useNebius
-        ? 'NVIDIA Nemotron (Nebius Token Factory)'
-        : (isComputerUse
-            ? 'Google Gemini 3.8 Flash (Computer Use)'
-            : (authMode == 'adc'
-                ? 'Gemini 3.8 Flash (ADC Serverless)'
-                : 'Gemini 3.8 Flash'));
-
-    if (mounted) {
-      setState(() {
-        _chatMessages.add(
-          ChatMessage(
-            id: pendingMsgId,
-            isUser: false,
-            text: 'Thinking with $modelLabel...',
-            timestamp: DateTime.now(),
-          ),
-        );
-      });
-    }
+    // Add thinking message
+    final modelLabel = useNebius ? 'Nemotron' : 'Gemini 3.8 Flash';
+    final pendingMsgId = 'pending_${DateTime.now().millisecondsSinceEpoch}';
+    setState(() {
+      _chatMessages.add(
+        ChatMessage(
+          id: pendingMsgId,
+          isUser: false,
+          text: 'Thinking with $modelLabel...',
+          timestamp: DateTime.now(),
+        ),
+      );
+    });
 
     try {
+      final relevantMemories = _memoryRecall.hybridRecall(clean);
+      final memoryContext = relevantMemories.isEmpty
+          ? ''
+          : '\n--- RECALLED MEMORIES ABOUT THE USER ---\n' +
+              relevantMemories.map((m) => '• ${m.content}').join('\n') +
+              '\n--- END RECALLED MEMORIES ---\n';
+
       final String systemPrompt;
       if (!useNebius && isComputerUse) {
         systemPrompt = '''
 You are Device Assistant's Computer Use agent powered by Google Gemini 3.8 Flash.
+$memoryContext
 Your role is to execute GUI computer use actions, screen navigation, clicks, typing, gestures, and desktop OS commands.
 Reply ONLY with a single JSON object in this format:
 {"action": "tool_call", "tool": "<tool_name>", "args": {<arguments>}}
@@ -827,6 +696,7 @@ Available Computer Use tools:
       } else {
         systemPrompt = '''
 You are Device Assistant powered by NVIDIA Nemotron on Nebius Token Factory.
+$memoryContext
 You handle all general conversational intelligence, multi-step task planning, sub-agents, memory retention, workflows, and knowledge queries.
 When a user asks to perform an action on their device or inspect device state, reply ONLY with a single JSON object in this format:
 {"action": "tool_call", "tool": "<tool_name>", "args": {<arguments>}}
@@ -835,10 +705,21 @@ Available tools:
 - system_status: {}
 - open_application: {"package_name": "string (e.g. com.chrome.dev)", "app_name": "string"}
 - list_installed_apps: {"filter": "optional string"}
+- save_memory: {"content": "third-person fact about user", "category": "identity|preference|project|general"}
+- search_memories: {"query": "natural language query"}
+- forget_topic: {"topic": "subject to erase"}
+- memory_summary: {}
 - remember: {"key": "string", "value": "string", "category": "preference"|"location"|"general"}
 - recall: {"key": "string"}
 - list_memories: {"category": "optional string"}
 - forget: {"key": "string"}
+- generate_skill: {"description": "natural language task description", "platform": "android"|"desktop"}
+- learn_skill: {"name": "snake_case_skill_name"}
+- save_workflow_skill: {"name": "string", "description": "string", "markdown_content": "string"}
+- patch_workflow_skill: {"name": "string", "search_target": "string", "replacement": "string"}
+- view_workflow_skill: {"name": "string"}
+- list_workflow_skills: {}
+- rollback_workflow_skill: {"name": "string", "version_id": number}
 - plan_task: {"goal": "string"}
 - execute_plan: {"plan_id": "string"}
 - list_plans: {}
@@ -859,11 +740,11 @@ If the user query is a general knowledge question, conversational request, or ex
         final superVlEndpoint =
             await widget.keyVault.getNebiusSuperVlEndpoint();
         final nanoEndpoint = await widget.keyVault.getNebiusNanoEndpoint();
-        final superVlModel = await widget.keyVault.getNebiusSuperVlModel();
+        final superVlModel = await widget.keyVault.getNebiusSuperModel();
         final nanoModel = await widget.keyVault.getNebiusNanoModel();
 
         _nebiusClient ??= NebiusClient(
-          apiKey: nebiusKey!,
+          apiKey: nebiusKey,
           endpoint: baseEndpoint,
           superVlEndpoint: superVlEndpoint,
           nanoEndpoint: nanoEndpoint,
@@ -879,11 +760,18 @@ If the user query is a general knowledge question, conversational request, or ex
           ],
           complexity: complexity,
         );
+      } else if (_dartanticAgent != null && _dartanticAgent!.isReady) {
+        // Use Dartantic + Firebase AI Logic Agent
+        response = await _dartanticAgent!.sendPrompt(
+          prompt: clean,
+          systemPrompt: systemPrompt,
+        );
       } else {
         final geminiModel = await widget.keyVault.getGeminiModel();
         final geminiEndpoint = await widget.keyVault.getGeminiEndpoint();
         final projectId = await widget.keyVault.getGcpProjectId();
         final location = await widget.keyVault.getGcpLocation();
+        final adcService = GcpAdcAuthService(keyVault: widget.keyVault);
 
         _liveClient ??= GeminiLiveClient(
           apiKey: authMode == 'api_key' ? geminiKey : null,
@@ -893,8 +781,6 @@ If the user query is a general knowledge question, conversational request, or ex
           location: location,
           host: geminiEndpoint,
           model: geminiModel,
-          toolDeclarations:
-              ToolDefinitions.getAllDeclarations(isAndroid: Platform.isAndroid),
         );
 
         response = await _liveClient!.generateContent(
@@ -903,494 +789,142 @@ If the user query is a general knowledge question, conversational request, or ex
         );
       }
 
-      final trimmed = response.trim();
-      Map<String, dynamic>? toolCall;
+      // Remove thinking message
+      setState(() {
+        _chatMessages.removeWhere((msg) => msg.id == pendingMsgId);
+      });
 
-      try {
-        if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
-          final parsed = jsonDecode(trimmed) as Map<String, dynamic>;
-          if (parsed['action'] == 'tool_call' && parsed['tool'] != null) {
-            toolCall = parsed;
-          }
-        } else {
-          final s = trimmed.indexOf('{');
-          final e = trimmed.lastIndexOf('}');
-          if (s != -1 && e != -1 && e > s) {
-            final candidate = trimmed.substring(s, e + 1);
-            final parsed = jsonDecode(candidate) as Map<String, dynamic>;
-            if (parsed['action'] == 'tool_call' && parsed['tool'] != null) {
-              toolCall = parsed;
+      // Check if response is a tool call
+      if (response.trim().startsWith('{') && response.trim().endsWith('}')) {
+        try {
+          final parsed = jsonDecode(response) as Map<String, dynamic>;
+          if (parsed['action'] == 'tool_call') {
+            final tool = parsed['tool'] as String?;
+            final args = parsed['args'] as Map<String, dynamic>?;
+            if (tool != null && args != null) {
+              final result =
+                  await _dispatcher!.dispatch(toolName: tool, args: args);
+              setState(() {
+                _chatMessages.add(ChatMessage(
+                  id: DateTime.now().millisecondsSinceEpoch.toString(),
+                  isUser: false,
+                  text: 'Executed $tool: ${result['status'] ?? 'done'}',
+                  timestamp: DateTime.now(),
+                ));
+              });
+              return;
             }
           }
+        } catch (e) {
+          // Not a valid JSON, treat as text response
         }
-      } catch (_) {}
-
-      if (toolCall != null) {
-        final toolName = toolCall['tool'] as String;
-        final toolArgs = (toolCall['args'] as Map<String, dynamic>?) ?? {};
-
-        final result = await _dispatcher?.dispatch(
-              toolName: toolName,
-              args: toolArgs,
-            ) ??
-            {};
-
-        final summary = _formatToolResultSummary(toolName, toolArgs, result);
-
-        if (mounted) {
-          setState(() {
-            _lastAssistantVoiceResponse = summary;
-            final idx = _chatMessages.indexWhere((m) => m.id == pendingMsgId);
-            if (idx != -1) {
-              _chatMessages[idx] = ChatMessage(
-                id: pendingMsgId,
-                isUser: false,
-                text: summary,
-                timestamp: DateTime.now(),
-                toolData: {
-                  'tool': toolName,
-                  'args': toolArgs,
-                  'status': result.containsKey('blocked')
-                      ? 'blocked'
-                      : (result['status'] == 'app_not_found' ||
-                              result['success'] == false ||
-                              result.containsKey('error')
-                          ? 'error'
-                          : 'done'),
-                  'result': result,
-                },
-              );
-            }
-            _toolHistory.insert(0, {
-              'tool': toolName,
-              'args': toolArgs,
-              'status': result.containsKey('blocked')
-                  ? 'blocked'
-                  : (result['status'] == 'app_not_found' ||
-                          result['success'] == false ||
-                          result.containsKey('error')
-                      ? 'error'
-                      : 'done'),
-              'result': result,
-              'time': DateTime.now(),
-            });
-          });
-        }
-        _androidBridge?.speakText(summary);
-        return;
       }
 
-      // Natural language conversational response
-      if (mounted) {
-        setState(() {
-          _lastAssistantVoiceResponse = trimmed;
-          final idx = _chatMessages.indexWhere((m) => m.id == pendingMsgId);
-          if (idx != -1) {
-            _chatMessages[idx].text = trimmed;
-          }
-        });
+      // Add assistant response to chat
+      setState(() {
+        _chatMessages.add(ChatMessage(
+          id: DateTime.now().millisecondsSinceEpoch.toString(),
+          isUser: false,
+          text: response,
+          timestamp: DateTime.now(),
+        ));
+      });
+
+      if (_currentSessionId != null) {
+        widget.database.addConversationMessage(
+          sessionId: _currentSessionId!,
+          role: 'assistant',
+          content: response,
+        );
       }
-      _androidBridge?.speakText(trimmed);
+
+      // Background auto-extraction of long-term user memories from this turn
+      unawaited(_triggerBackgroundMemoryExtraction(clean, response));
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _lastAssistantVoiceResponse = 'Nemotron Error: $e';
-          final idx = _chatMessages.indexWhere((m) => m.id == pendingMsgId);
-          if (idx != -1) {
-            _chatMessages[idx] = ChatMessage(
-              id: pendingMsgId,
-              isUser: false,
-              text: 'Nemotron Error: $e',
-              timestamp: DateTime.now(),
-              isError: true,
-            );
-          }
-        });
-      }
+      setState(() {
+        _chatMessages.removeWhere((msg) => msg.id == pendingMsgId);
+        _chatMessages.add(ChatMessage(
+          id: DateTime.now().millisecondsSinceEpoch.toString(),
+          isUser: false,
+          text: 'Error: $e',
+          timestamp: DateTime.now(),
+        ));
+      });
     }
   }
 
-  String _formatToolResultSummary(
-      String tool, Map<String, dynamic> args, Map<String, dynamic> result) {
-    if (result.containsKey('blocked') || result['status'] == 'blocked') {
-      final reason = result['security_alert'] ??
-          result['reason'] ??
-          'Sensitive application active';
-      return 'Blocked by Security Shield: $reason';
-    }
-    if (result.containsKey('error')) {
-      return 'Tool error ($tool): ${result['error']}';
-    }
-
-    switch (tool) {
-      case 'system_status':
-        final os = result['os'] ?? 'Unknown';
-        final ver = result['os_version'] ?? '';
-        final cores = result['cores'] ?? 1;
-        final dev = result['device'] ?? 'Device';
-        return 'System Status: $os $ver on $dev ($cores CPU cores).';
-
-      case 'open_application':
-        final app = args['app_name'] ?? args['package_name'] ?? 'app';
-        if (result['status'] == 'app_not_found' || result['success'] == false) {
-          return 'Could not open "$app": ${result['error'] ?? 'Application not found on this device.'}';
-        }
-        return 'Opened $app.';
-
-      case 'list_installed_apps':
-        final count = result['count'] ?? 0;
-        final appsList = result['apps'] as List<dynamic>? ?? [];
-        if (appsList.isEmpty) {
-          final filter = args['filter'];
-          return filter != null
-              ? 'No apps found matching "$filter".'
-              : 'No installed launcher apps found.';
-        }
-        final preview = appsList
-            .take(5)
-            .map((a) => a is Map
-                ? '${a['appName']} (${a['packageName']})'
-                : a.toString())
-            .join(', ');
-        return 'Found $count installed apps: $preview${appsList.length > 5 ? '...' : ''}.';
-
-      case 'capture_screen':
-        if (result['status'] == 'unavailable') {
-          return 'Screen capture unavailable: ${result['message'] ?? 'FLAG_SECURE active'}';
-        }
-        final bytes = result['bytes_length'] ?? result['size_bytes'] ?? 0;
-        return 'Captured screen screenshot ($bytes bytes).';
-
-      case 'scroll':
-      case 'scroll_screen':
-        if (result['success'] == false) {
-          return 'Failed to scroll screen: ${result['error'] ?? 'accessibility service unavailable'}';
-        }
-        final fwd = args['forward'] == true;
-        return fwd ? 'Scrolled down.' : 'Scrolled up.';
-
-      case 'perform_navigation':
-      case 'navigate':
-        if (result['success'] == false) {
-          return 'Failed navigation: ${result['error'] ?? 'accessibility service unavailable'}';
-        }
-        final action = args['action'];
-        final actionStr = action == 1 || action == 'back'
-            ? 'back'
-            : action == 2 || action == 'home'
-                ? 'home'
-                : action == 3 || action == 'recents'
-                    ? 'recents'
-                    : 'navigation';
-        return 'Executed $actionStr navigation.';
-
-      case 'remember':
-        final key = args['key'] ?? '';
-        final val = args['value'] ?? '';
-        return 'Remembered "$key": $val';
-
-      case 'recall':
-        if (result['found'] == true) {
-          return 'Recalled "${args['key']}": ${result['value']}';
-        }
-        return 'No saved memory found for "${args['key']}".';
-
-      case 'forget':
-        if (result['status'] == 'forgotten') {
-          return 'Forgot memory "${args['key']}".';
-        }
-        return 'Memory "${args['key']}" was not found.';
-
-      case 'list_memories':
-        final count = result['count'] ?? 0;
-        final memories = result['memories'] as List<dynamic>? ?? [];
-        if (memories.isEmpty) {
-          return 'No memories found in local database.';
-        }
-        final preview = memories
-            .take(3)
-            .map((m) => m is Map ? '${m['key']}: ${m['value']}' : m.toString())
-            .join('; ');
-        return 'Found $count memories ($preview${memories.length > 3 ? '...' : ''}).';
-
-      case 'plan_task':
-        final goal = result['goal'] ?? args['goal'] ?? '';
-        final steps = (result['steps'] as List<dynamic>?) ?? [];
-        final planId = result['plan_id'] ?? '';
-        return 'Generated plan for "$goal" with ${steps.length} steps (ID: $planId).';
-
-      case 'execute_plan':
-        final status = result['status'] ?? 'completed';
-        final count = result['steps_executed'] ?? 0;
-        return 'Plan execution $status: completed $count steps.';
-
-      case 'save_workflow':
-        final name = result['name'] ?? args['name'] ?? '';
-        final stepsCount = result['steps_count'] ?? 0;
-        return 'Saved workflow "$name" ($stepsCount steps).';
-
-      case 'run_workflow':
-        final name = args['name'] ?? '';
-        final status = result['status'] ?? 'done';
-        return 'Workflow "$name" executed ($status).';
-
-      case 'web_search':
-        final ans = result['answer'] ?? result['result'] ?? '';
-        if (ans.toString().isNotEmpty) {
-          return ans.toString();
-        }
-        return 'Web search completed for "${args['query']}".';
-
-      case 'undo_last':
-        final toolName = result['tool'] ?? '';
-        return 'Undid last action ($toolName).';
-
-      default:
-        return 'Executed tool $tool successfully.';
-    }
-  }
-
-  Future<void> _toggleConnection() async {
-    // If currently listening via local device STT, stop it
-    if (_isLocalSttActive) {
-      if (Platform.isAndroid && _androidBridge != null) {
-        await _androidBridge!.stopHotwordListening();
-      }
-      if (mounted) {
-        setState(() => _isLocalSttActive = false);
-        _androidBridge?.updateTrayStatus(isActive: false);
-      }
-      return;
-    }
-
-    // Start Device STT listening
-    if (Platform.isAndroid && _androidBridge != null) {
-      final hasMic = await _androidBridge!.isMicrophonePermissionGranted();
-      if (!hasMic) {
-        await _androidBridge!.requestMicrophonePermission();
-      }
-
-      final ok = await _androidBridge!.startHotwordListening(hotwords: ['*']);
-      if (mounted) {
-        setState(() => _isLocalSttActive = ok);
-        _androidBridge?.updateTrayStatus(isActive: ok);
-        if (ok) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Device STT active. Speak a command or request...'),
-              backgroundColor: Colors.teal,
-              duration: Duration(seconds: 2),
-            ),
-          );
-        }
-      }
-      return;
-    }
-
-    // Non-Android desktop
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-              'Continuous Device STT is currently supported on Android. On desktop, please use the Chat tab.'),
-          backgroundColor: Colors.indigo,
-        ),
+  Future<void> _triggerBackgroundMemoryExtraction(
+      String userMessage, String assistantReply) async {
+    try {
+      final extractor = MemoryExtractor(
+        geminiClient: _liveClient,
+        nebiusClient: _nebiusClient,
       );
+
+      final extracted = await extractor.extractMemories(
+        userMessage: userMessage,
+        assistantReply: assistantReply,
+      );
+
+      for (final memory in extracted) {
+        final embedding = MemoryVectorEngine.serializeEmbedding(
+          MemoryVectorEngine.generateEmbedding(memory),
+        );
+        widget.database.saveMemory(
+          content: memory,
+          category: 'general',
+          source: 'auto',
+          importance: 0.6,
+          embedding: embedding,
+        );
+      }
+    } catch (_) {
+      // Background extraction errors should not crash the foreground turn
     }
   }
 
-  void _showKeyDialog() {
-    final geminiCtrl = TextEditingController();
-    final nebiusCtrl = TextEditingController();
-
-    widget.keyVault
-        .getGeminiApiKey()
-        .then((val) => geminiCtrl.text = val ?? '');
-    widget.keyVault
-        .getNebiusApiKey()
-        .then((val) => nebiusCtrl.text = val ?? '');
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Configure API Keys (BYOK)'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nebiusCtrl,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: 'Nebius Token Factory Key',
-                  hintText:
-                      'Used for Nemotron-3.5-Super-VL & Nano 30B Reasoning',
-                  prefixIcon: Icon(Icons.psychology),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: geminiCtrl,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: 'Google Gemini API Key (Optional)',
-                  hintText:
-                      'Used for Gemini Live Voice & Google Cloud inference',
-                  prefixIcon: Icon(Icons.mic),
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              if (geminiCtrl.text.isNotEmpty) {
-                await widget.keyVault.setGeminiApiKey(geminiCtrl.text);
-              }
-              if (nebiusCtrl.text.isNotEmpty) {
-                await widget.keyVault.setNebiusApiKey(nebiusCtrl.text);
-              }
-              if (ctx.mounted) {
-                Navigator.of(ctx).pop();
-              }
-              if (mounted) {
-                _initClients();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                      content:
-                          Text('Keys securely saved to hardware keystore.')),
-                );
-              }
-            },
-            child: const Text('Save Keys'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _manualCaptureScreen() async {
-    final decision = widget.guard.evaluate(packageName: _activePackage);
-    if (decision.isBlocked) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: Colors.red.shade900,
-            content: Text(
-                'Sensitive app active (${_activePackage ?? "Protected"}). Screen capture shielded.'),
-          ),
-        );
-      }
-      return;
-    }
-
-    if (Platform.isAndroid && _androidBridge != null) {
-      final bytes = await _androidBridge!.takeScreenCapture();
-      if (bytes != null) {
-        _liveClient?.sendImageFrame(bytes);
-        if (mounted) {
-          setState(() {
-            _transcripts.add(
-                '[Visual screen frame captured and streamed to Gemini Live]');
-          });
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              backgroundColor: Colors.indigo,
-              content: Text('Screen frame streamed to Assistant vision model.'),
-              duration: Duration(seconds: 2),
-            ),
-          );
-        }
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              backgroundColor: Colors.amber,
-              content: Text(
-                  'Screen capture unavailable or blocked by Android FLAG_SECURE.'),
-            ),
-          );
-        }
-      }
-    } else {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content:
-                Text('Screen capture frame available on Android (API 30+).'),
-          ),
-        );
-      }
-    }
+  void _handleUserTextInput(String text) {
+    _processAssistantQuery(text);
   }
 
   void _startPcApprovalMonitoring() {
     _approvalPollTimer?.cancel();
-    _pcEventsSub?.cancel();
-
-    if (_pcBridgeClient == null) return;
-
-    // 1. Initial check & periodic polling fallback
-    _checkPendingPcApprovals();
-    _approvalPollTimer = Timer.periodic(const Duration(seconds: 4), (_) {
-      _checkPendingPcApprovals();
+    _approvalPollTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      _pollPcApprovals();
     });
-
-    // 2. Real-time SSE stream for instant 0ms notification
-    try {
-      _pcEventsSub = _pcBridgeClient!.listenToEvents().listen((event) {
-        final type = event['type'];
-        if (type == 'approval_request' || type == 'approval_resolved') {
-          _checkPendingPcApprovals();
-        }
-      });
-    } catch (_) {}
   }
 
-  Future<void> _checkPendingPcApprovals() async {
+  Future<void> _pollPcApprovals() async {
     if (_pcBridgeClient == null) return;
     try {
-      final list = await _pcBridgeClient!.fetchPendingApprovals();
-      if (mounted) {
-        setState(() {
-          _pendingPcApprovals = list;
-        });
+      final approvals = await _pcBridgeClient!.getPendingApprovals();
+      if (approvals.isNotEmpty) {
+        setState(() => _pendingPcApprovals = approvals);
       }
-    } catch (_) {}
-  }
-
-  Future<void> _resolvePcApproval(String id, bool approved) async {
-    if (_pcBridgeClient == null) return;
-    final ok = await _pcBridgeClient!.resolveApproval(
-      approvalId: id,
-      approved: approved,
-      note: 'via mobile 1-tap confirmation',
-    );
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          backgroundColor:
-              approved ? Colors.green.shade800 : Colors.red.shade800,
-          content: Text(
-            approved
-                ? (ok
-                    ? 'Approved PC dangerous action'
-                    : 'Failed to approve action')
-                : (ok ? 'Denied PC dangerous action' : 'Failed to deny action'),
-          ),
-          duration: const Duration(seconds: 2),
-        ),
-      );
-      _checkPendingPcApprovals();
+    } catch (e) {
+      // Ignore polling errors
     }
   }
 
-  Future<void> _toggleCameraStreaming() async {
+  Future<void> _resolvePcApproval(String id, bool approved) async {
+    try {
+      await _pcBridgeClient?.resolveApproval(
+        approvalId: id,
+        approved: approved,
+      );
+      setState(() {
+        _pendingPcApprovals.removeWhere((a) => a['id'] == id);
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to resolve approval: $e')),
+        );
+      }
+    }
+  }
+
+  void _toggleCameraStreaming() async {
     if (_isCameraStreaming) {
       await _cameraStreaming.stopStreaming();
       if (mounted) {
@@ -1450,820 +984,676 @@ If the user query is a general knowledge question, conversational request, or ex
     _audioPlayback?.dispose();
     _liveClient?.dispose();
     _desktopDriver?.dispose();
+    _textController.dispose();
     super.dispose();
+  }
+
+  void _openShield() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => Scaffold(
+          backgroundColor: const Color(0xFF12141A),
+          appBar: AppBar(
+            backgroundColor: const Color(0xFF181B22),
+            elevation: 0,
+            title: const Text('Privacy Shield'),
+          ),
+          body: SecurityShieldTab(
+            database: widget.database,
+            guard: widget.guard,
+            androidBridge: _androidBridge,
+          ),
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    Widget bodyContent;
-    switch (_activeTabIndex) {
-      case 1:
-        bodyContent = ChatTab(
-          messages: _chatMessages,
-          onSendMessage: _handleUserTextInput,
-          isLiveConnected: _isConnected || _isLocalSttActive,
-          onToggleLive: _toggleConnection,
-          onClearChat: () => setState(() => _chatMessages.clear()),
-          onDispatchTool: (tool, args) async {
-            await _dispatcher?.dispatch(toolName: tool, args: args);
-          },
-        );
-        break;
-      case 2:
-        bodyContent =
-            MemoriesTab(database: widget.database, keyVault: widget.keyVault);
-        break;
-      case 3:
-        bodyContent = _dispatcher != null
-            ? PlansWorkflowsTab(
-                database: widget.database, dispatcher: _dispatcher!)
-            : const Center(child: CircularProgressIndicator());
-        break;
-      case 4:
-        bodyContent = SecurityShieldTab(
-          database: widget.database,
-          guard: widget.guard,
-          androidBridge: _androidBridge,
-        );
-        break;
-      default:
-        bodyContent = _buildAssistantVoiceView(theme);
-    }
-
     return PopScope(
-        canPop: !Platform.isAndroid,
-        onPopInvokedWithResult: (didPop, result) {
-          if (didPop) return;
-          if (Platform.isAndroid && _androidBridge != null) {
-            _androidBridge!.minimizeApp();
-          }
-        },
-        child: Scaffold(
-          appBar: AppBar(
-            title: Row(
-              children: [
-                const Icon(Icons.hub_outlined, color: Colors.indigoAccent),
-                const SizedBox(width: 8),
-                const Text('Device Assistant',
-                    style: TextStyle(fontWeight: FontWeight.bold)),
-                const Spacer(),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: _isConnected
-                        ? Colors.green.withValues(alpha: 0.15)
-                        : _isLocalSttActive
-                            ? Colors.teal.withValues(alpha: 0.15)
-                            : Colors.grey.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                        color: _isConnected
-                            ? Colors.green
-                            : _isLocalSttActive
-                                ? Colors.teal
-                                : Colors.grey),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      CircleAvatar(
-                        radius: 4,
-                        backgroundColor: _isConnected
-                            ? Colors.green
-                            : _isLocalSttActive
-                                ? Colors.teal
-                                : Colors.grey,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        _isConnected
-                            ? 'Gemini Live Active'
-                            : _isLocalSttActive
-                                ? 'Local STT (Nemotron)'
-                                : 'Disconnected',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: _isConnected
-                              ? Colors.green
-                              : _isLocalSttActive
-                                  ? Colors.teal
-                                  : Colors.grey,
-                        ),
-                      ),
-                    ],
-                  ),
+      canPop: !Platform.isAndroid,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        if (Platform.isAndroid && _androidBridge != null) {
+          _androidBridge!.minimizeApp();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFF12141A),
+        appBar: AppBar(
+          backgroundColor: const Color(0xFF181B22),
+          elevation: 0,
+          title: Row(
+            children: [
+              const Icon(Icons.hub_outlined, color: Colors.indigoAccent),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  'Device Assistant',
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontWeight: FontWeight.bold),
                 ),
-              ],
-            ),
-            actions: [
-              IconButton(
-                icon: const Icon(Icons.settings_outlined),
-                tooltip: 'Settings & Keys',
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => SettingsScreen(
-                        keyVault: widget.keyVault,
-                        database: widget.database,
-                      ),
+              ),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: _statusColor.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: _statusColor),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircleAvatar(radius: 4, backgroundColor: _statusColor),
+                    const SizedBox(width: 6),
+                    Text(
+                      _statusLabel,
+                      style: TextStyle(fontSize: 12, color: _statusColor),
                     ),
-                  ).then((_) => _initClients());
-                },
+                  ],
+                ),
               ),
             ],
           ),
-          body: bodyContent,
-          bottomNavigationBar: NavigationBar(
-            selectedIndex: _activeTabIndex,
-            onDestinationSelected: (idx) =>
-                setState(() => _activeTabIndex = idx),
-            destinations: const [
-              NavigationDestination(
-                icon: Icon(Icons.mic_outlined),
-                selectedIcon: Icon(Icons.mic),
-                label: 'Voice',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.chat_bubble_outline),
-                selectedIcon: Icon(Icons.chat_bubble),
-                label: 'Chat',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.psychology_outlined),
-                selectedIcon: Icon(Icons.psychology),
-                label: 'Memory',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.alt_route),
-                selectedIcon: Icon(Icons.alt_route),
-                label: 'Plans & Workflows',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.shield_outlined),
-                selectedIcon: Icon(Icons.shield),
-                label: 'Shield',
-              ),
-            ],
-          ),
-        ));
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.shield_outlined),
+              tooltip: 'Privacy Shield',
+              onPressed: _openShield,
+            ),
+            IconButton(
+              icon: const Icon(Icons.settings_outlined),
+              tooltip: 'Settings & Keys',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => SettingsScreen(
+                      keyVault: widget.keyVault,
+                      database: widget.database,
+                    ),
+                  ),
+                ).then((_) => _initClients());
+              },
+            ),
+          ],
+        ),
+        body: _buildGeminiLiveView(theme),
+      ),
+    );
   }
 
-  Widget _buildAssistantVoiceView(ThemeData theme) {
+  Widget _buildGeminiLiveView(ThemeData theme) {
     return Column(
       children: [
-        // Android Battery Optimization Exemption Banner
+        // Status Banners
         if (Platform.isAndroid && !_isBatteryOptimizationIgnored)
-          Container(
-            color: Colors.orange.shade900.withValues(alpha: 0.3),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Row(
-              children: [
-                const Icon(Icons.battery_alert,
-                    color: Colors.amberAccent, size: 20),
-                const SizedBox(width: 8),
-                const Expanded(
-                  child: Text(
-                    'Battery optimization active. Disable to allow always-on background voice and automations.',
-                    style: TextStyle(fontSize: 12, color: Colors.white),
-                  ),
-                ),
-                TextButton(
-                  onPressed: () async {
-                    await _androidBridge?.requestIgnoreBatteryOptimization();
-                    final ignored =
-                        await _androidBridge?.isBatteryOptimizationIgnored() ??
-                            false;
-                    setState(() => _isBatteryOptimizationIgnored = ignored);
-                  },
-                  child: const Text('Disable',
-                      style: TextStyle(color: Colors.amberAccent)),
-                ),
-              ],
-            ),
+          _buildStatusBanner(
+            Colors.orange.shade900,
+            Icons.battery_alert,
+            Colors.amberAccent,
+            'Battery optimization active. Disable to allow always-on background voice.',
+            'Disable',
+            () async {
+              await _androidBridge?.requestIgnoreBatteryOptimization();
+              final ignored =
+                  await _androidBridge?.isBatteryOptimizationIgnored() ?? false;
+              setState(() => _isBatteryOptimizationIgnored = ignored);
+            },
           ),
-
-        // Android Accessibility Required Banner
         if (Platform.isAndroid && !_isAccessibilityEnabled)
-          Container(
-            color: Colors.red.shade900.withValues(alpha: 0.3),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Row(
-              children: [
-                const Icon(Icons.warning_amber_rounded,
-                    color: Colors.redAccent, size: 20),
-                const SizedBox(width: 8),
-                const Expanded(
-                  child: Text(
-                    'Accessibility Service disabled. Enable to allow mobile app automation.',
-                    style: TextStyle(fontSize: 12, color: Colors.white),
-                  ),
-                ),
-                TextButton(
-                  onPressed: () => _androidBridge?.openAccessibilitySettings(),
-                  child: const Text('Enable',
-                      style: TextStyle(color: Colors.redAccent)),
-                ),
-              ],
-            ),
+          _buildStatusBanner(
+            Colors.red.shade900,
+            Icons.warning_amber_rounded,
+            Colors.redAccent,
+            'Accessibility Service disabled. Enable to allow mobile app automation.',
+            'Enable',
+            () => _androidBridge?.openAccessibilitySettings(),
           ),
-
-        // Usage Access (Package Usage Stats) Required Banner
         if (Platform.isAndroid && !_isUsageAccessGranted)
-          Container(
-            color: Colors.blue.shade900.withValues(alpha: 0.3),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Row(
-              children: [
-                const Icon(Icons.apps_outlined,
-                    color: Colors.lightBlueAccent, size: 20),
-                const SizedBox(width: 8),
-                const Expanded(
-                  child: Text(
-                    'Usage Access needed for precise app targeting (Chrome Dev vs Stable, etc.).',
-                    style: TextStyle(fontSize: 12, color: Colors.white),
-                  ),
-                ),
-                TextButton(
-                  onPressed: () async {
-                    await _androidBridge?.requestUsageAccess();
-                    // Re-check after returning from settings
-                    await Future.delayed(const Duration(milliseconds: 500));
-                    final granted =
-                        await _androidBridge?.isUsageAccessGranted() ?? false;
-                    if (mounted) {
-                      setState(() => _isUsageAccessGranted = granted);
-                    }
-                  },
-                  child: const Text('Grant',
-                      style: TextStyle(color: Colors.lightBlueAccent)),
-                ),
-              ],
-            ),
+          _buildStatusBanner(
+            Colors.blue.shade900,
+            Icons.apps_outlined,
+            Colors.lightBlueAccent,
+            'Usage Access needed for precise app targeting.',
+            'Grant',
+            () async {
+              await _androidBridge?.requestUsageAccess();
+              await Future.delayed(const Duration(milliseconds: 500));
+              final granted =
+                  await _androidBridge?.isUsageAccessGranted() ?? false;
+              if (mounted) setState(() => _isUsageAccessGranted = granted);
+            },
           ),
 
-        // Security Shield Status Banner
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          color: Colors.amber.withValues(alpha: 0.08),
-          child: Row(
-            children: [
-              const Icon(Icons.shield_outlined, color: Colors.amber, size: 20),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  _activePackage != null
-                      ? 'Shield Active (Foreground: $_activePackage)'
-                      : 'Sensitive App Shield Active (SIM Toolkit, Banking, 2FA, FinTech Protected)',
-                  style: const TextStyle(
-                      fontSize: 12, fontWeight: FontWeight.w500),
-                ),
-              ),
-              Text(
-                '${SensitiveAppGuard.defaultBlacklist.length} Apps Blocked',
-                style: const TextStyle(fontSize: 11, color: Colors.grey),
-              ),
-            ],
-          ),
-        ),
+        if (_pendingPcApprovals.isNotEmpty) _buildPcApprovalCard(),
 
-        // PC Dangerous Action Remote Approvals
-        if (_pendingPcApprovals.isNotEmpty) _buildPcApprovalsSection(),
-
-        // Central Live Voice Orb Area
+        // Main Content Area
         Expanded(
-          flex: 4,
-          child: Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                AnimatedBuilder(
-                  animation: _orbController,
-                  builder: (context, child) {
-                    final isActive = _isConnected || _isLocalSttActive;
-                    final scale =
-                        isActive ? 1.0 + (_orbController.value * 0.12) : 1.0;
-                    return Transform.scale(
-                      scale: scale,
-                      child: Container(
-                        width: 140,
-                        height: 140,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: RadialGradient(
-                            colors: _isConnected
-                                ? [
-                                    Colors.cyanAccent,
-                                    Colors.indigo,
-                                    Colors.blueAccent
-                                  ]
-                                : _isLocalSttActive
-                                    ? [
-                                        Colors.tealAccent,
-                                        Colors.teal.shade800,
-                                        Colors.indigo.shade900
-                                      ]
-                                    : [
-                                        Colors.grey.shade400,
-                                        Colors.grey.shade700
-                                      ],
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: _isConnected
-                                  ? Colors.cyanAccent.withValues(alpha: 0.4)
-                                  : _isLocalSttActive
-                                      ? Colors.tealAccent.withValues(alpha: 0.4)
-                                      : Colors.black12,
-                              blurRadius: isActive ? 30 : 10,
-                              spreadRadius: isActive ? 8 : 2,
-                            ),
-                          ],
-                        ),
-                        child: IconButton(
-                          iconSize: 48,
-                          icon: _isConnecting
-                              ? const CircularProgressIndicator(
-                                  color: Colors.white)
-                              : Icon(
-                                  isActive ? Icons.mic : Icons.mic_none,
-                                  color: Colors.white,
-                                ),
-                          onPressed: _toggleConnection,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-                const SizedBox(height: 16),
-                // Voice Speech Transcription & TTS Response Card
-                Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 20),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: _isTtsSpeaking
-                        ? Colors.indigo.withValues(alpha: 0.25)
-                        : _isLocalSttActive
-                            ? Colors.teal.withValues(alpha: 0.2)
-                            : Colors.white.withValues(alpha: 0.04),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: _isTtsSpeaking
-                          ? Colors.cyanAccent.withValues(alpha: 0.5)
-                          : _isLocalSttActive
-                              ? Colors.tealAccent.withValues(alpha: 0.5)
-                              : Colors.white12,
-                    ),
-                  ),
-                  child: Column(
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            _isTtsSpeaking
-                                ? Icons.volume_up
-                                : _isLocalSttActive
-                                    ? Icons.mic
-                                    : Icons.mic_none,
-                            size: 18,
-                            color: _isTtsSpeaking
-                                ? Colors.cyanAccent
-                                : _isLocalSttActive
-                                    ? Colors.tealAccent
-                                    : Colors.grey,
-                          ),
-                          const SizedBox(width: 8),
-                          Flexible(
-                            child: Text(
-                              _isTtsSpeaking
-                                  ? 'TTS Playing Voice Response...'
-                                  : _isLocalSttActive
-                                      ? (_currentVoiceTranscript.isNotEmpty
-                                          ? 'Heard: "$_currentVoiceTranscript"'
-                                          : 'Listening... Speak your request')
-                                      : 'Tap Orb to Speak with Nemotron',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                                color: _isTtsSpeaking
-                                    ? Colors.cyanAccent
-                                    : _isLocalSttActive
-                                        ? Colors.white
-                                        : Colors.grey.shade400,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      if (_lastAssistantVoiceResponse.isNotEmpty) ...[
-                        const SizedBox(height: 6),
-                        Text(
-                          _lastAssistantVoiceResponse,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: _isTtsSpeaking
-                                ? Colors.white
-                                : Colors.grey.shade400,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  _isLocalSttActive
-                      ? 'Listening via Device STT (NVIDIA Nemotron)'
-                      : (_isConnected
-                          ? 'Listening & Conversing with Gemini Live'
-                          : 'Tap Orb to Speak with Nemotron'),
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  _isLocalSttActive
-                      ? 'Continuous On-Device STT | Active Tool Calling'
-                      : 'Smart Routing: Nemotron-3.5-Super-VL & Nano-30B | Local DB',
-                  style:
-                      theme.textTheme.bodySmall?.copyWith(color: Colors.grey),
-                ),
-                if (Platform.isAndroid &&
-                    _isHotwordActive &&
-                    !_isConnected &&
-                    !_isLocalSttActive)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: Colors.indigo.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                            color: Colors.cyanAccent.withValues(alpha: 0.3)),
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.touch_app_outlined,
-                              size: 14, color: Colors.cyanAccent),
-                          SizedBox(width: 6),
-                          Text(
-                            'Tap Orb to Start Listening',
-                            style: TextStyle(
-                                fontSize: 11,
-                                color: Colors.cyanAccent,
-                                fontWeight: FontWeight.w500),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                const SizedBox(height: 14),
-                Wrap(
-                  spacing: 8,
-                  alignment: WrapAlignment.center,
-                  children: [
-                    OutlinedButton.icon(
-                      icon: Icon(
-                          _isCameraStreaming
-                              ? Icons.videocam
-                              : Icons.videocam_outlined,
-                          size: 16,
-                          color: _isCameraStreaming ? Colors.tealAccent : null),
-                      label: Text(
-                          _isCameraStreaming
-                              ? 'Stop Camera'
-                              : 'Live Camera Vision',
-                          style: TextStyle(
-                              fontSize: 12,
-                              color: _isCameraStreaming
-                                  ? Colors.tealAccent
-                                  : null)),
-                      style: _isCameraStreaming
-                          ? OutlinedButton.styleFrom(
-                              side: const BorderSide(color: Colors.tealAccent))
-                          : null,
-                      onPressed: _toggleCameraStreaming,
-                    ),
-                    OutlinedButton.icon(
-                      icon: const Icon(Icons.screenshot_monitor_outlined,
-                          size: 16),
-                      label: const Text('Stream Screen Frame',
-                          style: TextStyle(fontSize: 12)),
-                      onPressed: _manualCaptureScreen,
-                    ),
-                    if (_toolHistory.isNotEmpty)
-                      OutlinedButton.icon(
-                        icon: const Icon(Icons.delete_sweep_outlined, size: 16),
-                        label: const Text('Clear Log',
-                            style: TextStyle(fontSize: 12)),
-                        onPressed: () => setState(() => _toolHistory.clear()),
-                      ),
-                  ],
-                ),
-              ],
-            ),
-          ),
+          child: _chatMessages.isEmpty
+              ? _buildEmptyState()
+              : _buildConversationList(),
         ),
 
-        const Divider(height: 1),
-
-        // Device Actions & Automation Feed
-        Expanded(
-          flex: 5,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(Icons.touch_app_outlined,
-                            size: 18, color: Colors.cyanAccent),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Device Actions & Execution Log',
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                    Text(
-                      '${_toolHistory.length} executed',
-                      style: const TextStyle(fontSize: 11, color: Colors.grey),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Expanded(
-                  child: _toolHistory.isEmpty
-                      ? Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.flash_on_outlined,
-                                  size: 44, color: Colors.grey.shade600),
-                              const SizedBox(height: 10),
-                              const Text(
-                                'No device actions recorded yet.',
-                                style: TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                    color: Colors.grey),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'Commands spoken via Device STT or sent to NVIDIA Nemotron automate app navigation, screen inspection, and device controls.',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                    fontSize: 12, color: Colors.grey.shade500),
-                              ),
-                            ],
-                          ),
-                        )
-                      : ListView.builder(
-                          itemCount: _toolHistory.length,
-                          itemBuilder: (ctx, idx) {
-                            final item = _toolHistory[idx];
-                            final isBlocked = item['status'] == 'blocked';
-                            final isExecuting = item['status'] == 'executing';
-                            final isError = item['status'] == 'error';
-                            return Card(
-                              margin: const EdgeInsets.symmetric(vertical: 4),
-                              color: isBlocked
-                                  ? Colors.red.withValues(alpha: 0.12)
-                                  : isError
-                                      ? Colors.orange.withValues(alpha: 0.12)
-                                      : null,
-                              child: ListTile(
-                                dense: true,
-                                leading: Icon(
-                                  isBlocked
-                                      ? Icons.block
-                                      : isError
-                                          ? Icons.error_outline
-                                          : isExecuting
-                                              ? Icons.sync
-                                              : Icons.check_circle_outline,
-                                  color: isBlocked
-                                      ? Colors.redAccent
-                                      : isError
-                                          ? Colors.orangeAccent
-                                          : isExecuting
-                                              ? Colors.cyanAccent
-                                              : Colors.greenAccent,
-                                  size: 20,
-                                ),
-                                title: Text(
-                                  item['tool'] as String,
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.bold),
-                                ),
-                                subtitle: Text(
-                                  () {
-                                    if (isBlocked) {
-                                      return 'Args: ${item['args']}\nBLOCKED by security guard';
-                                    }
-                                    if (isError) {
-                                      final result = item['result'] as Map?;
-                                      final errMsg =
-                                          result?['error']?.toString() ??
-                                              'Tool call failed';
-                                      return 'Args: ${item['args']}\nERROR: $errMsg';
-                                    }
-                                    if (isExecuting) {
-                                      return 'Args: ${item['args']}\nExecuting on device...';
-                                    }
-                                    return 'Args: ${item['args']}\nCompleted successfully';
-                                  }(),
-                                  style: const TextStyle(fontSize: 11),
-                                ),
-                                trailing:
-                                    item['tool'] == 'remember' && !isBlocked
-                                        ? TextButton(
-                                            child: const Text('Undo',
-                                                style: TextStyle(
-                                                    fontSize: 11,
-                                                    color: Colors.amberAccent)),
-                                            onPressed: () {
-                                              _dispatcher?.dispatch(
-                                                  toolName: 'undo_last',
-                                                  args: {});
-                                            },
-                                          )
-                                        : null,
-                              ),
-                            );
-                          },
-                        ),
-                ),
-              ],
-            ),
-          ),
-        ),
+        // Bottom Input Area
+        _buildBottomInputArea(),
       ],
     );
   }
 
-  Widget _buildPcApprovalsSection() {
+  Widget _buildPcApprovalCard() {
+    final request = _pendingPcApprovals.first;
+    final id = request['id']?.toString() ?? '';
+    final tool = request['tool'] ??
+        request['tool_name'] ??
+        request['action'] ??
+        'PC action';
+    final args = request['args'];
+    final extra = _pendingPcApprovals.length - 1;
+
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF2B1515),
-        border: Border.all(color: Colors.redAccent, width: 1.5),
+        color: Colors.amber.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.redAccent.withValues(alpha: 0.2),
-            blurRadius: 8,
-            spreadRadius: 1,
+        border: Border.all(color: Colors.amberAccent.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.devices, color: Colors.amberAccent, size: 22),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  extra > 0
+                      ? 'PC approval required (+$extra more)'
+                      : 'PC approval required',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.amberAccent,
+                  ),
+                ),
+                Text(
+                  args == null ? '$tool' : '$tool: $args',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11, color: Colors.white70),
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: () => _resolvePcApproval(id, false),
+            child: const Text('Deny', style: TextStyle(color: Colors.white54)),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.amber,
+              foregroundColor: Colors.black,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+            ),
+            onPressed: () => _resolvePcApproval(id, true),
+            child: const Text('Approve'),
           ),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    );
+  }
+
+  Widget _buildStatusBanner(Color bgColor, IconData icon, Color iconColor,
+      String message, String buttonText, VoidCallback onButtonPressed) {
+    return Container(
+      color: bgColor.withValues(alpha: 0.3),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
         children: [
-          Row(
-            children: [
-              const Icon(Icons.security, color: Colors.redAccent, size: 20),
-              const SizedBox(width: 8),
-              const Expanded(
-                child: Text(
-                  'PC Action Confirmation Needed',
-                  style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                      fontSize: 14),
+          Icon(icon, color: iconColor, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(fontSize: 12, color: Colors.white),
+            ),
+          ),
+          TextButton(
+            onPressed: onButtonPressed,
+            child: Text(buttonText, style: TextStyle(color: iconColor)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          AnimatedBuilder(
+            animation: _orbController,
+            builder: (context, child) {
+              final isActive = _isConnected || _isLocalSttActive;
+              final scale =
+                  isActive ? 1.0 + (_orbController.value * 0.12) : 1.0;
+              return Transform.scale(
+                scale: scale,
+                child: Container(
+                  width: 160,
+                  height: 160,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: _isConnected
+                          ? [
+                              Colors.cyanAccent,
+                              Colors.indigo,
+                              Colors.blueAccent
+                            ]
+                          : _isLocalSttActive
+                              ? [
+                                  Colors.tealAccent,
+                                  Colors.teal.shade800,
+                                  Colors.indigo.shade900
+                                ]
+                              : [Colors.grey.shade400, Colors.grey.shade700],
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: _isConnected
+                            ? Colors.cyanAccent.withValues(alpha: 0.4)
+                            : _isLocalSttActive
+                                ? Colors.tealAccent.withValues(alpha: 0.4)
+                                : Colors.black12,
+                        blurRadius: _isConnected || _isLocalSttActive ? 30 : 10,
+                        spreadRadius: _isConnected || _isLocalSttActive ? 8 : 2,
+                      ),
+                    ],
+                  ),
+                  child: IconButton(
+                    iconSize: 64,
+                    icon: _isConnecting
+                        ? const CircularProgressIndicator(
+                            color: Colors.white, strokeWidth: 3)
+                        : Icon(
+                            _isConnected || _isLocalSttActive
+                                ? Icons.mic
+                                : Icons.mic_none,
+                            color: Colors.white,
+                          ),
+                    onPressed: _toggleConnection,
+                  ),
                 ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.redAccent.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  '${_pendingPcApprovals.length} pending',
-                  style: const TextStyle(
-                      color: Colors.redAccent,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold),
-                ),
-              ),
-            ],
+              );
+            },
+          ),
+          const SizedBox(height: 24),
+          Text(
+            _isConnected
+                ? 'Listening...'
+                : _isLocalSttActive
+                    ? 'Listening on device'
+                    : _isTtsSpeaking
+                        ? 'Speaking...'
+                        : 'Tap the orb to talk',
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w500,
+              color: Colors.white70,
+            ),
           ),
           const SizedBox(height: 8),
-          ..._pendingPcApprovals.map((appr) {
-            final id = appr['id'] as String? ?? '';
-            final tool = appr['tool'] as String? ?? 'dangerous_tool';
-            final args = appr['args'] is Map ? appr['args'] as Map : {};
-            return Container(
-              margin: const EdgeInsets.only(top: 6),
-              padding: const EdgeInsets.all(8),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 40),
+            child: Text(
+              'Ask me to remember something, plan a task, or run a routine.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: Colors.white38),
+            ),
+          ),
+          if (_currentVoiceTranscript.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 32),
+              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: const Color(0xFF1E1E1E),
-                borderRadius: BorderRadius.circular(8),
+                color: Colors.white.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(12),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: Colors.amberAccent.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          tool,
-                          style: const TextStyle(
-                              color: Colors.amberAccent,
-                              fontFamily: 'monospace',
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                      const Spacer(),
-                      Text(
-                        id,
-                        style: const TextStyle(
-                            color: Colors.grey,
-                            fontSize: 10,
-                            fontFamily: 'monospace'),
-                      ),
-                    ],
-                  ),
-                  if (args.isNotEmpty) ...[
-                    const SizedBox(height: 6),
-                    Text(
-                      args.entries
-                          .map((e) => '${e.key}: ${e.value}')
-                          .join(', '),
-                      style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 11,
-                          fontFamily: 'monospace'),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                  const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.redAccent,
-                          side: const BorderSide(color: Colors.redAccent),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 4),
-                          minimumSize: const Size(60, 32),
-                        ),
-                        onPressed: () => _resolvePcApproval(id, false),
-                        icon: const Icon(Icons.close, size: 14),
-                        label:
-                            const Text('Deny', style: TextStyle(fontSize: 12)),
-                      ),
-                      const SizedBox(width: 8),
-                      ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green.shade700,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 4),
-                          minimumSize: const Size(80, 32),
-                        ),
-                        onPressed: () => _resolvePcApproval(id, true),
-                        icon: const Icon(Icons.check, size: 14),
-                        label: const Text('Approve',
-                            style: TextStyle(
-                                fontSize: 12, fontWeight: FontWeight.bold)),
-                      ),
-                    ],
-                  ),
-                ],
+              child: Text(
+                _currentVoiceTranscript,
+                style: const TextStyle(color: Colors.white70, fontSize: 16),
+                textAlign: TextAlign.center,
               ),
-            );
-          }),
+            ),
+          ],
         ],
+      ),
+    );
+  }
+
+  Widget _buildConversationList() {
+    return ListView.builder(
+      reverse: true,
+      padding: const EdgeInsets.all(16),
+      itemCount: _chatMessages.length,
+      itemBuilder: (context, index) {
+        final message = _chatMessages[_chatMessages.length - 1 - index];
+        return _buildMessageBubble(message);
+      },
+    );
+  }
+
+  Widget _buildToolBubble(ChatMessage message) {
+    final data = message.toolData!;
+    final tool = data['tool']?.toString() ?? 'tool';
+    final status = data['status']?.toString() ?? 'done';
+    final result = (data['result'] as Map?)?.cast<String, dynamic>() ?? {};
+    final isBlocked = status == 'blocked';
+    final isError = status == 'error';
+
+    final color = isBlocked
+        ? Colors.orangeAccent
+        : isError
+            ? Colors.redAccent
+            : Colors.cyanAccent;
+    final icon = isBlocked
+        ? Icons.block
+        : isError
+            ? Icons.error_outline
+            : Icons.check_circle_outline;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.3)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, size: 16, color: color),
+                const SizedBox(width: 8),
+                Text(
+                  tool,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: color,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              _summarizeToolResult(result),
+              style: const TextStyle(fontSize: 12, color: Colors.white70),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _summarizeToolResult(Map<String, dynamic> result) {
+    if (result.isEmpty) return 'Completed.';
+    if (result.containsKey('error')) return '${result['error']}';
+    if (result['status'] == 'blocked' || result.containsKey('blocked')) {
+      return '${result['security_alert'] ?? result['reason'] ?? 'Blocked by Privacy Shield.'}';
+    }
+
+    final memories = result['memories'];
+    if (memories is List) {
+      if (memories.isEmpty) return 'No memories stored.';
+      return memories.take(6).map((m) {
+        final map = m is Map ? m : {'key': 'item', 'value': m.toString()};
+        return '${map['key']}: ${map['value']}';
+      }).join('\n');
+    }
+
+    final plans = result['plans'];
+    if (plans is List) {
+      if (plans.isEmpty) return 'No task plans yet.';
+      return plans.take(6).map((p) {
+        final map = p is Map ? p : {'goal': p.toString()};
+        return '${map['goal'] ?? map['id'] ?? 'Plan'} (${map['status'] ?? 'planned'})';
+      }).join('\n');
+    }
+
+    final workflows = result['workflows'];
+    if (workflows is List) {
+      if (workflows.isEmpty) return 'No saved workflows.';
+      return workflows.take(6).map((w) {
+        final map = w is Map ? w : {'name': w.toString()};
+        return '${map['name'] ?? map['id'] ?? 'workflow'}';
+      }).join('\n');
+    }
+
+    final scheduled = result['scheduled_workflows'];
+    if (scheduled is List) {
+      if (scheduled.isEmpty) return 'No scheduled routines.';
+      return scheduled.take(6).map((s) {
+        final map = s is Map ? s : {'name': s.toString()};
+        return '${map['workflow_name'] ?? map['name'] ?? map['id'] ?? 'routine'}';
+      }).join('\n');
+    }
+
+    final steps = result['steps'];
+    if (steps is List) {
+      return 'Plan created with ${steps.length} steps.';
+    }
+
+    final answer = result['answer'];
+    if (answer != null) return '$answer';
+
+    if (result['status'] != null && result.length <= 3) {
+      return 'Status: ${result['status']}';
+    }
+
+    final text = result.toString();
+    return text.length > 220 ? '${text.substring(0, 220)}…' : text;
+  }
+
+  Widget _buildMessageBubble(ChatMessage message) {
+    if (message.toolData != null) return _buildToolBubble(message);
+
+    final isUser = message.isUser;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        mainAxisAlignment:
+            isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+        children: [
+          if (!isUser) ...[
+            Container(
+              width: 36,
+              height: 36,
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: LinearGradient(
+                  colors: [Colors.cyanAccent, Colors.indigo],
+                ),
+              ),
+              child: const Icon(Icons.smart_toy, color: Colors.white, size: 20),
+            ),
+            const SizedBox(width: 8),
+          ],
+          Flexible(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: isUser
+                    ? Colors.indigo.withValues(alpha: 0.3)
+                    : Colors.white.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: isUser
+                      ? Colors.indigo.withValues(alpha: 0.5)
+                      : Colors.white.withValues(alpha: 0.1),
+                ),
+              ),
+              child: Text(
+                message.text,
+                style: TextStyle(
+                  color: isUser ? Colors.white : Colors.white70,
+                  fontSize: 15,
+                ),
+              ),
+            ),
+          ),
+          if (isUser) ...[
+            const SizedBox(width: 8),
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.indigo.withValues(alpha: 0.3),
+              ),
+              child: const Icon(Icons.person, color: Colors.white70, size: 20),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  void _sendTypedMessage() {
+    final text = _textController.text.trim();
+    if (text.isEmpty) return;
+    _handleUserTextInput(text);
+    _textController.clear();
+  }
+
+  Widget _buildBottomInputArea() {
+    final isActive = _isConnected || _isLocalSttActive;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF181B22),
+        border: Border(
+          top: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+        ),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Row(
+          children: [
+            _buildInputAction(
+              icon:
+                  _isCameraStreaming ? Icons.videocam : Icons.videocam_outlined,
+              tooltip: _isCameraStreaming
+                  ? 'Stop camera vision'
+                  : 'Start camera vision',
+              active: _isCameraStreaming,
+              onPressed: _toggleCameraStreaming,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: TextField(
+                controller: _textController,
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+                minLines: 1,
+                maxLines: 4,
+                textInputAction: TextInputAction.send,
+                onSubmitted: (_) => _sendTypedMessage(),
+                decoration: InputDecoration(
+                  hintText: 'Message Device Assistant',
+                  hintStyle: const TextStyle(color: Colors.white38),
+                  filled: true,
+                  fillColor: Colors.white.withValues(alpha: 0.06),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(24),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            _buildInputAction(
+              icon: Icons.arrow_upward_rounded,
+              tooltip: 'Send',
+              primary: true,
+              onPressed: _sendTypedMessage,
+            ),
+            const SizedBox(width: 8),
+            _buildInputAction(
+              tooltip: isActive ? 'Stop listening' : 'Start listening',
+              active: isActive,
+              primary: !isActive,
+              onPressed: _toggleConnection,
+              child: _isConnecting
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : Icon(
+                      isActive ? Icons.mic : Icons.mic_none,
+                      color: isActive
+                          ? (_isConnected
+                              ? Colors.cyanAccent
+                              : Colors.tealAccent)
+                          : Colors.white,
+                      size: 24,
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInputAction({
+    IconData? icon,
+    required String tooltip,
+    required VoidCallback onPressed,
+    bool active = false,
+    bool primary = false,
+    Widget? child,
+  }) {
+    final background = primary
+        ? Colors.indigo
+        : active
+            ? Colors.cyanAccent.withValues(alpha: 0.18)
+            : Colors.white.withValues(alpha: 0.06);
+    final foreground =
+        active ? Colors.cyanAccent : (primary ? Colors.white : Colors.white54);
+
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: background,
+        shape: const CircleBorder(),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onPressed,
+          child: SizedBox(
+            width: 46,
+            height: 46,
+            child: Center(
+              child: child ?? Icon(icon, size: 22, color: foreground),
+            ),
+          ),
+        ),
       ),
     );
   }

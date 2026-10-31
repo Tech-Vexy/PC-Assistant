@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/services.dart';
+import 'telephony_service.dart';
 
 /// Dart interface to the native Android Accessibility & Foreground services
 class AndroidBridge {
@@ -19,12 +20,16 @@ class AndroidBridge {
   static final _audioRmsController = StreamController<double>.broadcast();
 
   static bool _handlerInitialized = false;
+  TelephonyService? _telephonyService;
 
   final bool _isAndroid;
 
   AndroidBridge({bool? isAndroid})
       : _isAndroid = isAndroid ?? Platform.isAndroid {
     _initHandler();
+    if (_isAndroid) {
+      _telephonyService = TelephonyService.instance;
+    }
   }
 
   void _initHandler() {
@@ -453,5 +458,60 @@ class AndroidBridge {
     try {
       await _channel.invokeMethod('stopSpeaking');
     } catch (_) {}
+  }
+
+  // --- TELEPHONY METHODS ---
+
+  /// Initialize telephony service (SMS and calls)
+  Future<bool> initializeTelephony() async {
+    if (!_isAndroid || _telephonyService == null) return false;
+    return await _telephonyService!.initialize();
+  }
+
+  /// Send SMS message
+  Future<Map<String, dynamic>> sendSms({
+    required String phoneNumber,
+    required String message,
+  }) async {
+    if (!_isAndroid || _telephonyService == null) {
+      return {'status': 'error', 'error': 'Telephony not available on this platform'};
+    }
+    return await _telephonyService!.sendSms(
+      phoneNumber: phoneNumber,
+      message: message,
+    );
+  }
+
+  /// Query SMS messages
+  Future<Map<String, dynamic>> getSmsMessages({
+    String kind = 'inbox',
+    int limit = 50,
+  }) async {
+    if (!_isAndroid || _telephonyService == null) {
+      return {'status': 'error', 'error': 'Telephony not available on this platform'};
+    }
+    return await _telephonyService!.getSmsMessages(kind: kind, limit: limit);
+  }
+
+  /// Make a phone call
+  Future<Map<String, dynamic>> makeCall(String phoneNumber) async {
+    if (!_isAndroid || _telephonyService == null) {
+      return {'status': 'error', 'error': 'Telephony not available on this platform'};
+    }
+    return await _telephonyService!.makeCall(phoneNumber);
+  }
+
+  /// Get network information
+  Future<Map<String, dynamic>> getNetworkInfo() async {
+    if (!_isAndroid || _telephonyService == null) {
+      return {'status': 'error', 'error': 'Telephony not available on this platform'};
+    }
+    return await _telephonyService!.getNetworkInfo();
+  }
+
+  /// Check if telephony is available
+  Future<bool> isTelephonyAvailable() async {
+    if (!_isAndroid || _telephonyService == null) return false;
+    return await _telephonyService!.isTelephonyAvailable();
   }
 }

@@ -146,9 +146,7 @@ device_assistant/
 |   |   |   |-- tool_definition.dart           # Declarations for Gemini Live, PC Bridge, & Sub-Agent tools
 |   |   |   `-- tool_dispatcher.dart           # Execution router, PC delegation, audit logging, & undo journal
 |   |   `-- ui/screens/
-|   |       |-- home_screen.dart               # Voice orb, live transcript, visual stream button, tabs
-|   |       |-- memories_tab.dart              # Memory search, filter, add, edit, delete, & PC sync UI
-|   |       |-- plans_workflows_tab.dart       # 3-tab manager: Plans, Workflows, Sub-Agents, & PC sync
+|   |       |-- home_screen.dart               # Single-page Gemini Live-style orb, transcript, camera & text input
 |   |       |-- security_shield_tab.dart       # Protected app policy viewer and audit log UI
 |   |       `-- settings_screen.dart           # BYOK keys, PC Bridge URL & connection test, diagnostics
 |   |-- platform/
