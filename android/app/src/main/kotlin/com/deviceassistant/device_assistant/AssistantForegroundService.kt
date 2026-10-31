@@ -12,7 +12,9 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
 import android.service.quicksettings.TileService
 import androidx.core.app.NotificationCompat
@@ -46,6 +48,12 @@ class AssistantForegroundService : Service() {
 
         var onTrayActionListener: ((action: String) -> Unit)? = null
 
+        /** Interval between speaker-drain checks while Live audio is playing. */
+        private const val DRAIN_POLL_MS = 150L
+
+        /** Silence on both the write path and the playback head that means "utterance finished". */
+        private const val DRAIN_QUIET_MS = 300L
+
         /**
          * Registered by MainActivity so the foreground service can deliver hotword
          * results back to Flutter even when the activity is in the background.
@@ -56,6 +64,14 @@ class AssistantForegroundService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var audioTrack: AudioTrack? = null
     private val audioExecutor = Executors.newSingleThreadExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    // Gemini Live speaker output gating for the STT microphone: while the
+    // assistant is audible, continuous recognition would transcribe its own
+    // voice and feed it back as a user command.
+    @Volatile private var isLivePlaybackActive = false
+    @Volatile private var lastChunkWriteAt = 0L
+    @Volatile private var lastHeadPosition = 0L
 
     // On-device hotword/STT detector owned by the service so it survives
     // when MainActivity is not in the foreground.
@@ -127,18 +143,70 @@ class AssistantForegroundService : Service() {
                 if (audioTrack == null || audioTrack?.state != AudioTrack.STATE_INITIALIZED) {
                     initAudioTrack()
                 }
+                beginLivePlayback()
                 audioTrack?.write(data, 0, data.size)
             } catch (_: Exception) {}
         }
     }
 
     fun flushAudio() {
+        endLivePlayback()
         audioExecutor.execute {
             try {
                 audioTrack?.pause()
                 audioTrack?.flush()
                 audioTrack?.play()
             } catch (_: Exception) {}
+        }
+    }
+
+    /**
+     * Mutes the microphone while assistant audio is audible. Called per chunk, so
+     * only the first frame of an utterance does any real work.
+     */
+    private fun beginLivePlayback() {
+        lastChunkWriteAt = System.currentTimeMillis()
+        if (isLivePlaybackActive) return
+
+        isLivePlaybackActive = true
+        lastHeadPosition = audioTrack?.playbackHeadPosition?.toLong() ?: 0L
+        // Wake-word mode stays listening so the user can interrupt; free-form STT
+        // would otherwise transcribe the assistant and submit its own words as a command.
+        val detector = hotwordDetector
+        if (detector != null && detector.isFreeFormStt()) detector.pauseListening()
+        mainHandler.removeCallbacks(drainWatcher)
+        mainHandler.postDelayed(drainWatcher, DRAIN_POLL_MS)
+    }
+
+    private fun endLivePlayback() {
+        if (!isLivePlaybackActive) return
+        isLivePlaybackActive = false
+        mainHandler.removeCallbacks(drainWatcher)
+        val detector = hotwordDetector ?: return
+        if (detector.isPaused()) detector.resumeListening()
+    }
+
+    private val drainWatcher = object : Runnable {
+        override fun run() {
+            if (!isLivePlaybackActive) return
+
+            val head = try {
+                audioTrack?.playbackHeadPosition?.toLong() ?: 0L
+            } catch (_: Exception) {
+                0L
+            }
+            // Negative delta means the head wrapped around; treat it as motion for one poll.
+            val advanced = head - lastHeadPosition
+            lastHeadPosition = head
+
+            val drained = advanced <= 0L &&
+                System.currentTimeMillis() - lastChunkWriteAt > DRAIN_QUIET_MS
+
+            if (drained) {
+                endLivePlayback()
+            } else {
+                mainHandler.postDelayed(this, DRAIN_POLL_MS)
+            }
         }
     }
 
@@ -327,6 +395,8 @@ class AssistantForegroundService : Service() {
         if (wakeLock?.isHeld == true) {
             wakeLock?.release()
         }
+        isLivePlaybackActive = false
+        mainHandler.removeCallbacks(drainWatcher)
         try {
             audioTrack?.stop()
             audioTrack?.release()

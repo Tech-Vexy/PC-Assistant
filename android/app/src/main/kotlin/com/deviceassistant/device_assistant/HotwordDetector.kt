@@ -54,11 +54,16 @@ class HotwordDetector(
 
     fun isPaused(): Boolean = isPaused
 
+    /** True when every "hotword" is a wildcard, i.e. all speech is transcribed as a command. */
+    fun isFreeFormStt(): Boolean = activeHotwords.any { it == "*" || it.isEmpty() }
+
     fun pauseListening() {
         mainHandler.post {
             isPaused = true
             try {
-                speechRecognizer?.stopListening()
+                // cancel (not stopListening) so an in-flight session that was
+                // recording the assistant's own voice discards its results.
+                speechRecognizer?.cancel()
             } catch (_: Exception) {}
             isRecognitionActive = false
         }
@@ -171,6 +176,7 @@ class HotwordDetector(
             }
 
             override fun onPartialResults(partialResults: Bundle?) {
+                if (isPaused) return
                 val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 val partial = matches?.firstOrNull()?.trim()
                 if (!partial.isNullOrEmpty()) {

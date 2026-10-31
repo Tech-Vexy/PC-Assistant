@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../../../core/agent/dartantic_agent.dart';
 import '../../../core/audio/audio_playback_service.dart';
 import '../../../core/audio/audio_recording_service.dart';
+import '../../../core/audio/self_echo_guard.dart';
 import '../../../core/database/local_database.dart';
 import '../../../core/network/gcp_adc_auth_service.dart';
 import '../../../core/network/gemini_live_client.dart';
@@ -44,6 +45,8 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final AudioRecordingService _audioRecorder = AudioRecordingService();
+  final SelfEchoGuard _selfEchoGuard = SelfEchoGuard();
+  DateTime? _lastAudioChunkAt;
   AudioPlaybackService? _audioPlayback;
   int _activeTabIndex = 0;
 
@@ -346,6 +349,7 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
 
     _transcriptSub = _liveClient!.transcriptStream.listen((text) {
       if (text.isEmpty) return;
+      if (_isAssistantAudioAudible) _selfEchoGuard.noteSpoken(text);
       if (mounted) {
         setState(() {
           if (_chatMessages.isNotEmpty &&
@@ -368,6 +372,7 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
     });
 
     _audioOutputSub = _liveClient!.audioOutputStream.listen((chunk) {
+      _lastAudioChunkAt = DateTime.now();
       _audioRecorder.notifyPlaybackStarted();
       _audioPlayback?.playChunk(chunk);
     });
@@ -450,12 +455,23 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
       if (!connected && _audioRecorder.isRecording) {
         _audioRecorder.stopStreaming();
       }
+      if (!connected) _selfEchoGuard.reset();
     });
   }
+
+  /// The speaker stays "audible" briefly after the last Live audio chunk.
+  bool get _isAssistantAudioAudible => _lastAudioChunkAt != null &&
+      DateTime.now().difference(_lastAudioChunkAt!) <
+          const Duration(milliseconds: 900);
 
   void _handleHotwordDetected(Map<String, String?> event) async {
     final hotword = event['hotword'] ?? 'hey assistant';
     final command = event['command'];
+
+    final heard = hotword == 'stt'
+        ? (command ?? '')
+        : [hotword, command ?? ''].where((s) => s.isNotEmpty).join(' ');
+    if (_selfEchoGuard.isLikelyEcho(heard)) return;
 
     if (command == null || command.isEmpty) {
       if (mounted) {
