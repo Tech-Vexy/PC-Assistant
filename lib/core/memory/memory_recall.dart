@@ -1,5 +1,3 @@
-import 'dart:convert';
-import 'package:sqlite3/sqlite3.dart';
 import '../database/local_database.dart';
 import 'memory_vector.dart';
 
@@ -102,11 +100,27 @@ class MemoryRecallEngine {
     return words.length > 12 ? words.sublist(0, 12) : words;
   }
 
+  /// Reduces a word to its common stem for wider prefix matching.
+  static String stemWord(String word) {
+    if (word.endsWith('ies') && word.length > 4) return '${word.substring(0, word.length - 3)}y';
+    if (word.endsWith('ing') && word.length > 5) {
+      var base = word.substring(0, word.length - 3);
+      if (base.length >= 3 && base[base.length - 1] == base[base.length - 2]) {
+        base = base.substring(0, base.length - 1);
+      }
+      return base;
+    }
+    if (word.endsWith('es') && word.length > 4) return word.substring(0, word.length - 2);
+    if (word.endsWith('s') && !word.endsWith('ss') && word.length > 3) return word.substring(0, word.length - 1);
+    if (word.endsWith('ed') && word.length > 4) return word.substring(0, word.length - 2);
+    return word;
+  }
+
   // ── Meta-memory / directive detection ──────────────────────────────────────
 
   /// Returns true if the user is asking what the assistant knows about them.
   bool isMetaMemoryQuery(String text) {
-    final norm = text.toLowerCase().trim().replaceAll(RegExp(r'[.,!?;:\'"]'), ' ');
+    final norm = text.toLowerCase().trim().replaceAll(RegExp(r'''[.,!?;:'"]'''), ' ');
     final patterns = [
       RegExp(r'what\s+(do\s+you\s+)?know\s+(about\s+)?(me|myself)'),
       RegExp(r'what\s+(do\s+you\s+)?remember(\s+about\s+(me|us))?'),
@@ -148,23 +162,21 @@ class MemoryRecallEngine {
     final words = keywordsFrom(query);
     if (words.isEmpty) return [];
 
-    final matchExpr = words.map((w) => '"$w"*').join(' OR ');
+    final terms = <String>{...words, ...words.map(stemWord)};
+    final matchExpr = terms.map((w) => '"$w"*').join(' OR ');
 
     try {
       final result = db.rawSelect('''
         SELECT m.id, m.content, m.category, m.source, m.importance, m.created_at,
                bm25(memories_fts) AS rank
         FROM memories_fts
-        JOIN memories m ON m.id = memories_fts.rowid
+        JOIN memories_v2 m ON m.id = memories_fts.rowid
         WHERE memories_fts MATCH ?
         ORDER BY rank
         LIMIT 8
       ''', [matchExpr]);
 
-      return result
-          .where((r) => (r['rank'] as num).toDouble() <= bm25Floor)
-          .map(_rowToMemory)
-          .toList();
+      return result.map(_rowToMemory).toList();
     } catch (_) {
       return [];
     }
@@ -178,7 +190,7 @@ class MemoryRecallEngine {
 
     final rows = db.rawSelect('''
       SELECT m.id, m.content, m.category, m.source, m.importance, m.created_at, m.embedding
-      FROM memories m
+      FROM memories_v2 m
       WHERE m.embedding IS NOT NULL
     ''', []);
 
@@ -189,7 +201,7 @@ class MemoryRecallEngine {
         if (embJson == null || embJson.isEmpty) continue;
         final memVec = MemoryVectorEngine.deserializeEmbedding(embJson);
         final score = MemoryVectorEngine.cosineSimilarity(queryVec, memVec);
-        if (score > cosineFloor) {
+        if (score > 0.0) {
           scored.add((memory: _rowToMemory(row, rank: score), score: score));
         }
       } catch (_) {
@@ -252,7 +264,7 @@ class MemoryRecallEngine {
     final rows = db.rawSelect('''
       SELECT id, content, category, source, importance, created_at,
              -1.0 AS rank
-      FROM memories
+      FROM memories_v2
       ORDER BY importance DESC, id DESC
       LIMIT ?
     ''', [limit]);
@@ -326,21 +338,24 @@ class MemoryRecallEngine {
     final words = keywordsFrom(topic);
     if (words.isEmpty) return 0;
 
-    final matchExpr = words.map((w) => '"$w"*').join(' OR ');
+    final terms = <String>{...words, ...words.map(stemWord)};
+    final matchExpr = terms.map((w) => '"$w"*').join(' OR ');
     int count = 0;
 
     try {
       final rows = db.rawSelect('''
         SELECT m.id
-        FROM memories_fts
-        JOIN memories m ON m.id = memories_fts.rowid
-        WHERE memories_fts MATCH ?
-      ''', [matchExpr]);
+        FROM memories_v2 m
+        WHERE m.id IN (
+          SELECT rowid FROM memories_fts WHERE memories_fts MATCH ?
+        )
+        OR lower(m.category) LIKE ?
+        OR lower(m.content) LIKE ?
+      ''', [matchExpr, '%${topic.toLowerCase()}%', '%${topic.toLowerCase()}%']);
 
       for (final row in rows) {
         final id = row['id'] as int;
-        db.rawExecute('DELETE FROM memories_fts WHERE rowid = ?', [id]);
-        db.rawExecute('DELETE FROM memories WHERE id = ?', [id]);
+        db.rawExecute('DELETE FROM memories_v2 WHERE id = ?', [id]);
         count++;
       }
     } catch (_) {}

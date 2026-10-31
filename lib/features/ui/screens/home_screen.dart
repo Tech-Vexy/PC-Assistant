@@ -26,6 +26,7 @@ import '../../../core/workflow/workflow_scheduler_service.dart';
 import 'security_shield_tab.dart';
 import 'settings_screen.dart';
 import 'chat_tab.dart';
+import '../widgets/floating_assistant_overlay.dart';
 
 class HomeScreen extends StatefulWidget {
   final KeyVault keyVault;
@@ -98,7 +99,6 @@ class _HomeScreenState extends State<HomeScreen>
 
   late final MemoryRecallEngine _memoryRecall;
   int? _currentSessionId;
-  String _lastLiveUserUtterance = '';
 
   @override
   void initState() {
@@ -461,11 +461,9 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   void _ensureSession() {
-    if (_currentSessionId == null) {
-      _currentSessionId = widget.database.createConversationSession(
-        title: 'Session ${DateTime.now().toIso8601String().substring(0, 16)}',
-      );
-    }
+    _currentSessionId ??= widget.database.createConversationSession(
+      title: 'Session ${DateTime.now().toIso8601String().substring(0, 16)}',
+    );
   }
 
   String _buildLiveSystemInstruction(List<RecalledMemory> coreMemories) {
@@ -500,18 +498,6 @@ Use capture_screen or inspect_screen to observe the screen, and device tools to 
 Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
 ''';
   }
-
-  static const String _liveSystemInstruction = '''
-You are Device Assistant, an intelligent on-device agent.
-Memory, task plans, and recurring workflows are managed by you through tools —
-there is no UI for them, so call the appropriate tool whenever the user asks:
-- remember / recall / list_memories / forget for durable user memory.
-- plan_task / execute_plan / list_plans for multi-step task planning.
-- save_workflow / run_workflow / list_workflows / delete_workflow for routines.
-- schedule_workflow / list_scheduled_workflows / cancel_scheduled_workflow for recurring runs.
-Use capture_screen or inspect_screen to observe the screen, and device tools to act.
-Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
-''';
 
   void _attachLiveClientStreams(GeminiLiveClient client) {
     _connSub?.cancel();
@@ -641,7 +627,6 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
     // While the Live session is running, keep text turns inside that session so
     // memory/plan/workflow tool calls flow through the same agent loop.
     if (_isConnected && _liveClient != null) {
-      _lastLiveUserUtterance = clean;
       _liveClient!.sendTextMessage(clean);
       return;
     }
@@ -670,9 +655,7 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
       final relevantMemories = _memoryRecall.hybridRecall(clean);
       final memoryContext = relevantMemories.isEmpty
           ? ''
-          : '\n--- RECALLED MEMORIES ABOUT THE USER ---\n' +
-              relevantMemories.map((m) => '• ${m.content}').join('\n') +
-              '\n--- END RECALLED MEMORIES ---\n';
+          : '\n--- RECALLED MEMORIES ABOUT THE USER ---\n${relevantMemories.map((m) => '• ${m.content}').join('\n')}\n--- END RECALLED MEMORIES ---\n';
 
       final String systemPrompt;
       if (!useNebius && isComputerUse) {
@@ -1090,7 +1073,17 @@ If the user query is a general knowledge question, conversational request, or ex
             ),
           ],
         ),
-        body: _buildGeminiLiveView(theme),
+        body: Stack(
+          children: [
+            _buildGeminiLiveView(theme),
+            FloatingAssistantOverlay(
+              isListening: _isLocalSttActive || _isConnected,
+              isSpeaking: _isTtsSpeaking,
+              transcript: _currentVoiceTranscript,
+              onDismiss: () => setState(() => _currentVoiceTranscript = ''),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -7,6 +7,7 @@ import '../../../core/network/gemini_live_client.dart';
 import '../../../core/network/nebius_client.dart';
 import '../../../core/network/pc_bridge_client.dart';
 import '../../../core/security/key_vault.dart';
+import '../../../platform/android/android_bridge.dart';
 
 class SettingsScreen extends StatefulWidget {
   final KeyVault keyVault;
@@ -60,6 +61,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _hotwordEnabled = true;
   String _activeProvider = 'nebius';
 
+  bool _isDeviceAdminActive = false;
+  final AndroidBridge _androidBridge = AndroidBridge();
+
   @override
   void initState() {
     super.initState();
@@ -93,6 +97,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _pcUrlCtrl.text = await widget.keyVault.getPcServerUrl();
     _hotwordEnabled = await widget.keyVault.isHotwordEnabled();
     _hotwordPhraseCtrl.text = await widget.keyVault.getCustomHotword();
+    if (Platform.isAndroid) {
+      _isDeviceAdminActive = await _androidBridge.isDeviceAdminActive();
+    }
     if (mounted) setState(() {});
   }
 
@@ -461,6 +468,68 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          if (Platform.isAndroid) ...[
+            _buildSectionHeader(
+              Icons.admin_panel_settings,
+              'System Elevation & Ambient Assistant',
+              'Configure Device Assistant as default digital assistant and device administrator',
+            ),
+            const SizedBox(height: 12),
+            Card(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(color: Colors.blueAccent.withValues(alpha: 0.3)),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    ListTile(
+                      leading: const Icon(Icons.assistant, color: Colors.blueAccent),
+                      title: const Text('Default Digital Assistant'),
+                      subtitle: const Text(
+                        'Launch assistant from anywhere via long-press home, power button, or navigation gestures',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                      trailing: ElevatedButton(
+                        onPressed: () => _androidBridge.openDefaultAssistantSettings(),
+                        child: const Text('Configure'),
+                      ),
+                    ),
+                    const Divider(height: 24),
+                    ListTile(
+                      leading: Icon(
+                        Icons.shield,
+                        color: _isDeviceAdminActive ? Colors.green : Colors.amberAccent,
+                      ),
+                      title: const Text('Device Administrator Elevation'),
+                      subtitle: Text(
+                        _isDeviceAdminActive
+                            ? 'Admin privileges active: Screen lock and policy enforcement enabled.'
+                            : 'Required to allow the assistant to enforce security and lock screen.',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                      trailing: _isDeviceAdminActive
+                          ? const Chip(
+                              label: Text('Active', style: TextStyle(fontSize: 11)),
+                              backgroundColor: Colors.green,
+                            )
+                          : ElevatedButton(
+                              onPressed: () async {
+                                await _androidBridge.requestDeviceAdmin();
+                                final active = await _androidBridge.isDeviceAdminActive();
+                                if (mounted) setState(() => _isDeviceAdminActive = active);
+                              },
+                              child: const Text('Grant Admin'),
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+          ],
+
           // --- Active AI Model Engine Selector Section ---
           _buildSectionHeader(
             Icons.tune,

@@ -105,7 +105,7 @@ void main() {
 
     test('repetition guard flags previous user queries across sessions', () {
       final sessionId = db.createConversationSession(title: 'Previous Session');
-      final msgId = db.addConversationMessage(
+      db.addConversationMessage(
         sessionId: sessionId,
         role: 'user',
         content: 'Can you generate a summary of today sales report',

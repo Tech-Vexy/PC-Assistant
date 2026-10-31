@@ -34,6 +34,8 @@ class ToolDispatcher {
   late final DynamicSkillGenerator _skillGen;
   late final HermesWorkflowManager _hermesWorkflow;
 
+  MemoryExtractor get memoryExtractor => _extractor;
+
   ToolDispatcher({
     required this.db,
     required this.guard,

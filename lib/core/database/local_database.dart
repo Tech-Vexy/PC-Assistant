@@ -58,30 +58,30 @@ class LocalDatabase {
       );
     ''');
 
-    // FTS5 virtual table for BM25 keyword search over memory content
+    // FTS5 virtual table for BM25 keyword search over memory content and category
     _db!.execute('''
       CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
-        USING fts5(content, content=memories_v2, content_rowid=id);
+        USING fts5(content, category, content=memories_v2, content_rowid=id);
     ''');
 
     // Triggers to keep FTS5 index in sync with memories_v2
     _db!.execute('''
       CREATE TRIGGER IF NOT EXISTS memories_v2_ai
         AFTER INSERT ON memories_v2 BEGIN
-          INSERT INTO memories_fts(rowid, content) VALUES (new.id, new.content);
+          INSERT INTO memories_fts(rowid, content, category) VALUES (new.id, new.content, new.category);
         END;
     ''');
     _db!.execute('''
       CREATE TRIGGER IF NOT EXISTS memories_v2_au
         AFTER UPDATE ON memories_v2 BEGIN
-          INSERT INTO memories_fts(memories_fts, rowid, content) VALUES ('delete', old.id, old.content);
-          INSERT INTO memories_fts(rowid, content) VALUES (new.id, new.content);
+          INSERT INTO memories_fts(memories_fts, rowid, content, category) VALUES ('delete', old.id, old.content, old.category);
+          INSERT INTO memories_fts(rowid, content, category) VALUES (new.id, new.content, new.category);
         END;
     ''');
     _db!.execute('''
       CREATE TRIGGER IF NOT EXISTS memories_v2_ad
         AFTER DELETE ON memories_v2 BEGIN
-          INSERT INTO memories_fts(memories_fts, rowid, content) VALUES ('delete', old.id, old.content);
+          INSERT INTO memories_fts(memories_fts, rowid, content, category) VALUES ('delete', old.id, old.content, old.category);
         END;
     ''');
 

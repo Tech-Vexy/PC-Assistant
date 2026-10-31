@@ -17,8 +17,11 @@ bool _shouldExtract(String userMessage) {
   if (metaPatterns.any((p) => p.hasMatch(norm))) return false;
 
   // Skip forget directives
-  if (norm.startsWith('forget') || norm.startsWith('delete') ||
-      norm.startsWith("don't remember")) return false;
+  if (norm.startsWith('forget') ||
+      norm.startsWith('delete') ||
+      norm.startsWith("don't remember")) {
+    return false;
+  }
 
   final trimmed = norm.replaceAll(RegExp(r'[.,!?;:]'), '');
   const trivial = {
