@@ -549,6 +549,47 @@ class ToolDefinitions {
         },
       ] else ...[
         {
+          'name': 'get_contacts',
+          'description':
+              'Searches and retrieves device contacts (names and phone numbers) to send SMS or make calls.',
+          'parameters': {
+            'type': 'object',
+            'properties': {
+              'query': {
+                'type': 'string',
+                'description': 'Name or number to filter by (optional)',
+              },
+            },
+          },
+        },
+        {
+          'name': 'lock_device',
+          'description':
+              'Immediately locks the device screen using Device Administrator privileges.',
+          'parameters': {
+            'type': 'object',
+            'properties': {},
+          },
+        },
+        {
+          'name': 'request_device_admin',
+          'description':
+              'Prompts the user to grant Device Administrator elevation to Device Assistant.',
+          'parameters': {
+            'type': 'object',
+            'properties': {},
+          },
+        },
+        {
+          'name': 'set_default_assistant',
+          'description':
+              'Opens Android system settings to set this app as the default device digital assistant.',
+          'parameters': {
+            'type': 'object',
+            'properties': {},
+          },
+        },
+        {
           'name': 'click_element',
           'description':
               'Clicks a visible UI element on mobile by its visible label',

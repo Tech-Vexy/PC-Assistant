@@ -2,4 +2,5 @@
 <resources>
     <string name="app_name">Device Assistant</string>
     <string name="accessibility_service_description">Enables Device Assistant to inspect UI nodes, click elements, and navigate apps with security shielding on banking and SIM Toolkit.</string>
+    <string name="device_admin_description">Allows Device Assistant to enforce system security policies, lock the screen on request, and protect device integrity.</string>
 </resources>

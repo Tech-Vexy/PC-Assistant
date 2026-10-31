@@ -514,4 +514,59 @@ class AndroidBridge {
     if (!_isAndroid || _telephonyService == null) return false;
     return await _telephonyService!.isTelephonyAvailable();
   }
+
+  // --- CONTACTS, DEFAULT ASSISTANT & DEVICE ADMIN ELEVATION ---
+
+  /// Queries device contacts with an optional name/number filter
+  Future<List<Map<String, String>>> getContacts({String? query}) async {
+    if (!_isAndroid) return [];
+    try {
+      final List<dynamic>? raw = await _channel.invokeMethod<List<dynamic>>(
+        'getContacts',
+        {'query': query},
+      );
+      if (raw == null) return [];
+      return raw.map((item) => Map<String, String>.from(item as Map)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// Checks if Device Assistant is active as an Android Device Administrator
+  Future<bool> isDeviceAdminActive() async {
+    if (!_isAndroid) return false;
+    try {
+      final bool? active = await _channel.invokeMethod<bool>('isDeviceAdminActive');
+      return active ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Launches the system prompt to grant Device Administrator elevation
+  Future<void> requestDeviceAdmin() async {
+    if (!_isAndroid) return;
+    try {
+      await _channel.invokeMethod('requestDeviceAdmin');
+    } catch (_) {}
+  }
+
+  /// Immediately locks the device screen using Device Policy Manager
+  Future<bool> lockDeviceNow() async {
+    if (!_isAndroid) return false;
+    try {
+      final bool? ok = await _channel.invokeMethod<bool>('lockDeviceNow');
+      return ok ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Opens the Android system settings to set this app as Default Digital Assistant
+  Future<void> openDefaultAssistantSettings() async {
+    if (!_isAndroid) return;
+    try {
+      await _channel.invokeMethod('openDefaultAssistantSettings');
+    } catch (_) {}
+  }
 }

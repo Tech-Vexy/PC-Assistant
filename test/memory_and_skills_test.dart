@@ -300,4 +300,41 @@ void main() {
       expect(memories.any((m) => m['content'].toString().contains('Dartantic')), isTrue);
     });
   });
+
+  group('Telephony, Device Admin, and Contact Tools Tests', () {
+    late LocalDatabase db;
+    late Directory tempDir;
+    late ToolDispatcher dispatcher;
+
+    setUp(() async {
+      tempDir = await Directory.systemTemp.createTemp('assistant_telephony_test_');
+      db = LocalDatabase();
+      await db.initialize(baseDirectory: tempDir);
+      dispatcher = ToolDispatcher(
+        db: db,
+        guard: SensitiveAppGuard(),
+      );
+    });
+
+    tearDown(() async {
+      db.close();
+      if (await tempDir.exists()) {
+        await tempDir.delete(recursive: true);
+      }
+    });
+
+    test('Telephony and contact tool dispatches gracefully handle missing bridge', () async {
+      final contactsRes = await dispatcher.dispatch(
+        toolName: 'get_contacts',
+        args: {'query': 'Alice'},
+      );
+      expect(contactsRes.containsKey('error'), isTrue);
+
+      final lockRes = await dispatcher.dispatch(
+        toolName: 'lock_device',
+        args: {},
+      );
+      expect(lockRes.containsKey('error'), isTrue);
+    });
+  });
 }

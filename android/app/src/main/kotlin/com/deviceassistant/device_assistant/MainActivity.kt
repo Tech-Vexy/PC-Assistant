@@ -237,6 +237,59 @@ class MainActivity : FlutterActivity() {
                         result.success(apps)
                     }
 
+                    "getContacts" -> {
+                        val filter = call.argument<String>("query")
+                        val contacts = queryDeviceContacts(filter)
+                        result.success(contacts)
+                    }
+
+                    "isDeviceAdminActive" -> {
+                        val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as android.app.admin.DevicePolicyManager
+                        val adminComponent = android.content.ComponentName(this, AssistantDeviceAdminReceiver::class.java)
+                        result.success(dpm.isAdminActive(adminComponent))
+                    }
+
+                    "requestDeviceAdmin" -> {
+                        val adminComponent = android.content.ComponentName(this, AssistantDeviceAdminReceiver::class.java)
+                        val intent = Intent(android.app.admin.DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
+                            putExtra(android.app.admin.DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent)
+                            putExtra(
+                                android.app.admin.DevicePolicyManager.EXTRA_ADD_EXPLANATION,
+                                "Device Assistant requires administrative elevation to enforce security policies and lock the device."
+                            )
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                        }
+                        startActivity(intent)
+                        result.success(true)
+                    }
+
+                    "lockDeviceNow" -> {
+                        val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as android.app.admin.DevicePolicyManager
+                        val adminComponent = android.content.ComponentName(this, AssistantDeviceAdminReceiver::class.java)
+                        if (dpm.isAdminActive(adminComponent)) {
+                            dpm.lockNow()
+                            result.success(true)
+                        } else {
+                            result.success(false)
+                        }
+                    }
+
+                    "openDefaultAssistantSettings" -> {
+                        val intent = Intent(Settings.ACTION_VOICE_INPUT_SETTINGS).apply {
+                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                        }
+                        try {
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (_: Exception) {
+                            val fallback = Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS).apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            }
+                            startActivity(fallback)
+                            result.success(true)
+                        }
+                    }
+
                     "updateTrayStatus" -> {
                         val isActive = call.argument<Boolean>("isActive") ?: false
                         val statusText = call.argument<String>("statusText")
@@ -619,6 +672,39 @@ class MainActivity : FlutterActivity() {
             result.add(mapOf("appName" to label, "packageName" to pkg))
         }
         return result
+    }
+
+    private fun queryDeviceContacts(filter: String?): List<Map<String, String>> {
+        val contacts = mutableListOf<Map<String, String>>()
+        if (checkSelfPermission(android.Manifest.permission.READ_CONTACTS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(android.Manifest.permission.READ_CONTACTS), 103)
+            return contacts
+        }
+
+        try {
+            val uri = android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI
+            val projection = arrayOf(
+                android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER
+            )
+            val selection = if (!filter.isNullOrBlank()) {
+                "${android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} LIKE ?"
+            } else null
+            val selectionArgs = if (!filter.isNullOrBlank()) arrayOf("%$filter%") else null
+
+            contentResolver.query(uri, projection, selection, selectionArgs, null)?.use { cursor ->
+                val nameIdx = cursor.getColumnIndex(android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+                val numberIdx = cursor.getColumnIndex(android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER)
+                while (cursor.moveToNext()) {
+                    val name = if (nameIdx != -1) cursor.getString(nameIdx) ?: "" else ""
+                    val number = if (numberIdx != -1) cursor.getString(numberIdx) ?: "" else ""
+                    if (name.isNotEmpty() || number.isNotEmpty()) {
+                        contacts.add(mapOf("name" to name, "phoneNumber" to number))
+                    }
+                }
+            }
+        } catch (_: Exception) {}
+        return contacts
     }
 
     private fun isAccessibilityServiceEnabled(context: Context): Boolean {

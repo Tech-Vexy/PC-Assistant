@@ -420,6 +420,22 @@ class ToolDispatcher {
           result = await _handleGetNetworkInfo(args);
           break;
 
+        case 'get_contacts':
+          result = await _handleGetContacts(args);
+          break;
+
+        case 'lock_device':
+          result = await _handleLockDevice();
+          break;
+
+        case 'request_device_admin':
+          result = await _handleRequestDeviceAdmin();
+          break;
+
+        case 'set_default_assistant':
+          result = await _handleSetDefaultAssistant();
+          break;
+
         case 'generate_skill':
           result = await _handleGenerateSkill(args);
           break;
@@ -1904,5 +1920,61 @@ class ToolDispatcher {
     }
 
     return await androidBridge!.getNetworkInfo();
+  }
+
+  // --- CONTACTS, DEFAULT ASSISTANT & DEVICE ADMIN HANDLERS ---
+
+  Future<Map<String, dynamic>> _handleGetContacts(
+      Map<String, dynamic> args) async {
+    if (androidBridge == null) {
+      return {'error': 'Contacts access is only available on Android devices'};
+    }
+    final query = args['query'] as String?;
+    final contacts = await androidBridge!.getContacts(query: query);
+    return {
+      'count': contacts.length,
+      'contacts': contacts,
+    };
+  }
+
+  Future<Map<String, dynamic>> _handleLockDevice() async {
+    if (androidBridge == null) {
+      return {'error': 'Device locking is only available on Android'};
+    }
+    final isAdmin = await androidBridge!.isDeviceAdminActive();
+    if (!isAdmin) {
+      await androidBridge!.requestDeviceAdmin();
+      return {
+        'status': 'admin_required',
+        'message': 'Device Administrator permission is required. Elevation prompt opened.',
+      };
+    }
+    final ok = await androidBridge!.lockDeviceNow();
+    return {
+      'status': ok ? 'locked' : 'failed',
+      'message': ok ? 'Device screen locked successfully.' : 'Could not lock screen.',
+    };
+  }
+
+  Future<Map<String, dynamic>> _handleRequestDeviceAdmin() async {
+    if (androidBridge == null) {
+      return {'error': 'Device Admin is only available on Android'};
+    }
+    await androidBridge!.requestDeviceAdmin();
+    return {
+      'status': 'prompted',
+      'message': 'Device Administrator elevation prompt displayed to user.',
+    };
+  }
+
+  Future<Map<String, dynamic>> _handleSetDefaultAssistant() async {
+    if (androidBridge == null) {
+      return {'error': 'Default assistant settings are only on Android'};
+    }
+    await androidBridge!.openDefaultAssistantSettings();
+    return {
+      'status': 'opened',
+      'message': 'Default Digital Assistant system settings opened.',
+    };
   }
 }
