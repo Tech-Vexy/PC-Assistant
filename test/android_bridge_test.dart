@@ -359,7 +359,8 @@ void main() {
       expect(installedApps.first['packageName'], 'com.android.calculator');
     });
 
-    test('launchSystemIntent and makeCall dispatch direct android intent', () async {
+    test('launchSystemIntent and makeCall dispatch direct android intent',
+        () async {
       final bridge = AndroidBridge(isAndroid: true);
       final success = await bridge.launchSystemIntent(
         action: 'settings',

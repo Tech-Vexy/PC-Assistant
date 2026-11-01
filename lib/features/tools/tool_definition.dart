@@ -609,7 +609,8 @@ class ToolDefinitions {
               },
               'goal': {
                 'type': 'string',
-                'description': 'Optional explicit goal (e.g. "call contact", "dial number")',
+                'description':
+                    'Optional explicit goal (e.g. "call contact", "dial number")',
               },
             },
           },

@@ -361,8 +361,7 @@ class DeviceAppOperator {
     // Determine Call button from layout
     final callNode = hierarchy.firstWhere(
       (n) {
-        final desc =
-            (n['contentDescription']?.toString() ?? '').toLowerCase();
+        final desc = (n['contentDescription']?.toString() ?? '').toLowerCase();
         final text = (n['text']?.toString() ?? '').toLowerCase();
         final id = (n['id']?.toString() ?? '').toLowerCase();
         return desc.contains('call') ||
@@ -553,4 +552,3 @@ class DeviceAppOperator {
     return result;
   }
 }
-

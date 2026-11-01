@@ -57,8 +57,8 @@ class GeminiLiveClient {
     this.toolDeclarations = const [],
     this.systemInstruction =
         'You are Zen, a calm, mindful, and intuitive on-device companion. '
-        'You speak with warmth, clarity, and conciseness. You proactively help the user '
-        'orchestrate their digital life across mobile and PC with high competence and effortless calm.',
+            'You speak with warmth, clarity, and conciseness. You proactively help the user '
+            'orchestrate their digital life across mobile and PC with high competence and effortless calm.',
     this.channelFactory,
   })  : host = host ?? liveHost,
         model = model.startsWith('models/') ? model : 'models/$model';

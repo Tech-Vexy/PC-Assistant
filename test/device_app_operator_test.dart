@@ -68,7 +68,8 @@ void main() {
       androidBridge: mockBridge,
       db: db,
       hermesManager: hermes,
-      dispatchStep: (tool, args) => dispatcher.dispatch(toolName: tool, args: args),
+      dispatchStep: (tool, args) =>
+          dispatcher.dispatch(toolName: tool, args: args),
     );
   });
 
@@ -80,7 +81,9 @@ void main() {
   });
 
   group('DeviceAppOperator & Operate Dialer / Device Tests', () {
-    test('First run: captures screenshot & hierarchy to determine layout, executes, and saves workflow', () async {
+    test(
+        'First run: captures screenshot & hierarchy to determine layout, executes, and saves workflow',
+        () async {
       // Setup mock dialer layout in hierarchy
       mockBridge.mockHierarchy = [
         {
@@ -129,7 +132,8 @@ void main() {
       // Verify the workflow was saved to the database
       final savedWorkflow = db.getWorkflow('workflow_phone_call_contact');
       expect(savedWorkflow, isNotNull);
-      final steps = (savedWorkflow!['steps'] as List<dynamic>).cast<Map<String, dynamic>>();
+      final steps = (savedWorkflow!['steps'] as List<dynamic>)
+          .cast<Map<String, dynamic>>();
       expect(steps.isNotEmpty, isTrue);
 
       // Verify tools executed
@@ -138,7 +142,9 @@ void main() {
       expect(executedTools.contains('click_element'), isTrue);
     });
 
-    test('Second run: references and replays learned workflow with new parameters', () async {
+    test(
+        'Second run: references and replays learned workflow with new parameters',
+        () async {
       // Pre-save a learned workflow
       db.saveWorkflow('workflow_phone_call_contact', steps: [
         {
@@ -169,7 +175,9 @@ void main() {
       expect(mockBridge.takeScreenshotCalled, isFalse);
     });
 
-    test('Operate dialer with phone number synthesizes dialpad actions and replays subsequently', () async {
+    test(
+        'Operate dialer with phone number synthesizes dialpad actions and replays subsequently',
+        () async {
       mockBridge.mockHierarchy = [
         {
           'id': 'com.google.android.dialer:id/dialpad_floating_action_button',
@@ -225,7 +233,8 @@ void main() {
       expect(replayRes['mode'], equals('replayed_workflow'));
     });
 
-    test('ToolDispatcher dispatches operate_dialer as operate_device', () async {
+    test('ToolDispatcher dispatches operate_dialer as operate_device',
+        () async {
       db.saveWorkflow('workflow_phone_call_contact', steps: [
         {
           'tool': 'remember',

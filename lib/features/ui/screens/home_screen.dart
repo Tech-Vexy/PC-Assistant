@@ -396,7 +396,9 @@ class _HomeScreenState extends State<HomeScreen>
 
       final hasGemini = (geminiKey != null && geminiKey.isNotEmpty) ||
           authMode == 'api_key' ||
-          (authMode == 'adc' && await GcpAdcAuthService(keyVault: widget.keyVault).hasAdcCredentials());
+          (authMode == 'adc' &&
+              await GcpAdcAuthService(keyVault: widget.keyVault)
+                  .hasAdcCredentials());
 
       if (hasGemini) {
         final projectId = await widget.keyVault.getGcpProjectId();
@@ -410,8 +412,10 @@ class _HomeScreenState extends State<HomeScreen>
 
         _liveClient = GeminiLiveClient(
           apiKey: geminiKey,
-          accessTokenProvider:
-              authMode == 'adc' ? () => GcpAdcAuthService(keyVault: widget.keyVault).getAccessToken() : null,
+          accessTokenProvider: authMode == 'adc'
+              ? () =>
+                  GcpAdcAuthService(keyVault: widget.keyVault).getAccessToken()
+              : null,
           projectId: projectId,
           location: location,
           host: geminiEndpoint,
