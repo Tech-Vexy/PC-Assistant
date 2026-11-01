@@ -86,8 +86,8 @@ class ToolDefinitions {
         'name': 'save_memory',
         'description':
             'Saves a durable fact about the user into long-term memory with semantic indexing. '
-            'Automatically deduplicates and supersedes stale memories. '
-            'Use this for facts that should persist across sessions (name, preferences, projects, goals).',
+                'Automatically deduplicates and supersedes stale memories. '
+                'Use this for facts that should persist across sessions (name, preferences, projects, goals).',
         'parameters': {
           'type': 'object',
           'properties': {
@@ -95,7 +95,7 @@ class ToolDefinitions {
               'type': 'string',
               'description':
                   'Third-person statement about the user (e.g. "User prefers dark mode", '
-                  '"User is building a Flutter assistant app")',
+                      '"User is building a Flutter assistant app")',
             },
             'category': {
               'type': 'string',
@@ -114,8 +114,8 @@ class ToolDefinitions {
         'name': 'search_memories',
         'description':
             'Searches long-term memory using hybrid semantic + keyword search. '
-            'Returns the most relevant memories for the query. '
-            'Use this instead of recall when you need to find memories by meaning, not exact key.',
+                'Returns the most relevant memories for the query. '
+                'Use this instead of recall when you need to find memories by meaning, not exact key.',
         'parameters': {
           'type': 'object',
           'properties': {
@@ -131,13 +131,14 @@ class ToolDefinitions {
         'name': 'forget_topic',
         'description':
             'Erases all memories related to a topic from long-term memory. '
-            'Use when the user says "forget about X" or "delete X from your memory".',
+                'Use when the user says "forget about X" or "delete X from your memory".',
         'parameters': {
           'type': 'object',
           'properties': {
             'topic': {
               'type': 'string',
-              'description': 'Topic or subject to erase (e.g. "my gym routine", "the Kyoto trip")',
+              'description':
+                  'Topic or subject to erase (e.g. "my gym routine", "the Kyoto trip")',
             },
           },
           'required': ['topic'],
@@ -147,7 +148,7 @@ class ToolDefinitions {
         'name': 'memory_summary',
         'description':
             'Returns a summary of all long-term memories — what the assistant knows about this user. '
-            'Use when the user asks "what do you know about me?" or "what do you remember?".',
+                'Use when the user asks "what do you know about me?" or "what do you remember?".',
         'parameters': {
           'type': 'object',
           'properties': {},
@@ -157,8 +158,8 @@ class ToolDefinitions {
         'name': 'generate_skill',
         'description':
             'Generates a new reusable workflow skill from a natural language description of a task. '
-            'The skill is saved as a workflow that can be run or scheduled. '
-            'Use when the user describes a repeatable task they want automated.',
+                'The skill is saved as a workflow that can be run or scheduled. '
+                'Use when the user describes a repeatable task they want automated.',
         'parameters': {
           'type': 'object',
           'properties': {
@@ -179,7 +180,7 @@ class ToolDefinitions {
         'name': 'learn_skill',
         'description':
             'Synthesizes a reusable workflow skill by observing a sequence of tool calls from recent history. '
-            'Use to turn a just-completed sequence of actions into a named, reusable automation.',
+                'Use to turn a just-completed sequence of actions into a named, reusable automation.',
         'parameters': {
           'type': 'object',
           'properties': {
@@ -282,21 +283,24 @@ class ToolDefinitions {
         'name': 'save_workflow_skill',
         'description':
             'Saves a Hermes-format procedural workflow skill (YAML frontmatter + markdown execution guide + parameters). '
-            'Features automatic static security scanning and append-only version ledger tracking for rollback.',
+                'Features automatic static security scanning and append-only version ledger tracking for rollback.',
         'parameters': {
           'type': 'object',
           'properties': {
             'name': {
               'type': 'string',
-              'description': 'Snake-case unique skill name (e.g. morning_briefing, pr_review_flow)',
+              'description':
+                  'Snake-case unique skill name (e.g. morning_briefing, pr_review_flow)',
             },
             'description': {
               'type': 'string',
-              'description': 'One-line summary shown in progressive disclosure lists',
+              'description':
+                  'One-line summary shown in progressive disclosure lists',
             },
             'markdown_content': {
               'type': 'string',
-              'description': 'Complete markdown execution instructions, rules, and constraints',
+              'description':
+                  'Complete markdown execution instructions, rules, and constraints',
             },
             'version': {
               'type': 'string',
@@ -304,7 +308,8 @@ class ToolDefinitions {
             },
             'parameters': {
               'type': 'object',
-              'description': 'Template parameter declarations with descriptions and defaults',
+              'description':
+                  'Template parameter declarations with descriptions and defaults',
             },
             'steps': {
               'type': 'array',
@@ -314,7 +319,8 @@ class ToolDefinitions {
             'tags': {
               'type': 'array',
               'items': {'type': 'string'},
-              'description': 'Tags for organization (e.g. ["routine", "productivity"])',
+              'description':
+                  'Tags for organization (e.g. ["routine", "productivity"])',
             },
             'change_summary': {
               'type': 'string',
@@ -328,7 +334,7 @@ class ToolDefinitions {
         'name': 'patch_workflow_skill',
         'description':
             'Applies a surgical patch (search-and-replace) to an existing workflow skill without full rewrite. '
-            'Increments the patch version and logs the change to the audit ledger.',
+                'Increments the patch version and logs the change to the audit ledger.',
         'parameters': {
           'type': 'object',
           'properties': {
@@ -598,11 +604,13 @@ class ToolDefinitions {
             'properties': {
               'unread_only': {
                 'type': 'boolean',
-                'description': 'If true, returns only unread/active notifications (default false)',
+                'description':
+                    'If true, returns only unread/active notifications (default false)',
               },
               'app': {
                 'type': 'string',
-                'description': 'Filter by application name or package (e.g. "whatsapp", "slack", "gmail")',
+                'description':
+                    'Filter by application name or package (e.g. "whatsapp", "slack", "gmail")',
               },
               'limit': {
                 'type': 'number',
@@ -634,7 +642,8 @@ class ToolDefinitions {
             'properties': {
               'notification_key': {
                 'type': 'string',
-                'description': 'The unique key of the target notification (from list_notifications or triage_notifications)',
+                'description':
+                    'The unique key of the target notification (from list_notifications or triage_notifications)',
               },
               'reply_text': {
                 'type': 'string',

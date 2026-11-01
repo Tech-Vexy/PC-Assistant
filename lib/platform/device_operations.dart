@@ -17,7 +17,8 @@ class DeviceOperations {
   // --- PLATFORM DETECTION ---
 
   bool get isAndroid => Platform.isAndroid;
-  bool get isDesktop => Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+  bool get isDesktop =>
+      Platform.isWindows || Platform.isLinux || Platform.isMacOS;
   bool get isMobile => Platform.isAndroid || Platform.isIOS;
 
   // --- MOUSE / TOUCH OPERATIONS ---
@@ -69,7 +70,8 @@ class DeviceOperations {
       }
     } else if (isAndroid && androidBridge != null) {
       if (text != null || viewId != null) {
-        final success = await androidBridge!.clickByText(text ?? '', viewId: viewId);
+        final success =
+            await androidBridge!.clickByText(text ?? '', viewId: viewId);
         return {
           'status': success ? 'done' : 'error',
           'text': text,
@@ -88,7 +90,9 @@ class DeviceOperations {
         };
       }
     }
-    return {'error': 'Click operation requires appropriate parameters for platform'};
+    return {
+      'error': 'Click operation requires appropriate parameters for platform'
+    };
   }
 
   /// Scroll operation
@@ -98,7 +102,8 @@ class DeviceOperations {
     int deltaY = 0,
   }) async {
     if (isDesktop && desktopDriver != null) {
-      final success = await desktopDriver!.scrollMouse(deltaX: deltaX, deltaY: deltaY);
+      final success =
+          await desktopDriver!.scrollMouse(deltaX: deltaX, deltaY: deltaY);
       return {
         'status': success ? 'done' : 'error',
         'deltaX': deltaX,
@@ -212,8 +217,14 @@ class DeviceOperations {
       final apps = await desktopDriver!.getRunningApps();
       final filtered = filter == null
           ? apps
-          : apps.where((app) =>
-              app['name']?.toString().toLowerCase().contains(filter.toLowerCase()) ?? false).toList();
+          : apps
+              .where((app) =>
+                  app['name']
+                      ?.toString()
+                      .toLowerCase()
+                      .contains(filter.toLowerCase()) ??
+                  false)
+              .toList();
       return {
         'status': 'done',
         'count': filtered.length,
@@ -224,9 +235,19 @@ class DeviceOperations {
       final apps = await androidBridge!.getInstalledApps();
       final filtered = filter == null
           ? apps
-          : apps.where((app) =>
-              (app['appName']?.toString().toLowerCase().contains(filter.toLowerCase()) ?? false) ||
-              (app['packageName']?.toString().toLowerCase().contains(filter.toLowerCase()) ?? false)).toList();
+          : apps
+              .where((app) =>
+                  (app['appName']
+                          ?.toString()
+                          .toLowerCase()
+                          .contains(filter.toLowerCase()) ??
+                      false) ||
+                  (app['packageName']
+                          ?.toString()
+                          .toLowerCase()
+                          .contains(filter.toLowerCase()) ??
+                      false))
+              .toList();
       return {
         'status': 'done',
         'count': filtered.length,

@@ -183,7 +183,8 @@ class DesktopDriver with TrayListener, WindowListener {
   /// Scroll mouse wheel
   Future<bool> scrollMouse({required int deltaX, required int deltaY}) async {
     if (_automationService == null) return false;
-    return await _automationService!.scrollMouse(deltaX: deltaX, deltaY: deltaY);
+    return await _automationService!
+        .scrollMouse(deltaX: deltaX, deltaY: deltaY);
   }
 
   /// Drag mouse from start to end coordinates
@@ -193,8 +194,8 @@ class DesktopDriver with TrayListener, WindowListener {
       required double endX,
       required double endY}) async {
     if (_automationService == null) return false;
-    return await _automationService!.dragMouse(
-        startX: startX, startY: startY, endX: endX, endY: endY);
+    return await _automationService!
+        .dragMouse(startX: startX, startY: startY, endX: endX, endY: endY);
   }
 
   /// Type a string of text

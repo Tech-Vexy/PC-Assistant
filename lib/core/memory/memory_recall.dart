@@ -73,18 +73,111 @@ class MemoryRecallEngine {
   // ── Keyword extraction ─────────────────────────────────────────────────────
 
   static const Set<String> _stopwords = {
-    'the', 'a', 'an', 'and', 'or', 'but', 'if', 'then', 'so', 'because',
-    'as', 'of', 'at', 'by', 'for', 'with', 'about', 'into', 'to', 'from',
-    'in', 'on', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'do',
-    'does', 'did', 'have', 'has', 'had', 'i', 'you', 'he', 'she', 'it',
-    'we', 'they', 'me', 'him', 'her', 'us', 'them', 'my', 'your', 'his',
-    'its', 'our', 'their', 'this', 'that', 'these', 'those', 'what',
-    'which', 'who', 'whom', 'how', 'when', 'where', 'why', 'not', 'no',
-    'yes', 'can', 'could', 'should', 'would', 'will', 'shall', 'may',
-    'might', 'must', 'just', 'also', 'very', 'really', 'some', 'any',
-    'all', 'get', 'got', 'make', 'made', 'like', 'want', 'need', 'know',
-    'think', 'thought', 'there', 'here', 'than', 'tell', 'give', 'show',
-    'help', 'please', 'thanks', 'thank', 'okay',
+    'the',
+    'a',
+    'an',
+    'and',
+    'or',
+    'but',
+    'if',
+    'then',
+    'so',
+    'because',
+    'as',
+    'of',
+    'at',
+    'by',
+    'for',
+    'with',
+    'about',
+    'into',
+    'to',
+    'from',
+    'in',
+    'on',
+    'is',
+    'are',
+    'was',
+    'were',
+    'be',
+    'been',
+    'being',
+    'do',
+    'does',
+    'did',
+    'have',
+    'has',
+    'had',
+    'i',
+    'you',
+    'he',
+    'she',
+    'it',
+    'we',
+    'they',
+    'me',
+    'him',
+    'her',
+    'us',
+    'them',
+    'my',
+    'your',
+    'his',
+    'its',
+    'our',
+    'their',
+    'this',
+    'that',
+    'these',
+    'those',
+    'what',
+    'which',
+    'who',
+    'whom',
+    'how',
+    'when',
+    'where',
+    'why',
+    'not',
+    'no',
+    'yes',
+    'can',
+    'could',
+    'should',
+    'would',
+    'will',
+    'shall',
+    'may',
+    'might',
+    'must',
+    'just',
+    'also',
+    'very',
+    'really',
+    'some',
+    'any',
+    'all',
+    'get',
+    'got',
+    'make',
+    'made',
+    'like',
+    'want',
+    'need',
+    'know',
+    'think',
+    'thought',
+    'there',
+    'here',
+    'than',
+    'tell',
+    'give',
+    'show',
+    'help',
+    'please',
+    'thanks',
+    'thank',
+    'okay',
   };
 
   /// Extracts distinctive keywords from [text] for use as BM25 query terms.
@@ -102,7 +195,9 @@ class MemoryRecallEngine {
 
   /// Reduces a word to its common stem for wider prefix matching.
   static String stemWord(String word) {
-    if (word.endsWith('ies') && word.length > 4) return '${word.substring(0, word.length - 3)}y';
+    if (word.endsWith('ies') && word.length > 4) {
+      return '${word.substring(0, word.length - 3)}y';
+    }
     if (word.endsWith('ing') && word.length > 5) {
       var base = word.substring(0, word.length - 3);
       if (base.length >= 3 && base[base.length - 1] == base[base.length - 2]) {
@@ -110,9 +205,15 @@ class MemoryRecallEngine {
       }
       return base;
     }
-    if (word.endsWith('es') && word.length > 4) return word.substring(0, word.length - 2);
-    if (word.endsWith('s') && !word.endsWith('ss') && word.length > 3) return word.substring(0, word.length - 1);
-    if (word.endsWith('ed') && word.length > 4) return word.substring(0, word.length - 2);
+    if (word.endsWith('es') && word.length > 4) {
+      return word.substring(0, word.length - 2);
+    }
+    if (word.endsWith('s') && !word.endsWith('ss') && word.length > 3) {
+      return word.substring(0, word.length - 1);
+    }
+    if (word.endsWith('ed') && word.length > 4) {
+      return word.substring(0, word.length - 2);
+    }
     return word;
   }
 
@@ -120,7 +221,8 @@ class MemoryRecallEngine {
 
   /// Returns true if the user is asking what the assistant knows about them.
   bool isMetaMemoryQuery(String text) {
-    final norm = text.toLowerCase().trim().replaceAll(RegExp(r'''[.,!?;:'"]'''), ' ');
+    final norm =
+        text.toLowerCase().trim().replaceAll(RegExp(r'''[.,!?;:'"]'''), ' ');
     final patterns = [
       RegExp(r'what\s+(do\s+you\s+)?know\s+(about\s+)?(me|myself)'),
       RegExp(r'what\s+(do\s+you\s+)?remember(\s+about\s+(me|us))?'),
@@ -140,15 +242,22 @@ class MemoryRecallEngine {
   /// Detects an explicit "forget about X" directive. Returns the topic or null.
   String? detectForgetDirective(String text) {
     final patterns = [
-      RegExp(r'^(?:please\s+)?forget\s+(?:about\s+)?(?:all\s+(?:about\s+)?)?(.+)', caseSensitive: false),
-      RegExp(r'^(?:please\s+)?(?:delete|remove)\s+(.+?)\s+(?:from\s+(?:your\s+|my\s+)?memory|from\s+vault)', caseSensitive: false),
-      RegExp(r"^(?:please\s+)?don'?t\s+remember\s+(?:about\s+)?(.+)", caseSensitive: false),
-      RegExp(r'^(?:please\s+)?erase\s+(.+?)\s+from\s+memory', caseSensitive: false),
+      RegExp(
+          r'^(?:please\s+)?forget\s+(?:about\s+)?(?:all\s+(?:about\s+)?)?(.+)',
+          caseSensitive: false),
+      RegExp(
+          r'^(?:please\s+)?(?:delete|remove)\s+(.+?)\s+(?:from\s+(?:your\s+|my\s+)?memory|from\s+vault)',
+          caseSensitive: false),
+      RegExp(r"^(?:please\s+)?don'?t\s+remember\s+(?:about\s+)?(.+)",
+          caseSensitive: false),
+      RegExp(r'^(?:please\s+)?erase\s+(.+?)\s+from\s+memory',
+          caseSensitive: false),
     ];
     for (final p in patterns) {
       final m = p.firstMatch(text.trim());
       if (m != null && m.groupCount >= 1) {
-        final topic = (m.group(1) ?? '').trim().replaceAll(RegExp(r'[.,!?;:]+$'), '');
+        final topic =
+            (m.group(1) ?? '').trim().replaceAll(RegExp(r'[.,!?;:]+$'), '');
         if (topic.length >= 2) return topic;
       }
     }
@@ -240,7 +349,8 @@ class MemoryRecallEngine {
       final score = 1.0 / (rrfK + i + 1);
       if (fusedMap.containsKey(m.id)) {
         final existing = fusedMap[m.id]!;
-        fusedMap[m.id] = (memory: existing.memory, rrfScore: existing.rrfScore + score);
+        fusedMap[m.id] =
+            (memory: existing.memory, rrfScore: existing.rrfScore + score);
       } else {
         fusedMap[m.id] = (memory: m, rrfScore: score);
       }
@@ -312,10 +422,10 @@ class MemoryRecallEngine {
               (assistantRows.first['content'] as String).length > 280
                   ? 280
                   : (assistantRows.first['content'] as String).length);
-          final date = DateTime.fromMillisecondsSinceEpoch(
-                  row['createdAt'] as int)
-              .toIso8601String()
-              .substring(0, 10);
+          final date =
+              DateTime.fromMillisecondsSinceEpoch(row['createdAt'] as int)
+                  .toIso8601String()
+                  .substring(0, 10);
           candidates.add(PriorDeliverable(
             sessionId: sessionId,
             date: date,
@@ -366,8 +476,11 @@ class MemoryRecallEngine {
   // ── Helper ─────────────────────────────────────────────────────────────────
 
   RecalledMemory _rowToMemory(Map<String, dynamic> row, {double? rank}) {
-    final ts = row['created_at'] as int? ?? DateTime.now().millisecondsSinceEpoch;
-    final date = DateTime.fromMillisecondsSinceEpoch(ts).toIso8601String().substring(0, 10);
+    final ts =
+        row['created_at'] as int? ?? DateTime.now().millisecondsSinceEpoch;
+    final date = DateTime.fromMillisecondsSinceEpoch(ts)
+        .toIso8601String()
+        .substring(0, 10);
     return RecalledMemory(
       id: row['id'] as int,
       content: row['content'] as String,

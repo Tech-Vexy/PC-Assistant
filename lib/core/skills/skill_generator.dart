@@ -34,8 +34,8 @@ class SkillDefinition {
       name: json['name'] as String,
       description: json['description'] as String? ?? '',
       parameters: (json['parameters'] as List<dynamic>? ?? []).cast<String>(),
-      steps: (json['steps'] as List<dynamic>? ?? [])
-          .cast<Map<String, dynamic>>(),
+      steps:
+          (json['steps'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>(),
       generatedBy: json['generated_by'] as String? ?? 'ai',
       createdAt: DateTime.fromMillisecondsSinceEpoch(
           json['created_at'] as int? ?? DateTime.now().millisecondsSinceEpoch),
@@ -175,7 +175,8 @@ Synthesize these into a reusable workflow skill.
         systemPrompt: _skillLearnSystemPrompt,
         userMessage: prompt,
         temperature: 0.2,
-      );      return _parseSkillDefinition(raw, generatedBy: 'learned');
+      );
+      return _parseSkillDefinition(raw, generatedBy: 'learned');
     } catch (_) {
       return null;
     }
@@ -232,15 +233,17 @@ Synthesize these into a reusable workflow skill.
     );
   }
 
-  SkillDefinition? _parseSkillDefinition(String raw, {required String generatedBy}) {
+  SkillDefinition? _parseSkillDefinition(String raw,
+      {required String generatedBy}) {
     final start = raw.indexOf('{');
     final end = raw.lastIndexOf('}');
     if (start == -1 || end <= start) return null;
 
     try {
-      final obj = jsonDecode(raw.substring(start, end + 1)) as Map<String, dynamic>;
-      final steps = (obj['steps'] as List<dynamic>? ?? [])
-          .cast<Map<String, dynamic>>();
+      final obj =
+          jsonDecode(raw.substring(start, end + 1)) as Map<String, dynamic>;
+      final steps =
+          (obj['steps'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
       if (steps.isEmpty) return null;
 
       return SkillDefinition(

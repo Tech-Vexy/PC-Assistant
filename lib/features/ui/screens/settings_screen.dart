@@ -481,21 +481,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
             Card(
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
-                side: BorderSide(color: Colors.blueAccent.withValues(alpha: 0.3)),
+                side:
+                    BorderSide(color: Colors.blueAccent.withValues(alpha: 0.3)),
               ),
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(
                   children: [
                     ListTile(
-                      leading: const Icon(Icons.assistant, color: Colors.blueAccent),
+                      leading:
+                          const Icon(Icons.assistant, color: Colors.blueAccent),
                       title: const Text('Default Digital Assistant'),
                       subtitle: const Text(
                         'Launch assistant from anywhere via long-press home, power button, or navigation gestures',
                         style: TextStyle(fontSize: 12),
                       ),
                       trailing: ElevatedButton(
-                        onPressed: () => _androidBridge.openDefaultAssistantSettings(),
+                        onPressed: () =>
+                            _androidBridge.openDefaultAssistantSettings(),
                         child: const Text('Configure'),
                       ),
                     ),
@@ -503,7 +506,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ListTile(
                       leading: Icon(
                         Icons.shield,
-                        color: _isDeviceAdminActive ? Colors.green : Colors.amberAccent,
+                        color: _isDeviceAdminActive
+                            ? Colors.green
+                            : Colors.amberAccent,
                       ),
                       title: const Text('Device Administrator Elevation'),
                       subtitle: Text(
@@ -514,14 +519,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                       trailing: _isDeviceAdminActive
                           ? const Chip(
-                              label: Text('Active', style: TextStyle(fontSize: 11)),
+                              label: Text('Active',
+                                  style: TextStyle(fontSize: 11)),
                               backgroundColor: Colors.green,
                             )
                           : ElevatedButton(
                               onPressed: () async {
                                 await _androidBridge.requestDeviceAdmin();
-                                final active = await _androidBridge.isDeviceAdminActive();
-                                if (mounted) setState(() => _isDeviceAdminActive = active);
+                                final active =
+                                    await _androidBridge.isDeviceAdminActive();
+                                if (mounted) {
+                                  setState(() => _isDeviceAdminActive = active);
+                                }
                               },
                               child: const Text('Grant Admin'),
                             ),
@@ -543,17 +552,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                       trailing: _isNotificationListenerActive
                           ? const Chip(
-                              label: Text('Active', style: TextStyle(fontSize: 11)),
+                              label: Text('Active',
+                                  style: TextStyle(fontSize: 11)),
                               backgroundColor: Colors.green,
                             )
                           : ElevatedButton(
                               onPressed: () async {
-                                await _androidBridge.openNotificationListenerSettings();
+                                await _androidBridge
+                                    .openNotificationListenerSettings();
                                 final active = await _androidBridge
                                     .isNotificationListenerEnabled();
                                 if (mounted) {
-                                  setState(
-                                      () => _isNotificationListenerActive = active);
+                                  setState(() =>
+                                      _isNotificationListenerActive = active);
                                 }
                               },
                               child: const Text('Configure'),

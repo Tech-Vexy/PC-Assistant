@@ -86,7 +86,9 @@ void main() {
       expect(db.getArchivedNotifications().isEmpty, isTrue);
     });
 
-    test('NotificationMessagingService triages into urgent, informational, and low priority', () async {
+    test(
+        'NotificationMessagingService triages into urgent, informational, and low priority',
+        () async {
       // 1. WhatsApp direct message -> urgent_message
       db.archiveNotification(
         key: 'msg_1',
@@ -121,11 +123,13 @@ void main() {
 
       expect(triage.urgentMessages.length, equals(1));
       expect(triage.urgentMessages.first.title, equals('Mom'));
-      expect(triage.urgentMessages.first.triageCategory, equals('urgent_message'));
+      expect(
+          triage.urgentMessages.first.triageCategory, equals('urgent_message'));
 
       expect(triage.informational.length, equals(1));
       expect(triage.informational.first.appName, equals('Calendar'));
-      expect(triage.informational.first.triageCategory, equals('important_info'));
+      expect(
+          triage.informational.first.triageCategory, equals('important_info'));
 
       expect(triage.lowPriority.length, equals(1));
       expect(triage.lowPriority.first.title, equals('Summer Sale'));
@@ -169,11 +173,17 @@ void main() {
       final notifs = await notifService.getNotifications();
       expect(notifs.length, equals(1));
       expect(notifs.first.packageName, equals('com.slack'));
-      expect(notifs.any((n) => n.packageName == 'com.chase.sig.android'), isFalse);
-      expect(notifs.any((n) => n.packageName == 'com.google.android.apps.authenticator2'), isFalse);
+      expect(
+          notifs.any((n) => n.packageName == 'com.chase.sig.android'), isFalse);
+      expect(
+          notifs.any(
+              (n) => n.packageName == 'com.google.android.apps.authenticator2'),
+          isFalse);
     });
 
-    test('ToolDispatcher dispatches list_notifications, triage_notifications, and read_notifications_summary', () async {
+    test(
+        'ToolDispatcher dispatches list_notifications, triage_notifications, and read_notifications_summary',
+        () async {
       db.archiveNotification(
         key: 'n_telegram',
         packageName: 'org.telegram.messenger',
@@ -209,15 +219,20 @@ void main() {
       );
       expect(summaryRes.containsKey('summary'), isTrue);
       expect(summaryRes['urgent_count'], equals(1));
-      expect((summaryRes['summary'] as String).contains('direct message'), isTrue);
+      expect(
+          (summaryRes['summary'] as String).contains('direct message'), isTrue);
     });
 
-    test('Empty notification inbox returns peaceful all caught up message', () async {
+    test('Empty notification inbox returns peaceful all caught up message',
+        () async {
       final triage = await notifService.triageNotifications();
       expect(triage.urgentMessages.isEmpty, isTrue);
       expect(triage.informational.isEmpty, isTrue);
       expect(triage.lowPriority.isEmpty, isTrue);
-      expect(triage.executiveSummary, equals('You are all caught up! No active notifications or messages.'));
+      expect(
+          triage.executiveSummary,
+          equals(
+              'You are all caught up! No active notifications or messages.'));
     });
   });
 }

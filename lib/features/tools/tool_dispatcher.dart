@@ -556,7 +556,8 @@ class ToolDispatcher {
 
   /// Saves a rich memory fact (content-addressed, auto-deduplicated, indexed in FTS5 + vector).
   Map<String, dynamic> _handleSaveMemory(Map<String, dynamic> args) {
-    final content = args['content'] as String? ?? args['value'] as String? ?? '';
+    final content =
+        args['content'] as String? ?? args['value'] as String? ?? '';
     if (content.trim().isEmpty) return {'error': 'content is required'};
     final category = (args['category'] as String?) ?? 'general';
     final importance = (args['importance'] as num?)?.toDouble() ?? 0.5;
@@ -574,9 +575,17 @@ class ToolDispatcher {
     );
 
     if (id == -1) {
-      return {'status': 'duplicate', 'message': 'A similar memory already exists'};
+      return {
+        'status': 'duplicate',
+        'message': 'A similar memory already exists'
+      };
     }
-    return {'status': 'saved', 'id': id, 'content': content, 'category': category};
+    return {
+      'status': 'saved',
+      'id': id,
+      'content': content,
+      'category': category
+    };
   }
 
   /// Hybrid BM25 + vector recall search across all memories.
@@ -610,7 +619,8 @@ class ToolDispatcher {
     final core = _recall.coreMemories(limit: 20);
     if (core.isEmpty) {
       return {
-        'message': 'No memories saved yet. I will learn about you as we interact.',
+        'message':
+            'No memories saved yet. I will learn about you as we interact.',
         'count': 0,
         'memories': [],
       };
@@ -646,8 +656,7 @@ class ToolDispatcher {
     return {
       'status': 'generated',
       'skill': skill.toJson(),
-      'message':
-          'Skill "${skill.name}" generated and saved as a workflow. '
+      'message': 'Skill "${skill.name}" generated and saved as a workflow. '
           'Call run_workflow with name "${skill.name}" to execute it.',
     };
   }
@@ -676,7 +685,9 @@ class ToolDispatcher {
     );
 
     if (skill == null) {
-      return {'error': 'Could not synthesize a skill from the provided history.'};
+      return {
+        'error': 'Could not synthesize a skill from the provided history.'
+      };
     }
 
     db.saveWorkflow(skill.name,
@@ -941,7 +952,8 @@ class ToolDispatcher {
     return {
       'count': summary.length,
       'skills': summary,
-      'message': 'Lightweight skills summary (Progressive Disclosure L1). Call view_workflow_skill for full instructions.',
+      'message':
+          'Lightweight skills summary (Progressive Disclosure L1). Call view_workflow_skill for full instructions.',
     };
   }
 
@@ -1729,7 +1741,8 @@ class ToolDispatcher {
 
   // --- DESKTOP AUTOMATION HANDLERS ---
 
-  Future<Map<String, dynamic>> _handleMoveMouse(Map<String, dynamic> args) async {
+  Future<Map<String, dynamic>> _handleMoveMouse(
+      Map<String, dynamic> args) async {
     if (desktopDriver == null) {
       return {'error': 'Desktop automation is not available on this platform'};
     }
@@ -1747,7 +1760,8 @@ class ToolDispatcher {
     };
   }
 
-  Future<Map<String, dynamic>> _handleClickMouse(Map<String, dynamic> args) async {
+  Future<Map<String, dynamic>> _handleClickMouse(
+      Map<String, dynamic> args) async {
     if (desktopDriver == null) {
       return {'error': 'Desktop automation is not available on this platform'};
     }
@@ -1788,7 +1802,8 @@ class ToolDispatcher {
     };
   }
 
-  Future<Map<String, dynamic>> _handlePressKey(Map<String, dynamic> args) async {
+  Future<Map<String, dynamic>> _handlePressKey(
+      Map<String, dynamic> args) async {
     if (desktopDriver == null) {
       return {'error': 'Desktop automation is not available on this platform'};
     }
@@ -1826,7 +1841,8 @@ class ToolDispatcher {
     };
   }
 
-  Future<Map<String, dynamic>> _handleScrollMouse(Map<String, dynamic> args) async {
+  Future<Map<String, dynamic>> _handleScrollMouse(
+      Map<String, dynamic> args) async {
     if (desktopDriver == null) {
       return {'error': 'Desktop automation is not available on this platform'};
     }
@@ -1834,7 +1850,8 @@ class ToolDispatcher {
     final deltaX = (args['delta_x'] as num?)?.toInt() ?? 0;
     final deltaY = (args['delta_y'] as num?)?.toInt() ?? 0;
 
-    final success = await desktopDriver!.scrollMouse(deltaX: deltaX, deltaY: deltaY);
+    final success =
+        await desktopDriver!.scrollMouse(deltaX: deltaX, deltaY: deltaY);
     return {
       'status': success ? 'done' : 'error',
       'delta_x': deltaX,
@@ -1875,7 +1892,8 @@ class ToolDispatcher {
     };
   }
 
-  Future<Map<String, dynamic>> _handleCloseApp(Map<String, dynamic> args) async {
+  Future<Map<String, dynamic>> _handleCloseApp(
+      Map<String, dynamic> args) async {
     if (desktopDriver == null) {
       return {'error': 'Desktop automation is not available on this platform'};
     }
@@ -1926,7 +1944,8 @@ class ToolDispatcher {
     return await androidBridge!.getSmsMessages(kind: kind, limit: limit);
   }
 
-  Future<Map<String, dynamic>> _handleMakeCall(Map<String, dynamic> args) async {
+  Future<Map<String, dynamic>> _handleMakeCall(
+      Map<String, dynamic> args) async {
     if (androidBridge == null) {
       return {'error': 'Telephony is not available on this platform'};
     }
@@ -1972,13 +1991,15 @@ class ToolDispatcher {
       await androidBridge!.requestDeviceAdmin();
       return {
         'status': 'admin_required',
-        'message': 'Device Administrator permission is required. Elevation prompt opened.',
+        'message':
+            'Device Administrator permission is required. Elevation prompt opened.',
       };
     }
     final ok = await androidBridge!.lockDeviceNow();
     return {
       'status': ok ? 'locked' : 'failed',
-      'message': ok ? 'Device screen locked successfully.' : 'Could not lock screen.',
+      'message':
+          ok ? 'Device screen locked successfully.' : 'Could not lock screen.',
     };
   }
 
@@ -2037,7 +2058,10 @@ class ToolDispatcher {
     final text = args['reply_text'] as String? ?? '';
 
     if (key.isEmpty || text.isEmpty) {
-      return {'status': 'error', 'error': 'notification_key and reply_text are required.'};
+      return {
+        'status': 'error',
+        'error': 'notification_key and reply_text are required.'
+      };
     }
 
     final ok = await _notifService.replyToNotification(key, text);

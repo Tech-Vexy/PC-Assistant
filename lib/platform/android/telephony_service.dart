@@ -22,7 +22,8 @@ class TelephonyService {
 
     try {
       // Check if telephony is available
-      final isAvailable = await _telephony.requestPhoneAndSmsPermissions ?? false;
+      final isAvailable =
+          await _telephony.requestPhoneAndSmsPermissions ?? false;
       _isInitialized = isAvailable;
       return _isInitialized;
     } catch (e) {
@@ -81,13 +82,16 @@ class TelephonyService {
         ],
       );
 
-      final messageList = messages.take(limit).map((msg) => {
-        'id': msg.id,
-        'address': msg.address,
-        'body': msg.body,
-        'date': msg.date,
-        'type': msg.type,
-      }).toList();
+      final messageList = messages
+          .take(limit)
+          .map((msg) => {
+                'id': msg.id,
+                'address': msg.address,
+                'body': msg.body,
+                'date': msg.date,
+                'type': msg.type,
+              })
+          .toList();
 
       return {
         'status': 'done',

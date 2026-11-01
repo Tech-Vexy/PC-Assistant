@@ -45,9 +45,11 @@ class DartanticFirebaseAgent implements GeminiAgentEngine {
       // Agent.providerFactories['firebase-google'] = () => FirebaseAIProvider(backend: FirebaseAIBackend.googleAI);
       // Agent.providerFactories['firebase-vertex'] = () => FirebaseAIProvider(backend: FirebaseAIBackend.vertexAI);
       _isReady = true;
-      debugPrint('[DartanticFirebaseAgent] Initialized with model: $modelName (Vertex: $useVertex)');
+      debugPrint(
+          '[DartanticFirebaseAgent] Initialized with model: $modelName (Vertex: $useVertex)');
     } catch (e) {
-      debugPrint('[DartanticFirebaseAgent] Init error (falling back to direct client): $e');
+      debugPrint(
+          '[DartanticFirebaseAgent] Init error (falling back to direct client): $e');
       _isReady = false;
     }
   }
@@ -61,7 +63,7 @@ class DartanticFirebaseAgent implements GeminiAgentEngine {
     // When Dartantic dependencies are compiled in environment:
     // final agent = Agent(useVertex ? 'firebase-vertex:$modelName' : 'firebase-google:$modelName', tools: _buildTools());
     // return await agent.prompt(prompt);
-    
+
     // For now we delegate tool-aware execution cleanly:
     final toolResult = await _dispatchIfToolIntent(prompt);
     if (toolResult != null) {

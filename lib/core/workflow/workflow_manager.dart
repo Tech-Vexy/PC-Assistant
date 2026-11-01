@@ -14,9 +14,9 @@ class HermesSkillDocument {
   String get name => frontmatter['name']?.toString() ?? 'unnamed_workflow';
   String get description => frontmatter['description']?.toString() ?? '';
   String get version => frontmatter['version']?.toString() ?? '1.0.0';
-  List<String> get platforms =>
-      (frontmatter['platforms'] as List<dynamic>? ?? ['android', 'linux', 'windows', 'macos'])
-          .cast<String>();
+  List<String> get platforms => (frontmatter['platforms'] as List<dynamic>? ??
+          ['android', 'linux', 'windows', 'macos'])
+      .cast<String>();
   Map<String, dynamic> get parameters =>
       (frontmatter['parameters'] as Map<String, dynamic>? ?? {});
   List<String> get tags =>
@@ -167,7 +167,8 @@ class HermesWorkflowManager {
       'status': 'saved',
       'name': cleanName,
       'version': version,
-      'message': 'Workflow skill "$cleanName" saved successfully in Hermes format.',
+      'message':
+          'Workflow skill "$cleanName" saved successfully in Hermes format.',
     };
   }
 
@@ -203,7 +204,8 @@ class HermesWorkflowManager {
       newVer = '${verParts[0]}.${verParts[1]}.$patchNum';
     }
 
-    final steps = (existing['steps'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+    final steps = (existing['steps'] as List<dynamic>? ?? [])
+        .cast<Map<String, dynamic>>();
 
     // Scan patched content
     final scan = WorkflowGuard.scan(
@@ -256,7 +258,8 @@ class HermesWorkflowManager {
     if (!ok) {
       return {
         'status': 'error',
-        'error': 'Failed to rollback "$name" to ledger ID #$versionId. Version not found.',
+        'error':
+            'Failed to rollback "$name" to ledger ID #$versionId. Version not found.',
       };
     }
     return {

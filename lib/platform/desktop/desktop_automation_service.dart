@@ -21,7 +21,9 @@ class DesktopAutomationService {
 
   /// Initialize the desktop automation backend
   Future<bool> initialize() async {
-    if (!Platform.isWindows && !Platform.isLinux && !Platform.isMacOS) return false;
+    if (!Platform.isWindows && !Platform.isLinux && !Platform.isMacOS) {
+      return false;
+    }
     if (_isInitialized) return true;
 
     try {
@@ -174,7 +176,10 @@ class DesktopAutomationService {
               if (parts.isNotEmpty) {
                 final name = parts[0].replaceAll('"', '').trim();
                 if (name.isNotEmpty) {
-                  apps.add({'name': name, 'pid': parts.length > 1 ? parts[1].replaceAll('"', '') : ''});
+                  apps.add({
+                    'name': name,
+                    'pid': parts.length > 1 ? parts[1].replaceAll('"', '') : ''
+                  });
                 }
               }
             }

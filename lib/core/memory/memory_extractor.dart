@@ -25,18 +25,36 @@ bool _shouldExtract(String userMessage) {
 
   final trimmed = norm.replaceAll(RegExp(r'[.,!?;:]'), '');
   const trivial = {
-    'hi', 'hello', 'hey', 'thanks', 'thank you', 'ok', 'okay',
-    'cool', 'yes', 'no', 'yep', 'nope', 'sure', 'bye', 'goodbye',
-    "let's continue", 'lets continue', 'continue', 'whats up', "what's up",
-    'good morning', 'good evening', 'how are you', 'who are you',
+    'hi',
+    'hello',
+    'hey',
+    'thanks',
+    'thank you',
+    'ok',
+    'okay',
+    'cool',
+    'yes',
+    'no',
+    'yep',
+    'nope',
+    'sure',
+    'bye',
+    'goodbye',
+    "let's continue",
+    'lets continue',
+    'continue',
+    'whats up',
+    "what's up",
+    'good morning',
+    'good evening',
+    'how are you',
+    'who are you',
   };
   if (trivial.contains(trimmed)) return false;
 
   // Need at least 2 distinctive keywords (3+ chars)
-  final words = trimmed
-      .split(RegExp(r'\s+'))
-      .where((w) => w.length >= 3)
-      .toSet();
+  final words =
+      trimmed.split(RegExp(r'\s+')).where((w) => w.length >= 3).toSet();
   return words.length >= 2;
 }
 
@@ -123,7 +141,8 @@ class MemoryExtractor {
     if (start == -1 || end <= start) return [];
 
     try {
-      final obj = jsonDecode(raw.substring(start, end + 1)) as Map<String, dynamic>;
+      final obj =
+          jsonDecode(raw.substring(start, end + 1)) as Map<String, dynamic>;
       final list = obj['memories'];
       if (list is! List) return [];
       return list

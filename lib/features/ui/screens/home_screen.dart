@@ -228,7 +228,13 @@ class _HomeScreenState extends State<HomeScreen>
         } else {
           final customPhrase = await widget.keyVault.getCustomHotword();
           await _androidBridge!.startHotwordListening(
-            hotwords: [customPhrase, 'hey assistant', 'ok assistant', 'device assistant', 'jarvis'],
+            hotwords: [
+              customPhrase,
+              'hey assistant',
+              'ok assistant',
+              'device assistant',
+              'jarvis'
+            ],
           );
         }
       }
@@ -1041,7 +1047,8 @@ If the user query is a general knowledge question, conversational request, or ex
                           colors: [Colors.cyanAccent, Colors.indigoAccent],
                         ),
                       ),
-                      child: const Icon(Icons.hub_outlined, color: Colors.white, size: 18),
+                      child: const Icon(Icons.hub_outlined,
+                          color: Colors.white, size: 18),
                     ),
                     const SizedBox(width: 10),
                     const Expanded(
@@ -1056,11 +1063,13 @@ If the user query is a general knowledge question, conversational request, or ex
                       ),
                     ),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
                         color: _statusColor.withValues(alpha: 0.18),
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: _statusColor.withValues(alpha: 0.5)),
+                        border: Border.all(
+                            color: _statusColor.withValues(alpha: 0.5)),
                         boxShadow: [
                           BoxShadow(
                             color: _statusColor.withValues(alpha: 0.25),
@@ -1071,23 +1080,29 @@ If the user query is a general knowledge question, conversational request, or ex
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          CircleAvatar(radius: 4, backgroundColor: _statusColor),
+                          CircleAvatar(
+                              radius: 4, backgroundColor: _statusColor),
                           const SizedBox(width: 6),
                           Text(
                             _statusLabel,
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _statusColor),
+                            style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: _statusColor),
                           ),
                         ],
                       ),
                     ),
                     const SizedBox(width: 4),
                     IconButton(
-                      icon: const Icon(Icons.shield_outlined, color: Colors.white70),
+                      icon: const Icon(Icons.shield_outlined,
+                          color: Colors.white70),
                       tooltip: 'Privacy Shield',
                       onPressed: _openShield,
                     ),
                     IconButton(
-                      icon: const Icon(Icons.settings_outlined, color: Colors.white70),
+                      icon: const Icon(Icons.settings_outlined,
+                          color: Colors.white70),
                       tooltip: 'Settings & Keys',
                       onPressed: () {
                         Navigator.push(
@@ -1200,7 +1215,8 @@ If the user query is a general knowledge question, conversational request, or ex
         color: Colors.amber,
         borderRadius: BorderRadius.circular(18),
         padding: const EdgeInsets.all(12),
-        border: Border.all(color: Colors.amberAccent.withValues(alpha: 0.5), width: 1.2),
+        border: Border.all(
+            color: Colors.amberAccent.withValues(alpha: 0.5), width: 1.2),
         shadows: [
           BoxShadow(
             color: Colors.amberAccent.withValues(alpha: 0.2),
@@ -1216,7 +1232,8 @@ If the user query is a general knowledge question, conversational request, or ex
                 shape: BoxShape.circle,
                 color: Colors.amber.withValues(alpha: 0.2),
               ),
-              child: const Icon(Icons.devices, color: Colors.amberAccent, size: 20),
+              child: const Icon(Icons.devices,
+                  color: Colors.amberAccent, size: 20),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -1245,7 +1262,8 @@ If the user query is a general knowledge question, conversational request, or ex
             ),
             TextButton(
               onPressed: () => _resolvePcApproval(id, false),
-              child: const Text('Deny', style: TextStyle(color: Colors.white54)),
+              child:
+                  const Text('Deny', style: TextStyle(color: Colors.white54)),
             ),
             const SizedBox(width: 4),
             FilledButton(
@@ -1255,7 +1273,8 @@ If the user query is a general knowledge question, conversational request, or ex
                 padding: const EdgeInsets.symmetric(horizontal: 12),
               ),
               onPressed: () => _resolvePcApproval(id, true),
-              child: const Text('Approve', style: TextStyle(fontWeight: FontWeight.bold)),
+              child: const Text('Approve',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
             ),
           ],
         ),
@@ -1273,7 +1292,8 @@ If the user query is a general knowledge question, conversational request, or ex
         color: bgColor,
         borderRadius: BorderRadius.circular(16),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        border: Border.all(color: iconColor.withValues(alpha: 0.45), width: 1.2),
+        border:
+            Border.all(color: iconColor.withValues(alpha: 0.45), width: 1.2),
         child: Row(
           children: [
             Icon(icon, color: iconColor, size: 20),
@@ -1288,7 +1308,8 @@ If the user query is a general knowledge question, conversational request, or ex
               onPressed: onButtonPressed,
               style: TextButton.styleFrom(
                 foregroundColor: iconColor,
-                textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                textStyle:
+                    const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
               ),
               child: Text(buttonText),
             ),
@@ -1344,14 +1365,18 @@ If the user query is a general knowledge question, conversational request, or ex
                   blur: 16,
                   opacity: 0.12,
                   borderRadius: BorderRadius.circular(16),
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                   border: Border.all(
                     color: Colors.tealAccent.withValues(alpha: 0.4),
                     width: 1.2,
                   ),
                   child: Text(
                     _currentVoiceTranscript,
-                    style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w500),
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w500),
                     textAlign: TextAlign.center,
                   ),
                 ),
@@ -1424,7 +1449,8 @@ If the user query is a general knowledge question, conversational request, or ex
             const SizedBox(height: 6),
             Text(
               _summarizeToolResult(result),
-              style: const TextStyle(fontSize: 12, color: Colors.white70, height: 1.4),
+              style: const TextStyle(
+                  fontSize: 12, color: Colors.white70, height: 1.4),
             ),
           ],
         ),
@@ -1544,7 +1570,9 @@ If the user query is a general knowledge question, conversational request, or ex
               child: Text(
                 message.text,
                 style: TextStyle(
-                  color: isUser ? Colors.white : Colors.white.withValues(alpha: 0.9),
+                  color: isUser
+                      ? Colors.white
+                      : Colors.white.withValues(alpha: 0.9),
                   fontSize: 14.5,
                   height: 1.35,
                 ),
@@ -1605,8 +1633,12 @@ If the user query is a general knowledge question, conversational request, or ex
           child: Row(
             children: [
               GlassActionButton(
-                icon: _isCameraStreaming ? Icons.videocam : Icons.videocam_outlined,
-                tooltip: _isCameraStreaming ? 'Stop camera vision' : 'Start camera vision',
+                icon: _isCameraStreaming
+                    ? Icons.videocam
+                    : Icons.videocam_outlined,
+                tooltip: _isCameraStreaming
+                    ? 'Stop camera vision'
+                    : 'Start camera vision',
                 active: _isCameraStreaming,
                 onPressed: _toggleCameraStreaming,
                 size: 42,
@@ -1625,7 +1657,8 @@ If the user query is a general knowledge question, conversational request, or ex
                     hintStyle: TextStyle(color: Colors.white38, fontSize: 13),
                     border: InputBorder.none,
                     isDense: true,
-                    contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 10, vertical: 10),
                   ),
                 ),
               ),

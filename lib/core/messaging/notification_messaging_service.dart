@@ -13,7 +13,8 @@ class NotificationItem {
   final String content;
   final DateTime timestamp;
   final bool canReply;
-  final String triageCategory; // 'urgent_message', 'important_info', 'low_priority'
+  final String
+      triageCategory; // 'urgent_message', 'important_info', 'low_priority'
 
   const NotificationItem({
     required this.key,
@@ -118,7 +119,8 @@ class NotificationMessagingService {
         final title = raw['title']?.toString() ?? '';
         final text = raw['text']?.toString() ?? '';
         final key = raw['key']?.toString() ?? '';
-        final ts = raw['timestamp'] as int? ?? DateTime.now().millisecondsSinceEpoch;
+        final ts =
+            raw['timestamp'] as int? ?? DateTime.now().millisecondsSinceEpoch;
         final canReply = raw['canReply'] == true;
 
         if (title.isEmpty && text.isEmpty) continue;
@@ -165,7 +167,8 @@ class NotificationMessagingService {
 
       final title = row['title']?.toString() ?? '';
       final content = row['content']?.toString() ?? '';
-      final ts = row['timestamp'] as int? ?? DateTime.now().millisecondsSinceEpoch;
+      final ts =
+          row['timestamp'] as int? ?? DateTime.now().millisecondsSinceEpoch;
 
       items.add(NotificationItem(
         key: key,
@@ -242,14 +245,20 @@ class NotificationMessagingService {
     required String message,
   }) async {
     if (!Platform.isAndroid) {
-      return {'status': 'error', 'error': 'SMS sending is only supported on Android devices.'};
+      return {
+        'status': 'error',
+        'error': 'SMS sending is only supported on Android devices.'
+      };
     }
 
     try {
       final telephony = Telephony.instance;
       final perm = await telephony.isSmsCapable;
       if (perm != true) {
-        return {'status': 'error', 'error': 'Device is not capable of sending SMS.'};
+        return {
+          'status': 'error',
+          'error': 'Device is not capable of sending SMS.'
+        };
       }
 
       await telephony.sendSms(
@@ -314,11 +323,13 @@ class NotificationMessagingService {
 
     if (informational.isNotEmpty) {
       final count = informational.length;
-      parts.add('$count update${count > 1 ? 's' : ''} (including ${informational.first.appName})');
+      parts.add(
+          '$count update${count > 1 ? 's' : ''} (including ${informational.first.appName})');
     }
 
     if (lowPriority.isNotEmpty) {
-      parts.add('${lowPriority.length} low-priority alert${lowPriority.length > 1 ? 's' : ''}');
+      parts.add(
+          '${lowPriority.length} low-priority alert${lowPriority.length > 1 ? 's' : ''}');
     }
 
     return 'Summary: ${parts.join('; ')}.';

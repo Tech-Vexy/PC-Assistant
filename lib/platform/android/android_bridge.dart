@@ -474,7 +474,10 @@ class AndroidBridge {
     required String message,
   }) async {
     if (!_isAndroid || _telephonyService == null) {
-      return {'status': 'error', 'error': 'Telephony not available on this platform'};
+      return {
+        'status': 'error',
+        'error': 'Telephony not available on this platform'
+      };
     }
     return await _telephonyService!.sendSms(
       phoneNumber: phoneNumber,
@@ -488,7 +491,10 @@ class AndroidBridge {
     int limit = 50,
   }) async {
     if (!_isAndroid || _telephonyService == null) {
-      return {'status': 'error', 'error': 'Telephony not available on this platform'};
+      return {
+        'status': 'error',
+        'error': 'Telephony not available on this platform'
+      };
     }
     return await _telephonyService!.getSmsMessages(kind: kind, limit: limit);
   }
@@ -496,7 +502,10 @@ class AndroidBridge {
   /// Make a phone call
   Future<Map<String, dynamic>> makeCall(String phoneNumber) async {
     if (!_isAndroid || _telephonyService == null) {
-      return {'status': 'error', 'error': 'Telephony not available on this platform'};
+      return {
+        'status': 'error',
+        'error': 'Telephony not available on this platform'
+      };
     }
     return await _telephonyService!.makeCall(phoneNumber);
   }
@@ -504,7 +513,10 @@ class AndroidBridge {
   /// Get network information
   Future<Map<String, dynamic>> getNetworkInfo() async {
     if (!_isAndroid || _telephonyService == null) {
-      return {'status': 'error', 'error': 'Telephony not available on this platform'};
+      return {
+        'status': 'error',
+        'error': 'Telephony not available on this platform'
+      };
     }
     return await _telephonyService!.getNetworkInfo();
   }
@@ -536,7 +548,8 @@ class AndroidBridge {
   Future<bool> isDeviceAdminActive() async {
     if (!_isAndroid) return false;
     try {
-      final bool? active = await _channel.invokeMethod<bool>('isDeviceAdminActive');
+      final bool? active =
+          await _channel.invokeMethod<bool>('isDeviceAdminActive');
       return active ?? false;
     } catch (_) {
       return false;

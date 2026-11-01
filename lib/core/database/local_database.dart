@@ -272,9 +272,8 @@ class LocalDatabase {
   /// Runs schema migrations for existing databases.
   void _migrateSchema() {
     // Migrate legacy flat memories → memories_v2 (run once)
-    final hasMigrated = _db!
-        .select("SELECT COUNT(*) AS c FROM memories_v2")
-        .first['c'] as int;
+    final hasMigrated =
+        _db!.select("SELECT COUNT(*) AS c FROM memories_v2").first['c'] as int;
     if (hasMigrated == 0) {
       try {
         final legacyRows = _db!.select('SELECT * FROM memories');
@@ -332,7 +331,9 @@ class LocalDatabase {
     String? embedding,
   }) {
     final now = DateTime.now().millisecondsSinceEpoch;
-    final trimmed = content.trim().substring(0, content.length > 200 ? 200 : content.length);
+    final trimmed = content
+        .trim()
+        .substring(0, content.length > 200 ? 200 : content.length);
     if (trimmed.isEmpty) return -1;
 
     // Fuzzy dedup check
@@ -351,7 +352,8 @@ class LocalDatabase {
       if (exWords.isEmpty || newWords.isEmpty) continue;
 
       final overlap = newWords.intersection(exWords).length;
-      final similarity = overlap / (exWords.length > newWords.length ? exWords.length : newWords.length);
+      final similarity = overlap /
+          (exWords.length > newWords.length ? exWords.length : newWords.length);
 
       if (similarity >= 0.82) return -1; // near-duplicate
       if (similarity >= 0.55) {
@@ -402,7 +404,8 @@ class LocalDatabase {
   }
 
   /// Lists rich memories with optional category filter.
-  List<Map<String, dynamic>> listRichMemories({String? category, int limit = 100}) {
+  List<Map<String, dynamic>> listRichMemories(
+      {String? category, int limit = 100}) {
     if (category != null) {
       final stmt = _db!.prepare(
         'SELECT * FROM memories_v2 WHERE category = ? ORDER BY importance DESC, updated_at DESC LIMIT ?',
@@ -758,7 +761,8 @@ class LocalDatabase {
       final row = Map<String, dynamic>.from(result.first);
       try {
         row['platforms'] = jsonDecode(row['platforms_json'] as String? ?? '[]');
-        row['parameters'] = jsonDecode(row['parameters_json'] as String? ?? '{}');
+        row['parameters'] =
+            jsonDecode(row['parameters_json'] as String? ?? '{}');
         row['steps'] = jsonDecode(row['steps_json'] as String? ?? '[]');
         row['tags'] = jsonDecode(row['tags_json'] as String? ?? '[]');
       } catch (_) {}
@@ -1183,7 +1187,8 @@ class LocalDatabase {
   }
 
   void markNotificationRead(String key) {
-    final stmt = _db!.prepare('UPDATE notifications_archive SET is_read = 1 WHERE key = ?');
+    final stmt = _db!
+        .prepare('UPDATE notifications_archive SET is_read = 1 WHERE key = ?');
     stmt.execute([key]);
     stmt.close();
   }

@@ -80,12 +80,28 @@ class _AnimatedGlassOrbState extends State<AnimatedGlassOrb>
 
     // Dynamic color theme based on assistant mode
     final orbColors = widget.isSpeaking
-        ? [const Color(0xFFFFB703), const Color(0xFFFB8500), const Color(0xFFD90429)]
+        ? [
+            const Color(0xFFFFB703),
+            const Color(0xFFFB8500),
+            const Color(0xFFD90429)
+          ]
         : widget.isConnected
-            ? [const Color(0xFF00F5D4), const Color(0xFF00B4D8), const Color(0xFF4361EE)]
+            ? [
+                const Color(0xFF00F5D4),
+                const Color(0xFF00B4D8),
+                const Color(0xFF4361EE)
+              ]
             : widget.isListening
-                ? [const Color(0xFF06D6A0), const Color(0xFF118AB2), const Color(0xFF073B4C)]
-                : [const Color(0xFF6C757D), const Color(0xFF495057), const Color(0xFF212529)];
+                ? [
+                    const Color(0xFF06D6A0),
+                    const Color(0xFF118AB2),
+                    const Color(0xFF073B4C)
+                  ]
+                : [
+                    const Color(0xFF6C757D),
+                    const Color(0xFF495057),
+                    const Color(0xFF212529)
+                  ];
 
     final glowColor = widget.isSpeaking
         ? const Color(0xFFFFB703)
@@ -123,7 +139,8 @@ class _AnimatedGlassOrbState extends State<AnimatedGlassOrb>
                     shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
-                        color: glowColor.withValues(alpha: active ? 0.45 : 0.12),
+                        color:
+                            glowColor.withValues(alpha: active ? 0.45 : 0.12),
                         blurRadius: active ? 48 : 20,
                         spreadRadius: active ? 12 : 2,
                       ),
@@ -139,9 +156,8 @@ class _AnimatedGlassOrbState extends State<AnimatedGlassOrb>
               child: AnimatedBuilder(
                 animation: _pulseController,
                 builder: (context, _) {
-                  final scale = active
-                      ? 1.0 + (_pulseController.value * 0.06)
-                      : 1.0;
+                  final scale =
+                      active ? 1.0 + (_pulseController.value * 0.06) : 1.0;
                   return Transform.scale(
                     scale: scale,
                     child: ClipRRect(
@@ -157,8 +173,10 @@ class _AnimatedGlassOrbState extends State<AnimatedGlassOrb>
                               center: const Alignment(-0.35, -0.45),
                               radius: 0.95,
                               colors: [
-                                Colors.white.withValues(alpha: 0.45), // Specular light highlight
-                                ...orbColors.map((c) => c.withValues(alpha: 0.7)),
+                                Colors.white.withValues(
+                                    alpha: 0.45), // Specular light highlight
+                                ...orbColors
+                                    .map((c) => c.withValues(alpha: 0.7)),
                                 const Color(0xFF0A0C12).withValues(alpha: 0.85),
                               ],
                               stops: const [0.0, 0.25, 0.65, 1.0],
@@ -183,7 +201,8 @@ class _AnimatedGlassOrbState extends State<AnimatedGlassOrb>
                                 animation: _rotationController,
                                 builder: (context, _) {
                                   return Transform.rotate(
-                                    angle: _rotationController.value * 2 * math.pi,
+                                    angle:
+                                        _rotationController.value * 2 * math.pi,
                                     child: Align(
                                       alignment: Alignment.topRight,
                                       child: Container(
@@ -194,8 +213,10 @@ class _AnimatedGlassOrbState extends State<AnimatedGlassOrb>
                                           shape: BoxShape.circle,
                                           gradient: RadialGradient(
                                             colors: [
-                                              Colors.white.withValues(alpha: 0.5),
-                                              Colors.white.withValues(alpha: 0.0),
+                                              Colors.white
+                                                  .withValues(alpha: 0.5),
+                                              Colors.white
+                                                  .withValues(alpha: 0.0),
                                             ],
                                           ),
                                         ),
@@ -220,7 +241,9 @@ class _AnimatedGlassOrbState extends State<AnimatedGlassOrb>
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Icon(
-                                      active ? Icons.graphic_eq : Icons.mic_none,
+                                      active
+                                          ? Icons.graphic_eq
+                                          : Icons.mic_none,
                                       size: 42,
                                       color: Colors.white,
                                       shadows: [

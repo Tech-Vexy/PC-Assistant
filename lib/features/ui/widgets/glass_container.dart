@@ -299,7 +299,8 @@ class _AnimatedVoiceVisualizerState extends State<AnimatedVoiceVisualizer>
               width: 3,
               height: barH,
               decoration: BoxDecoration(
-                color: widget.color.withValues(alpha: widget.isActive ? 0.9 : 0.4),
+                color:
+                    widget.color.withValues(alpha: widget.isActive ? 0.9 : 0.4),
                 borderRadius: BorderRadius.circular(4),
                 boxShadow: widget.isActive
                     ? [

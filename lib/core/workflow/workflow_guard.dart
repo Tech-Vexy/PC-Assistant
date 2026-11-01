@@ -30,11 +30,13 @@ class WorkflowGuard {
     RegExp(r'\brm\s+-rf\s+[/~]', caseSensitive: false),
     RegExp(r'\bmkfs(\.[a-z0-9]+)?\b', caseSensitive: false),
     RegExp(r'\bdd\s+if=.*of=/dev/', caseSensitive: false),
-    RegExp(r':\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:', caseSensitive: false), // Forkbomb
+    RegExp(r':\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:',
+        caseSensitive: false), // Forkbomb
     RegExp(r'\b(curl|wget)\s+.*\|\s*(sh|bash|zsh)\b', caseSensitive: false),
     RegExp(r'\b(sudo\s+)?chmod\s+-R\s+777\s+/', caseSensitive: false),
     RegExp(r'>\s*/dev/sd[a-z]', caseSensitive: false),
-    RegExp(r'\b(export|set)\s+AWS_SECRET|AZURE_SECRET|GOOGLE_CREDENTIALS\b', caseSensitive: false),
+    RegExp(r'\b(export|set)\s+AWS_SECRET|AZURE_SECRET|GOOGLE_CREDENTIALS\b',
+        caseSensitive: false),
   ];
 
   // Disallowed sensitive Android packages or targets in workflow automations
@@ -72,7 +74,8 @@ class WorkflowGuard {
 
         for (final pattern in _dangerousPatterns) {
           if (pattern.hasMatch(argsStr)) {
-            flagged.add('Dangerous argument in step ($tool): "${pattern.pattern}"');
+            flagged.add(
+                'Dangerous argument in step ($tool): "${pattern.pattern}"');
           }
         }
 
@@ -80,7 +83,8 @@ class WorkflowGuard {
         if (tool == 'open_application' || tool == 'click_element') {
           for (final pkg in _blacklistedPackages) {
             if (argsStr.toLowerCase().contains(pkg)) {
-              flagged.add('Step ($tool) targets protected sensitive application: $pkg');
+              flagged.add(
+                  'Step ($tool) targets protected sensitive application: $pkg');
             }
           }
         }
