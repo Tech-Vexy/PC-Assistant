@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'package:telephony/telephony.dart';
 import '../../platform/android/android_bridge.dart';
 import '../database/local_database.dart';
 import '../security/sensitive_app_guard.dart';
@@ -244,36 +243,17 @@ class NotificationMessagingService {
     required String phoneNumber,
     required String message,
   }) async {
-    if (!Platform.isAndroid) {
+    if (!Platform.isAndroid || androidBridge == null) {
       return {
         'status': 'error',
         'error': 'SMS sending is only supported on Android devices.'
       };
     }
 
-    try {
-      final telephony = Telephony.instance;
-      final perm = await telephony.isSmsCapable;
-      if (perm != true) {
-        return {
-          'status': 'error',
-          'error': 'Device is not capable of sending SMS.'
-        };
-      }
-
-      await telephony.sendSms(
-        to: phoneNumber,
-        message: message,
-      );
-
-      return {
-        'status': 'sent',
-        'recipient': phoneNumber,
-        'message': message,
-      };
-    } catch (e) {
-      return {'status': 'error', 'error': 'Failed to send SMS: $e'};
-    }
+    return await androidBridge!.sendSms(
+      phoneNumber: phoneNumber,
+      message: message,
+    );
   }
 
   String _classifyCategory(String packageName, String title, String content) {

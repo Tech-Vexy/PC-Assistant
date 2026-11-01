@@ -1,11 +1,12 @@
 import 'dart:io';
-import 'package:telephony/telephony.dart';
+import 'package:flutter/services.dart';
 
-/// Android telephony service for SMS and call management
-/// Uses the telephony package for Android-only telephony features
+/// Android telephony service for SMS and call management.
+/// Uses native Android platform channels via MethodChannel for telephony features.
 class TelephonyService {
   static TelephonyService? _instance;
-  final Telephony _telephony = Telephony.instance;
+  static const MethodChannel _channel =
+      MethodChannel('com.deviceassistant/bridge');
   bool _isInitialized = false;
 
   TelephonyService._();
@@ -21,12 +22,10 @@ class TelephonyService {
     if (_isInitialized) return true;
 
     try {
-      // Check if telephony is available
-      final isAvailable =
-          await _telephony.requestPhoneAndSmsPermissions ?? false;
-      _isInitialized = isAvailable;
+      final available = await isTelephonyAvailable();
+      _isInitialized = available;
       return _isInitialized;
-    } catch (e) {
+    } catch (_) {
       return false;
     }
   }
@@ -36,23 +35,19 @@ class TelephonyService {
     required String phoneNumber,
     required String message,
   }) async {
-    if (!_isInitialized) {
-      return {'status': 'error', 'error': 'Telephony service not initialized'};
+    if (!Platform.isAndroid) {
+      return {'status': 'error', 'error': 'SMS not supported on this platform'};
     }
 
     try {
-      await _telephony.sendSms(
-        to: phoneNumber,
-        message: message,
-        statusListener: (SendStatus status) {
-          // Could log status here if needed
-        },
-      );
-      return {
-        'status': 'sent',
-        'phone_number': phoneNumber,
+      final res =
+          await _channel.invokeMethod<Map<dynamic, dynamic>>('sendSms', {
+        'phoneNumber': phoneNumber,
         'message': message,
-      };
+      });
+      return res != null
+          ? Map<String, dynamic>.from(res)
+          : {'status': 'sent', 'phone_number': phoneNumber, 'message': message};
     } catch (e) {
       return {
         'status': 'error',
@@ -67,37 +62,20 @@ class TelephonyService {
     String kind = 'inbox',
     int limit = 50,
   }) async {
-    if (!_isInitialized) {
-      return {'status': 'error', 'error': 'Telephony service not initialized'};
+    if (!Platform.isAndroid) {
+      return {
+        'status': 'error',
+        'error': 'SMS query not supported on this platform'
+      };
     }
 
     try {
-      final messages = await _telephony.getInboxSms(
-        columns: [
-          SmsColumn.ID,
-          SmsColumn.ADDRESS,
-          SmsColumn.BODY,
-          SmsColumn.DATE,
-          SmsColumn.TYPE,
-        ],
-      );
-
-      final messageList = messages
-          .take(limit)
-          .map((msg) => {
-                'id': msg.id,
-                'address': msg.address,
-                'body': msg.body,
-                'date': msg.date,
-                'type': msg.type,
-              })
-          .toList();
-
-      return {
-        'status': 'done',
-        'count': messageList.length,
-        'messages': messageList,
-      };
+      final res = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+          'getSmsMessages', {'limit': limit});
+      if (res != null) {
+        return Map<String, dynamic>.from(res);
+      }
+      return {'status': 'done', 'count': 0, 'messages': []};
     } catch (e) {
       return {
         'status': 'error',
@@ -108,21 +86,21 @@ class TelephonyService {
 
   /// Make a phone call
   Future<Map<String, dynamic>> makeCall(String phoneNumber) async {
-    if (!_isInitialized) {
-      return {'status': 'error', 'error': 'Telephony service not initialized'};
+    if (!Platform.isAndroid) {
+      return {
+        'status': 'error',
+        'error': 'Calls not supported on this platform'
+      };
     }
 
     try {
-      // Use intent to make call
-      await _telephony.sendSms(
-        to: phoneNumber,
-        message: '',
-        statusListener: (SendStatus status) {},
-      );
-      return {
-        'status': 'calling',
-        'phone_number': phoneNumber,
-      };
+      final res =
+          await _channel.invokeMethod<Map<dynamic, dynamic>>('makeCall', {
+        'phoneNumber': phoneNumber,
+      });
+      return res != null
+          ? Map<String, dynamic>.from(res)
+          : {'status': 'calling', 'phone_number': phoneNumber};
     } catch (e) {
       return {
         'status': 'error',
@@ -134,12 +112,19 @@ class TelephonyService {
 
   /// Get network information
   Future<Map<String, dynamic>> getNetworkInfo() async {
-    if (!_isInitialized) {
-      return {'status': 'error', 'error': 'Telephony service not initialized'};
+    if (!Platform.isAndroid) {
+      return {
+        'status': 'error',
+        'error': 'Network info not supported on this platform'
+      };
     }
 
     try {
-      // Basic implementation - return platform info
+      final res =
+          await _channel.invokeMethod<Map<dynamic, dynamic>>('getNetworkInfo');
+      if (res != null) {
+        return Map<String, dynamic>.from(res);
+      }
       return {
         'status': 'done',
         'network_type': 'mobile',
@@ -157,8 +142,9 @@ class TelephonyService {
   Future<bool> isTelephonyAvailable() async {
     if (!Platform.isAndroid) return false;
     try {
-      return await _telephony.requestPhoneAndSmsPermissions ?? false;
-    } catch (e) {
+      final res = await _channel.invokeMethod<bool>('isTelephonyAvailable');
+      return res ?? false;
+    } catch (_) {
       return false;
     }
   }

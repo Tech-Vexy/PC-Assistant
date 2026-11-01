@@ -437,6 +437,127 @@ class MainActivity : FlutterActivity() {
                         result.success(true)
                     }
 
+                    "sendSms" -> {
+                        val phoneNumber = call.argument<String>("phoneNumber") ?: ""
+                        val message = call.argument<String>("message") ?: ""
+                        if (phoneNumber.isBlank() || message.isBlank()) {
+                            result.success(mapOf("status" to "error", "error" to "phoneNumber and message are required"))
+                        } else {
+                            try {
+                                val smsManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                    context.getSystemService(android.telephony.SmsManager::class.java)
+                                } else {
+                                    @Suppress("DEPRECATION")
+                                    android.telephony.SmsManager.getDefault()
+                                }
+                                val parts = smsManager.divideMessage(message)
+                                if (parts.size > 1) {
+                                    smsManager.sendMultipartTextMessage(phoneNumber, null, parts, null, null)
+                                } else {
+                                    smsManager.sendTextMessage(phoneNumber, null, message, null, null)
+                                }
+                                result.success(mapOf(
+                                    "status" to "sent",
+                                    "phone_number" to phoneNumber,
+                                    "message" to message
+                                ))
+                            } catch (e: Exception) {
+                                result.success(mapOf(
+                                    "status" to "error",
+                                    "error" to (e.message ?: "Failed to send SMS")
+                                ))
+                            }
+                        }
+                    }
+
+                    "getSmsMessages" -> {
+                        val limit = call.argument<Int>("limit") ?: 50
+                        try {
+                            val messages = mutableListOf<Map<String, Any?>>()
+                            val cursor = contentResolver.query(
+                                android.provider.Telephony.Sms.Inbox.CONTENT_URI,
+                                arrayOf("_id", "address", "body", "date", "type"),
+                                null, null, "date DESC"
+                            )
+                            cursor?.use { c ->
+                                val idIdx = c.getColumnIndex("_id")
+                                val addrIdx = c.getColumnIndex("address")
+                                val bodyIdx = c.getColumnIndex("body")
+                                val dateIdx = c.getColumnIndex("date")
+                                val typeIdx = c.getColumnIndex("type")
+                                var count = 0
+                                while (c.moveToNext() && count < limit) {
+                                    messages.add(mapOf(
+                                        "id" to (if (idIdx >= 0) c.getInt(idIdx) else 0),
+                                        "address" to (if (addrIdx >= 0) c.getString(addrIdx) else ""),
+                                        "body" to (if (bodyIdx >= 0) c.getString(bodyIdx) else ""),
+                                        "date" to (if (dateIdx >= 0) c.getLong(dateIdx) else 0L),
+                                        "type" to (if (typeIdx >= 0) c.getInt(typeIdx) else 1)
+                                    ))
+                                    count++
+                                }
+                            }
+                            result.success(mapOf(
+                                "status" to "done",
+                                "count" to messages.size,
+                                "messages" to messages
+                            ))
+                        } catch (e: Exception) {
+                            result.success(mapOf(
+                                "status" to "error",
+                                "error" to (e.message ?: "Failed to query SMS")
+                            ))
+                        }
+                    }
+
+                    "makeCall" -> {
+                        val phoneNumber = call.argument<String>("phoneNumber") ?: ""
+                        if (phoneNumber.isBlank()) {
+                            result.success(mapOf("status" to "error", "error" to "phoneNumber is required"))
+                        } else {
+                            try {
+                                val hasCallPerm = checkSelfPermission(android.Manifest.permission.CALL_PHONE) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                                val intent = Intent(if (hasCallPerm) Intent.ACTION_CALL else Intent.ACTION_DIAL, Uri.parse("tel:$phoneNumber")).apply {
+                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                }
+                                startActivity(intent)
+                                result.success(mapOf(
+                                    "status" to "calling",
+                                    "phone_number" to phoneNumber
+                                ))
+                            } catch (e: Exception) {
+                                result.success(mapOf(
+                                    "status" to "error",
+                                    "error" to (e.message ?: "Failed to make call")
+                                ))
+                            }
+                        }
+                    }
+
+                    "isTelephonyAvailable" -> {
+                        val tm = getSystemService(Context.TELEPHONY_SERVICE) as? android.telephony.TelephonyManager
+                        val available = tm != null && tm.phoneType != android.telephony.TelephonyManager.PHONE_TYPE_NONE
+                        result.success(available)
+                    }
+
+                    "getNetworkInfo" -> {
+                        try {
+                            val tm = getSystemService(Context.TELEPHONY_SERVICE) as? android.telephony.TelephonyManager
+                            val networkOperator = tm?.networkOperatorName ?: "unknown"
+                            result.success(mapOf(
+                                "status" to "done",
+                                "network_type" to "mobile",
+                                "carrier" to networkOperator,
+                                "platform" to "android"
+                            ))
+                        } catch (e: Exception) {
+                            result.success(mapOf(
+                                "status" to "error",
+                                "error" to (e.message ?: "Unknown error")
+                            ))
+                        }
+                    }
+
                     else -> {
                         result.notImplemented()
                     }
