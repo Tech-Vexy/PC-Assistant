@@ -255,12 +255,12 @@ class MainActivity : FlutterActivity() {
 
                     "isDeviceAdminActive" -> {
                         val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as android.app.admin.DevicePolicyManager
-                        val adminComponent = android.content.ComponentName(this, AssistantDeviceAdminReceiver::class.java)
+                        val adminComponent = android.content.ComponentName(this@MainActivity, AssistantDeviceAdminReceiver::class.java)
                         result.success(dpm.isAdminActive(adminComponent))
                     }
 
                     "requestDeviceAdmin" -> {
-                        val adminComponent = android.content.ComponentName(this, AssistantDeviceAdminReceiver::class.java)
+                        val adminComponent = android.content.ComponentName(this@MainActivity, AssistantDeviceAdminReceiver::class.java)
                         val intent = Intent(android.app.admin.DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
                             putExtra(android.app.admin.DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent)
                             putExtra(
@@ -275,7 +275,7 @@ class MainActivity : FlutterActivity() {
 
                     "lockDeviceNow" -> {
                         val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as android.app.admin.DevicePolicyManager
-                        val adminComponent = android.content.ComponentName(this, AssistantDeviceAdminReceiver::class.java)
+                        val adminComponent = android.content.ComponentName(this@MainActivity, AssistantDeviceAdminReceiver::class.java)
                         if (dpm.isAdminActive(adminComponent)) {
                             dpm.lockNow()
                             result.success(true)

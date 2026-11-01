@@ -31,7 +31,7 @@ class AssistantNotificationListenerService : NotificationListenerService() {
         var instance: AssistantNotificationListenerService? = null
             private set
 
-        private val activeNotifications = ConcurrentHashMap<String, CachedNotification>()
+        private val cachedNotifications = ConcurrentHashMap<String, CachedNotification>()
         private val replyActions = ConcurrentHashMap<String, Pair<Notification.Action, RemoteInput>>()
 
         fun isEnabled(context: Context): Boolean {
@@ -47,7 +47,7 @@ class AssistantNotificationListenerService : NotificationListenerService() {
         }
 
         fun getNotificationsList(): List<Map<String, Any?>> {
-            return activeNotifications.values.sortedByDescending { it.timestamp }.map {
+            return cachedNotifications.values.sortedByDescending { it.timestamp }.map {
                 mapOf(
                     "key" to it.key,
                     "id" to it.id,
@@ -108,18 +108,14 @@ class AssistantNotificationListenerService : NotificationListenerService() {
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
         super.onNotificationRemoved(sbn)
         if (sbn == null) return
-        activeNotifications.remove(sbn.key)
+        cachedNotifications.remove(sbn.key)
         replyActions.remove(sbn.key)
     }
 
     private fun syncActiveNotifications() {
         try {
-            val active = activeNotifications ?: return
-            val sbns = activeNotifications
-            val currentSbns = activeNotifications.keys.toList()
-            for (sbn in activeNotifications) {
-                // Keep sync fresh
-            }
+            val currentNotifications = activeNotifications ?: return
+            currentNotifications.forEach(::extractAndCacheNotification)
         } catch (_: Exception) {}
     }
 
@@ -171,6 +167,6 @@ class AssistantNotificationListenerService : NotificationListenerService() {
             canReply = replyPair != null
         )
 
-        activeNotifications[sbn.key] = cached
+        cachedNotifications[sbn.key] = cached
     }
 }
