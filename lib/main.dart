@@ -1,13 +1,24 @@
 import 'dart:io';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 import 'core/database/local_database.dart';
 import 'core/security/key_vault.dart';
 import 'core/security/sensitive_app_guard.dart';
 import 'features/ui/screens/home_screen.dart';
+import 'firebase_options.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Firebase Initialization with Dartantic
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  } catch (e) {
+    debugPrint('Firebase initialization notice: $e');
+  }
 
   // Desktop Window Configuration
   if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
@@ -18,7 +29,7 @@ void main() async {
       center: true,
       backgroundColor: Colors.transparent,
       skipTaskbar: false,
-      title: 'Device Assistant',
+      title: 'Zen',
     );
     await windowManager.waitUntilReadyToShow(windowOptions, () async {
       await windowManager.show();
@@ -59,7 +70,7 @@ class DeviceAssistantApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Device Assistant',
+      title: 'Zen',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,

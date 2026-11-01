@@ -362,6 +362,45 @@ void main() {
         args: {},
       );
       expect(lockRes.containsKey('error'), isTrue);
+
+      final callRes = await dispatcher.dispatch(
+        toolName: 'call_contact',
+        args: {'contact_name': 'Dad', 'sim_slot': 2},
+      );
+      expect(callRes.containsKey('error'), isTrue);
+    });
+
+    test('call_contact requires contact_name or phone_number', () async {
+      final res = await dispatcher.dispatch(
+        toolName: 'call_contact',
+        args: {},
+      );
+      expect(
+          res['error'],
+          equals(
+              'Either contact_name or phone_number is required to initiate a call.'));
+    });
+
+    test('operate_device replays cached workflow and substitutes parameters',
+        () async {
+      db.saveWorkflow('workflow_phone_call_contact', steps: [
+        {
+          'tool': 'remember',
+          'args': {'key': 'last_called', 'value': '{{contact_name}}'}
+        },
+      ]);
+
+      final res = await dispatcher.dispatch(
+        toolName: 'operate_device',
+        args: {
+          'app_name': 'Phone',
+          'goal': 'call contact',
+          'parameters': {'contact_name': 'Dad', 'sim_slot': 1},
+        },
+      );
+
+      expect(res['mode'], equals('replayed_workflow'));
+      expect(db.recall('last_called'), equals('Dad'));
     });
   });
 }

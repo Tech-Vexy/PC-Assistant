@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.deviceassistant" "\0"
-            VALUE "FileDescription", "device_assistant" "\0"
+            VALUE "CompanyName", "com.veldrine.zen_ai" "\0"
+            VALUE "FileDescription", "zen" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "device_assistant" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.deviceassistant. All rights reserved." "\0"
-            VALUE "OriginalFilename", "device_assistant.exe" "\0"
-            VALUE "ProductName", "device_assistant" "\0"
+            VALUE "InternalName", "zen" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 com.veldrine.zen_ai. All rights reserved." "\0"
+            VALUE "OriginalFilename", "zen.exe" "\0"
+            VALUE "ProductName", "zen" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

@@ -555,6 +555,92 @@ class ToolDefinitions {
         },
       ] else ...[
         {
+          'name': 'call_contact',
+          'description':
+              'Makes a phone call by operating the device default phone/dialer app directly via UI automation: opens dialer, searches/fills contact or phone number, clicks Call, and chooses the requested SIM card if prompted.',
+          'parameters': {
+            'type': 'object',
+            'properties': {
+              'contact_name': {
+                'type': 'string',
+                'description':
+                    'Name of the contact to call (e.g. "Dad", "Alice", "Doctor")',
+              },
+              'phone_number': {
+                'type': 'string',
+                'description':
+                    'Phone number to call if known (e.g. "+1234567890", "0712345678")',
+              },
+              'sim_slot': {
+                'type': 'number',
+                'description':
+                    'SIM card slot to use on dual-SIM phones (1 or 2, default: 1)',
+              },
+              'sim_name': {
+                'type': 'string',
+                'description':
+                    'Optional name or carrier of the SIM card (e.g. "SIM 1", "SIM 2", "Safaricom", "Airtel")',
+              },
+            },
+          },
+        },
+        {
+          'name': 'operate_dialer',
+          'description':
+              'Operates the phone/dialer application on the device. Takes a screenshot and hierarchy to determine layout, defines actions to make a call or search a contact, and saves the actions as a workflow referenced on subsequent calls.',
+          'parameters': {
+            'type': 'object',
+            'properties': {
+              'contact_name': {
+                'type': 'string',
+                'description': 'Name of the contact to call',
+              },
+              'phone_number': {
+                'type': 'string',
+                'description': 'Phone number to dial',
+              },
+              'sim_slot': {
+                'type': 'number',
+                'description': 'SIM card slot (1 or 2, default 1)',
+              },
+              'sim_name': {
+                'type': 'string',
+                'description': 'Optional SIM carrier name',
+              },
+              'goal': {
+                'type': 'string',
+                'description': 'Optional explicit goal (e.g. "call contact", "dial number")',
+              },
+            },
+          },
+        },
+        {
+          'name': 'operate_device',
+          'description':
+              'Operates any device application (including Phone/Dialer, WhatsApp, Clock, Settings) by taking a screenshot to determine layout, defining actions to take to operate the app, and saving the actions as a workflow referenced on subsequent operations of the same app.',
+          'parameters': {
+            'type': 'object',
+            'properties': {
+              'app_name': {
+                'type': 'string',
+                'description':
+                    'Name of the target app (e.g. "Phone", "WhatsApp", "Clock", "Settings", "Spotify")',
+              },
+              'goal': {
+                'type': 'string',
+                'description':
+                    'The specific user goal to achieve (e.g. "call Dad using SIM 1", "set alarm for 7 AM", "send message to Alice")',
+              },
+              'parameters': {
+                'type': 'object',
+                'description':
+                    'Optional key-value parameters needed for the action (e.g. {"contact_name": "Dad", "sim_slot": 1})',
+              },
+            },
+            'required': ['app_name', 'goal'],
+          },
+        },
+        {
           'name': 'get_contacts',
           'description':
               'Searches and retrieves device contacts (names and phone numbers) to send SMS or make calls.',

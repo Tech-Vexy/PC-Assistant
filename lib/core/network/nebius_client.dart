@@ -315,7 +315,7 @@ class NebiusClient {
     String? platformContext,
   }) async {
     final systemPrompt = '''
-You are the Planning Engine of Device Assistant powered by Nemotron-3.5-Super-VL.
+You are the Planning Engine of Zen powered by Nemotron-3.5-Super-VL.
 Decompose the user's goal into a structured JSON execution plan.
 Return ONLY valid JSON matching this schema:
 {

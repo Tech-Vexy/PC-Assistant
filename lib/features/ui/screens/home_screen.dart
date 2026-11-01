@@ -230,6 +230,9 @@ class _HomeScreenState extends State<HomeScreen>
           await _androidBridge!.startHotwordListening(
             hotwords: [
               customPhrase,
+              'hey zen',
+              'zen',
+              'ok zen',
               'hey assistant',
               'ok assistant',
               'device assistant',
@@ -391,9 +394,9 @@ class _HomeScreenState extends State<HomeScreen>
         return;
       }
 
-      final adcService = GcpAdcAuthService(keyVault: widget.keyVault);
-      final hasAdc = authMode == 'adc' && await adcService.hasAdcCredentials();
-      final hasGemini = hasAdc || (geminiKey != null && geminiKey.isNotEmpty);
+      final hasGemini = (geminiKey != null && geminiKey.isNotEmpty) ||
+          authMode == 'api_key' ||
+          (authMode == 'adc' && await GcpAdcAuthService(keyVault: widget.keyVault).hasAdcCredentials());
 
       if (hasGemini) {
         final projectId = await widget.keyVault.getGcpProjectId();
@@ -406,9 +409,9 @@ class _HomeScreenState extends State<HomeScreen>
         final liveInstruction = _buildLiveSystemInstruction(coreMemories);
 
         _liveClient = GeminiLiveClient(
-          apiKey: authMode == 'api_key' ? geminiKey : null,
+          apiKey: geminiKey,
           accessTokenProvider:
-              authMode == 'adc' ? () => adcService.getAccessToken() : null,
+              authMode == 'adc' ? () => GcpAdcAuthService(keyVault: widget.keyVault).getAccessToken() : null,
           projectId: projectId,
           location: location,
           host: geminiEndpoint,
@@ -421,7 +424,9 @@ class _HomeScreenState extends State<HomeScreen>
 
         await _liveClient!.connect();
 
+        // BiDi real-time 24kHz audio streaming with on-device VAD gating
         final micReady = await _audioRecorder.startStreaming(
+          enableVad: true,
           onAudioChunk: (chunk) => _liveClient?.sendAudioChunk(chunk),
           onBargeIn: () {
             _audioPlayback?.flush();
@@ -484,7 +489,13 @@ ${coreMemories.map((m) => '• ${m.content}').join('\n')}
 ''';
 
     return '''
-You are Device Assistant, an intelligent on-device agent.
+You are Zen, a calm, mindful, and intuitive cross-platform companion.
+Personality:
+- Composed, attentive, concise, and effortlessly competent.
+- You bring clarity, warmth, and peace of mind to the user's day. Speak naturally and concisely without robotic filler.
+- You respect privacy and quiet focus above all else.
+- When performing actions (dialing, device control, PC bridging, or scheduling), execute decisively and confirm clearly.
+
 $memoryBlock
 Memory, task plans, and recurring workflows are managed by you through tools:
 - save_memory: Save durable user facts/preferences (auto-deduplicated, semantic indexing).
@@ -668,7 +679,8 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
       final String systemPrompt;
       if (!useNebius && isComputerUse) {
         systemPrompt = '''
-You are Device Assistant's Computer Use agent powered by Google Gemini 3.8 Flash.
+You are Zen's Computer Use engine powered by Google Gemini.
+Personality: Calm, composed, precise, and efficient.
 $memoryContext
 Your role is to execute GUI computer use actions, screen navigation, clicks, typing, gestures, and desktop OS commands.
 Reply ONLY with a single JSON object in this format:
@@ -688,7 +700,8 @@ Available Computer Use tools:
 ''';
       } else {
         systemPrompt = '''
-You are Device Assistant powered by NVIDIA Nemotron on Nebius Token Factory.
+You are Zen, an intelligent, calm, mindful on-device companion powered by NVIDIA Nemotron on Nebius Token Factory.
+Personality: Composed, concise, attentive, and helpful. You speak naturally with clarity and warmth.
 $memoryContext
 You handle all general conversational intelligence, multi-step task planning, sub-agents, memory retention, workflows, and knowledge queries.
 When a user asks to perform an action on their device or inspect device state, reply ONLY with a single JSON object in this format:
@@ -1053,7 +1066,7 @@ If the user query is a general knowledge question, conversational request, or ex
                     const SizedBox(width: 10),
                     const Expanded(
                       child: Text(
-                        'Device Assistant',
+                        'Zen',
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
@@ -1653,7 +1666,7 @@ If the user query is a general knowledge question, conversational request, or ex
                   textInputAction: TextInputAction.send,
                   onSubmitted: (_) => _sendTypedMessage(),
                   decoration: const InputDecoration(
-                    hintText: 'Ask or command Device Assistant...',
+                    hintText: 'Ask or command Zen...',
                     hintStyle: TextStyle(color: Colors.white38, fontSize: 13),
                     border: InputBorder.none,
                     isDense: true,

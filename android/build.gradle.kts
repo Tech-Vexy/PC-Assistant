@@ -25,7 +25,7 @@ subprojects {
             if (androidExt is com.android.build.gradle.BaseExtension) {
                 if (androidExt.namespace == null) {
                     val fallbackNamespace = project.group.toString().ifEmpty {
-                        "com.deviceassistant.plugin.${project.name.replace('-', '_')}"
+                        "com.veldrine.zen_ai.plugin.${project.name.replace('-', '_')}"
                     }
                     androidExt.namespace = fallbackNamespace
                 }

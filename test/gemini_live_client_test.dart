@@ -74,26 +74,26 @@ void main() {
       expect(event.arguments['key'], equals('test'));
     });
 
-    test('GeminiLiveClient initializes with default config (gemini-3.8-flash)',
+    test('GeminiLiveClient initializes with default config (gemini-3.8-live)',
         () {
       final client = GeminiLiveClient(apiKey: 'dummy_key');
       expect(client.isConnected, isFalse);
-      expect(client.model, equals('models/gemini-3.8-flash'));
+      expect(client.model, equals('models/gemini-3.8-live'));
       expect(() => client.sendTextMessage('Hello world'), returnsNormally);
       client.dispose();
     });
 
     test('GeminiLiveClient normalizes model without models/ prefix', () {
       final client =
-          GeminiLiveClient(apiKey: 'dummy_key', model: 'gemini-3.8-flash');
-      expect(client.model, equals('models/gemini-3.8-flash'));
+          GeminiLiveClient(apiKey: 'dummy_key', model: 'gemini-3.8-live');
+      expect(client.model, equals('models/gemini-3.8-live'));
       client.dispose();
     });
 
     test('GeminiLiveClient generateContent performs serverless inference',
         () async {
       final mockHttpClient = MockClient((request) async {
-        expect(request.url.path, contains('gemini-3.8-flash:generateContent'));
+        expect(request.url.path, contains('gemini-3.8-live:generateContent'));
         expect(request.url.queryParameters['key'], equals('test_key'));
         final body = jsonDecode(request.body) as Map<String, dynamic>;
         expect(body['contents'], isNotEmpty);
@@ -105,7 +105,7 @@ void main() {
                 'content': {
                   'role': 'model',
                   'parts': [
-                    {'text': 'Hello from Gemini 3.8 Flash Serverless!'}
+                    {'text': 'Hello from Gemini 3.8 Live Serverless!'}
                   ]
                 }
               }
@@ -122,7 +122,7 @@ void main() {
         httpClient: mockHttpClient,
       );
 
-      expect(result, equals('Hello from Gemini 3.8 Flash Serverless!'));
+      expect(result, equals('Hello from Gemini 3.8 Live Serverless!'));
       client.dispose();
     });
 
@@ -150,7 +150,7 @@ void main() {
       final result = await client.testConnection(httpClient: mockHttpClient);
 
       expect(result['success'], isTrue);
-      expect(result['model'], equals('models/gemini-3.8-flash'));
+      expect(result['model'], equals('models/gemini-3.8-live'));
       client.dispose();
     });
 

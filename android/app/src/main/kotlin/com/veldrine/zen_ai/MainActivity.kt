@@ -1,4 +1,4 @@
-package com.deviceassistant.device_assistant
+package com.veldrine.zen_ai
 
 import android.content.Context
 import android.content.Intent
@@ -13,9 +13,11 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.util.Locale
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 class MainActivity : FlutterActivity() {
-    private val CHANNEL = "com.deviceassistant/bridge"
+    private val CHANNEL = "com.veldrine.zen_ai/bridge"
     private var methodChannel: MethodChannel? = null
     private var hotwordDetector: HotwordDetector? = null
     private var textToSpeech: TextToSpeech? = null
@@ -229,6 +231,14 @@ class MainActivity : FlutterActivity() {
                     "launchApp" -> {
                         val target = call.argument<String>("packageName") ?: call.argument<String>("appName") ?: ""
                         val success = resolveAndLaunchApp(target)
+                        result.success(success)
+                    }
+
+                    "launchSystemIntent" -> {
+                        val action = call.argument<String>("action") ?: ""
+                        val uriStr = call.argument<String>("uri")
+                        val extras = call.argument<Map<String, Any>>("extras") ?: emptyMap()
+                        val success = launchSystemIntent(action, uriStr, extras)
                         result.success(success)
                     }
 
@@ -534,6 +544,17 @@ class MainActivity : FlutterActivity() {
                         }
                     }
 
+                    "operateDialerCall" -> {
+                        val contactName = call.argument<String>("contactName") ?: ""
+                        val phoneNumber = call.argument<String>("phoneNumber") ?: ""
+                        val simSlot = call.argument<Int>("simSlot") ?: 1
+                        val simName = call.argument<String>("simName")
+
+                        operateDialerCall(contactName, phoneNumber, simSlot, simName) { res ->
+                            runOnUiThread { result.success(res) }
+                        }
+                    }
+
                     "isTelephonyAvailable" -> {
                         val tm = getSystemService(Context.TELEPHONY_SERVICE) as? android.telephony.TelephonyManager
                         val available = tm != null && tm.phoneType != android.telephony.TelephonyManager.PHONE_TYPE_NONE
@@ -797,6 +818,68 @@ class MainActivity : FlutterActivity() {
         return false
     }
 
+    private fun launchSystemIntent(action: String, uriStr: String?, extras: Map<String, Any>): Boolean {
+        return try {
+            val intent = when (action.lowercase()) {
+                "dial", "call" -> {
+                    val uri = if (!uriStr.isNullOrBlank()) Uri.parse(uriStr) else null
+                    if (uri != null) Intent(Intent.ACTION_DIAL, uri) else Intent(Intent.ACTION_DIAL)
+                }
+                "sms", "send_sms" -> {
+                    val uri = if (!uriStr.isNullOrBlank()) Uri.parse(uriStr) else Uri.parse("smsto:")
+                    Intent(Intent.ACTION_SENDTO, uri).apply {
+                        extras["sms_body"]?.let { putExtra("sms_body", it.toString()) }
+                    }
+                }
+                "settings" -> {
+                    val settingType = extras["type"]?.toString()?.lowercase()
+                    when (settingType) {
+                        "wifi" -> Intent(Settings.ACTION_WIFI_SETTINGS)
+                        "bluetooth" -> Intent(Settings.ACTION_BLUETOOTH_SETTINGS)
+                        "sound", "volume" -> Intent(Settings.ACTION_SOUND_SETTINGS)
+                        "display" -> Intent(Settings.ACTION_DISPLAY_SETTINGS)
+                        "date", "time" -> Intent(Settings.ACTION_DATE_SETTINGS)
+                        "battery" -> Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                        "apps", "applications" -> Intent(Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS)
+                        "accessibility" -> Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                        "assistant", "voice" -> Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)
+                        else -> Intent(Settings.ACTION_SETTINGS)
+                    }
+                }
+                "alarm", "set_alarm" -> {
+                    Intent(android.provider.AlarmClock.ACTION_SET_ALARM).apply {
+                        extras["hour"]?.let { putExtra(android.provider.AlarmClock.EXTRA_HOUR, (it as? Number)?.toInt() ?: 0) }
+                        extras["minutes"]?.let { putExtra(android.provider.AlarmClock.EXTRA_MINUTES, (it as? Number)?.toInt() ?: 0) }
+                        extras["message"]?.let { putExtra(android.provider.AlarmClock.EXTRA_MESSAGE, it.toString()) }
+                        putExtra(android.provider.AlarmClock.EXTRA_SKIP_UI, false)
+                    }
+                }
+                "show_alarms" -> Intent(android.provider.AlarmClock.ACTION_SHOW_ALARMS)
+                "camera" -> Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE)
+                "view", "browse" -> {
+                    val uri = if (!uriStr.isNullOrBlank()) Uri.parse(uriStr) else null
+                    if (uri != null) Intent(Intent.ACTION_VIEW, uri) else return false
+                }
+                "search", "web_search" -> {
+                    Intent(Intent.ACTION_WEB_SEARCH).apply {
+                        extras["query"]?.let { putExtra(android.app.SearchManager.QUERY, it.toString()) }
+                    }
+                }
+                "contacts" -> Intent(Intent.ACTION_VIEW, android.provider.ContactsContract.Contacts.CONTENT_URI)
+                else -> {
+                    val uri = if (!uriStr.isNullOrBlank()) Uri.parse(uriStr) else null
+                    if (uri != null) Intent(action, uri) else Intent(action)
+                }
+            }
+
+            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            startActivity(intent)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     private fun getInstalledAppsList(): List<Map<String, String>> {
         val launcherIntent = Intent(Intent.ACTION_MAIN, null).apply {
             addCategory(Intent.CATEGORY_LAUNCHER)
@@ -892,6 +975,118 @@ class MainActivity : FlutterActivity() {
         } else {
             true
         }
+    }
+
+    private fun operateDialerCall(
+        contactName: String,
+        phoneNumberArg: String,
+        simSlot: Int,
+        simName: String?,
+        callback: (Map<String, Any?>) -> Unit
+    ) {
+        var resolvedNumber = phoneNumberArg.trim()
+        var resolvedName = contactName.trim()
+
+        // 1. Resolve contact number from device contacts if not provided
+        if (resolvedNumber.isEmpty() && resolvedName.isNotEmpty()) {
+            try {
+                val cursor = contentResolver.query(
+                    android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                    arrayOf(
+                        android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                        android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER
+                    ),
+                    "${android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} LIKE ?",
+                    arrayOf("%$resolvedName%"),
+                    null
+                )
+                cursor?.use { c ->
+                    if (c.moveToFirst()) {
+                        val nameIdx = c.getColumnIndex(android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+                        val numIdx = c.getColumnIndex(android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER)
+                        if (nameIdx >= 0) resolvedName = c.getString(nameIdx)
+                        if (numIdx >= 0) resolvedNumber = c.getString(numIdx)
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        // 2. Launch Default Phone / Dialer App
+        try {
+            val dialIntent = if (resolvedNumber.isNotEmpty()) {
+                Intent(Intent.ACTION_DIAL, Uri.parse("tel:${Uri.encode(resolvedNumber)}")).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+            } else {
+                val telecomManager = getSystemService(Context.TELECOM_SERVICE) as? android.telecom.TelecomManager
+                val defaultDialer = telecomManager?.defaultDialerPackage
+                if (defaultDialer != null) {
+                    packageManager.getLaunchIntentForPackage(defaultDialer)?.apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    } ?: Intent(Intent.ACTION_DIAL).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK }
+                } else {
+                    Intent(Intent.ACTION_DIAL).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK }
+                }
+            }
+
+            startActivity(dialIntent)
+        } catch (e: Exception) {
+            callback(mapOf(
+                "status" to "error",
+                "error" to "Failed to launch default dialer: ${e.message}"
+            ))
+            return
+        }
+
+        // 3. UI Automation via Accessibility Service
+        val scheduler = Executors.newSingleThreadScheduledExecutor()
+        scheduler.schedule({
+            try {
+                val service = AssistantAccessibilityService.instance
+                if (service == null) {
+                    callback(mapOf(
+                        "status" to "dialer_opened",
+                        "contact_name" to resolvedName,
+                        "phone_number" to resolvedNumber,
+                        "warning" to "Dialer opened, but Accessibility Service is disabled. Please enable it in Settings for automated dialing and SIM selection."
+                    ))
+                    return@schedule
+                }
+
+                // If number was unknown and only contact name is present, search in dialer
+                if (resolvedNumber.isEmpty() && resolvedName.isNotEmpty()) {
+                    service.inputText(resolvedName)
+                    Thread.sleep(700)
+                    service.findAndClickContact(resolvedName)
+                    Thread.sleep(500)
+                }
+
+                // Click Call button in dialer UI
+                val callClicked = service.clickCallButton()
+
+                // Wait briefly for dual SIM chooser dialog / bottom sheet
+                Thread.sleep(700)
+                val simChosen = service.chooseSimCard(simSlot, simName)
+
+                callback(mapOf(
+                    "status" to "calling",
+                    "contact_name" to resolvedName,
+                    "phone_number" to resolvedNumber,
+                    "sim_slot" to simSlot,
+                    "sim_name" to simName,
+                    "call_button_clicked" to callClicked,
+                    "sim_chosen" to simChosen,
+                    "method" to "dialer_ui_automation"
+                ))
+            } catch (e: Exception) {
+                callback(mapOf(
+                    "status" to "error",
+                    "error" to (e.message ?: "Automation error")
+                ))
+            } finally {
+                scheduler.shutdown()
+            }
+        }, 1200, TimeUnit.MILLISECONDS)
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {

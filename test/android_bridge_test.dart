@@ -5,7 +5,7 @@ import 'package:device_assistant/platform/android/android_bridge.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  const channel = MethodChannel('com.deviceassistant/bridge');
+  const channel = MethodChannel('com.veldrine.zen_ai/bridge');
   final log = <MethodCall>[];
 
   setUp(() {
@@ -50,6 +50,8 @@ void main() {
         case 'launchApp':
           final pkg = methodCall.arguments['packageName'] as String?;
           return pkg == 'com.android.calculator';
+        case 'launchSystemIntent':
+          return true;
         case 'updateTrayStatus':
           return true;
         case 'writeAudioChunk':
@@ -355,6 +357,20 @@ void main() {
       expect(installedApps.length, 2);
       expect(installedApps.first['appName'], 'Calculator');
       expect(installedApps.first['packageName'], 'com.android.calculator');
+    });
+
+    test('launchSystemIntent and makeCall dispatch direct android intent', () async {
+      final bridge = AndroidBridge(isAndroid: true);
+      final success = await bridge.launchSystemIntent(
+        action: 'settings',
+        extras: {'type': 'wifi'},
+      );
+      expect(success, isTrue);
+
+      final callRes = await bridge.makeCall('+1234567890');
+      expect(callRes['status'], equals('calling'));
+      expect(callRes['method'], equals('direct_intent'));
+      expect(callRes['phone_number'], equals('+1234567890'));
     });
   });
 }

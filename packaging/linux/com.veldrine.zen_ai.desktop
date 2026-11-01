@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Zen
+GenericName=AI Assistant
+Comment=On-Device Multimodal AI Assistant with Gemini Live & Nemotron
+Exec=zen %u
+Icon=zen
+Terminal=false
+Categories=Utility;AudioVideo;ArtificialIntelligence;Network;
+StartupWMClass=zen
+Keywords=zen;ai;assistant;voice;gemini;multimodal;
+MimeType=x-scheme-handler/zen;

@@ -1,4 +1,4 @@
-package com.deviceassistant.device_assistant
+package com.veldrine.zen_ai
 
 import android.accessibilityservice.AccessibilityButtonController
 import android.accessibilityservice.AccessibilityService
@@ -392,5 +392,147 @@ class AssistantAccessibilityService : AccessibilityService() {
         }
 
         return findAndScroll(root)
+    }
+
+    /**
+     * Clicks an accessibility node using ACTION_CLICK with parent traversal,
+     * falling back to physical coordinate injection if needed.
+     */
+    fun clickNodeOrTap(node: AccessibilityNodeInfo?): Boolean {
+        if (node == null || isCurrentPackageProtected()) return false
+
+        // 1. Direct ACTION_CLICK
+        if (node.isClickable && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+            return true
+        }
+
+        // 2. Traversal to clickable parent
+        var parent = node.parent
+        while (parent != null) {
+            if (parent.isClickable && parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                return true
+            }
+            parent = parent.parent
+        }
+
+        // 3. Fallback: Physical coordinate tap at bounding box center
+        val bounds = Rect()
+        node.getBoundsInScreen(bounds)
+        if (bounds.width() > 0 && bounds.height() > 0) {
+            return injectTap(bounds.centerX().toFloat(), bounds.centerY().toFloat())
+        }
+        return false
+    }
+
+    /**
+     * Finds and clicks the prominent Call / Dial button in dialer apps.
+     */
+    fun clickCallButton(): Boolean {
+        if (isCurrentPackageProtected()) return false
+        val root = rootInActiveWindow ?: return false
+
+        fun searchCallNode(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+            if (node == null) return null
+            val desc = node.contentDescription?.toString()?.lowercase() ?: ""
+            val text = node.text?.toString()?.lowercase() ?: ""
+            val id = node.viewIdResourceName?.lowercase() ?: ""
+
+            val matchesCall = desc.contains("call") || desc.contains("dial") || desc.contains("voice call") ||
+                    text == "call" || text == "dial" ||
+                    id.contains("dialpad_floating_action_button") || id.contains("call_button") ||
+                    id.contains("floating_action_button") || id.contains("dial_button")
+
+            if (matchesCall && (node.isClickable || node.isCheckable || node.className?.contains("Button") == true || node.className?.contains("ImageView") == true)) {
+                return node
+            }
+
+            for (i in 0 until node.childCount) {
+                val found = searchCallNode(node.getChild(i))
+                if (found != null) return found
+            }
+            return null
+        }
+
+        val callNode = searchCallNode(root)
+        if (callNode != null) {
+            return clickNodeOrTap(callNode)
+        }
+        return false
+    }
+
+    /**
+     * Finds and selects the requested SIM card if a dual-SIM chooser dialog is active.
+     */
+    fun chooseSimCard(simSlot: Int = 1, simName: String? = null): Boolean {
+        if (isCurrentPackageProtected()) return false
+        val root = rootInActiveWindow ?: return false
+
+        val targetNameLower = simName?.lowercase()?.trim()
+        val slotString = simSlot.toString()
+
+        fun searchSimNode(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+            if (node == null) return null
+            val desc = node.contentDescription?.toString()?.lowercase() ?: ""
+            val text = node.text?.toString()?.lowercase() ?: ""
+            val id = node.viewIdResourceName?.lowercase() ?: ""
+
+            val matchesSim = when {
+                !targetNameLower.isNullOrEmpty() && (text.contains(targetNameLower) || desc.contains(targetNameLower)) -> true
+                text.contains("sim $slotString") || desc.contains("sim $slotString") -> true
+                text.contains("sim$slotString") || desc.contains("sim$slotString") -> true
+                text.contains("slot $slotString") || desc.contains("slot $slotString") -> true
+                text.contains("phone $slotString") || desc.contains("phone $slotString") -> true
+                id.contains("sim_$slotString") || id.contains("sim$slotString") -> true
+                (text == slotString || desc == slotString) && (node.isClickable || node.parent?.isClickable == true) -> true
+                else -> false
+            }
+
+            if (matchesSim) {
+                return node
+            }
+
+            for (i in 0 until node.childCount) {
+                val found = searchSimNode(node.getChild(i))
+                if (found != null) return found
+            }
+            return null
+        }
+
+        val simNode = searchSimNode(root)
+        if (simNode != null) {
+            return clickNodeOrTap(simNode)
+        }
+        return false
+    }
+
+    /**
+     * Finds and clicks a contact list item matching the search query.
+     */
+    fun findAndClickContact(query: String): Boolean {
+        if (isCurrentPackageProtected()) return false
+        val root = rootInActiveWindow ?: return false
+        val qLower = query.lowercase().trim()
+
+        fun searchContactNode(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+            if (node == null) return null
+            val text = node.text?.toString()?.lowercase() ?: ""
+            val desc = node.contentDescription?.toString()?.lowercase() ?: ""
+
+            if ((text.contains(qLower) || desc.contains(qLower)) && !text.contains("search") && !desc.contains("search")) {
+                return node
+            }
+
+            for (i in 0 until node.childCount) {
+                val found = searchContactNode(node.getChild(i))
+                if (found != null) return found
+            }
+            return null
+        }
+
+        val contactNode = searchContactNode(root)
+        if (contactNode != null) {
+            return clickNodeOrTap(contactNode)
+        }
+        return false
     }
 }

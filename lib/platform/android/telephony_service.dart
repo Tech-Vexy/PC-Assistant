@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 class TelephonyService {
   static TelephonyService? _instance;
   static const MethodChannel _channel =
-      MethodChannel('com.deviceassistant/bridge');
+      MethodChannel('com.veldrine.zen_ai/bridge');
   bool _isInitialized = false;
 
   TelephonyService._();

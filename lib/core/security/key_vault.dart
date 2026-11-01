@@ -81,13 +81,13 @@ class KeyVault {
     await _storage.write(key: _geminiModelKey, value: model.trim());
   }
 
-  /// Retrieves the Gemini Model identifier (default: gemini-3.8-flash)
+  /// Retrieves the Gemini Model identifier (default: gemini-3.8-live)
   Future<String> getGeminiModel() async {
     final custom = await _storage.read(key: _geminiModelKey);
     if (custom != null && custom.isNotEmpty) {
       return custom;
     }
-    return 'gemini-3.8-flash';
+    return 'gemini-3.8-live';
   }
 
   /// Saves the Google Cloud Serverless inference endpoint / host

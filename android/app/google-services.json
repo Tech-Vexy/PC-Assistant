@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "451645278529",
+    "project_id": "zen-device-assistant",
+    "storage_bucket": "zen-device-assistant.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:451645278529:android:0c21462ce5d3265241b9c0",
+        "android_client_info": {
+          "package_name": "com.veldrine.zen_ai"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAvWr8CSrR10BH7j9TLSl7cqdXhRPbM0v8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

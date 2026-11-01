@@ -12,6 +12,7 @@ import '../../core/network/nebius_client.dart';
 import '../../core/network/pc_bridge_client.dart';
 import '../../core/security/sensitive_app_guard.dart';
 import '../../core/skills/skill_generator.dart';
+import '../../core/workflow/device_app_operator.dart';
 import '../../core/workflow/workflow_manager.dart';
 import '../../platform/android/android_bridge.dart';
 import '../../platform/desktop/desktop_driver.dart';
@@ -35,9 +36,11 @@ class ToolDispatcher {
   late final DynamicSkillGenerator _skillGen;
   late final HermesWorkflowManager _hermesWorkflow;
   late final NotificationMessagingService _notifService;
+  late final DeviceAppOperator _deviceAppOperator;
 
   MemoryExtractor get memoryExtractor => _extractor;
   NotificationMessagingService get notificationService => _notifService;
+  DeviceAppOperator get deviceAppOperator => _deviceAppOperator;
 
   ToolDispatcher({
     required this.db,
@@ -65,6 +68,15 @@ class ToolDispatcher {
       androidBridge: androidBridge,
       db: db,
       guard: guard,
+    );
+    _deviceAppOperator = DeviceAppOperator(
+      androidBridge: androidBridge,
+      db: db,
+      hermesManager: _hermesWorkflow,
+      nebiusClient: nebiusClient,
+      geminiClient: geminiClient,
+      dispatchStep: (toolName, args) =>
+          dispatch(toolName: toolName, args: args),
     );
   }
 
@@ -422,8 +434,18 @@ class ToolDispatcher {
           result = await _handleGetSmsMessages(args);
           break;
 
+        case 'call_contact':
         case 'make_call':
-          result = await _handleMakeCall(args);
+          result = await _handleCallContact(args);
+          break;
+
+        case 'operate_dialer':
+          result = await _handleOperateDialer(args);
+          break;
+
+        case 'operate_device_app':
+        case 'operate_device':
+          result = await _handleOperateDevice(args);
           break;
 
         case 'get_network_info':
@@ -1469,7 +1491,7 @@ class ToolDispatcher {
           {
             'role': 'system',
             'content':
-                'You are the knowledge synthesis engine of Device Assistant powered by NVIDIA Nemotron. Answer the user query accurately, concisely, and factually.',
+                'You are the knowledge synthesis engine of Zen powered by NVIDIA Nemotron. Answer the user query accurately, concisely, calmly, and factually.',
           },
           {'role': 'user', 'content': query},
         ],
@@ -1944,18 +1966,92 @@ class ToolDispatcher {
     return await androidBridge!.getSmsMessages(kind: kind, limit: limit);
   }
 
-  Future<Map<String, dynamic>> _handleMakeCall(
+  Future<Map<String, dynamic>> _handleCallContact(
+      Map<String, dynamic> args) async {
+    final contactName =
+        args['contact_name'] as String? ?? args['name'] as String?;
+    final phoneNumber =
+        args['phone_number'] as String? ?? args['number'] as String?;
+    final simSlot = (args['sim_slot'] as num?)?.toInt() ?? 1;
+    final simName = args['sim_name'] as String?;
+
+    if ((contactName == null || contactName.trim().isEmpty) &&
+        (phoneNumber == null || phoneNumber.trim().isEmpty)) {
+      return {
+        'error':
+            'Either contact_name or phone_number is required to initiate a call.'
+      };
+    }
+
+    if (androidBridge == null && !Platform.isAndroid) {
+      return {'error': 'Dialer automation is only available on Android'};
+    }
+
+    final goal = contactName != null && contactName.trim().isNotEmpty
+        ? 'call contact'
+        : 'call number';
+
+    return await _deviceAppOperator.operateApp(
+      appName: 'Phone',
+      goal: goal,
+      parameters: {
+        if (contactName != null) 'contact_name': contactName,
+        if (phoneNumber != null) 'phone_number': phoneNumber,
+        'sim_slot': simSlot,
+        if (simName != null) 'sim_name': simName,
+      },
+    );
+  }
+
+  Future<Map<String, dynamic>> _handleOperateDialer(
       Map<String, dynamic> args) async {
     if (androidBridge == null) {
-      return {'error': 'Telephony is not available on this platform'};
+      return {'error': 'Dialer automation is only available on Android'};
     }
 
-    final phoneNumber = args['phone_number'] as String? ?? '';
-    if (phoneNumber.isEmpty) {
-      return {'error': 'phone_number is required'};
+    final contactName =
+        args['contact_name'] as String? ?? args['name'] as String?;
+    final phoneNumber =
+        args['phone_number'] as String? ?? args['number'] as String?;
+    final simSlot = (args['sim_slot'] as num?)?.toInt() ?? 1;
+    final simName = args['sim_name'] as String?;
+    final appName = args['app_name'] as String? ?? 'Phone';
+
+    final goal = args['goal'] as String? ??
+        (contactName != null && contactName.trim().isNotEmpty
+            ? 'call contact'
+            : (phoneNumber != null && phoneNumber.trim().isNotEmpty
+                ? 'call number'
+                : 'operate dialer'));
+
+    return await _deviceAppOperator.operateApp(
+      appName: appName,
+      goal: goal,
+      parameters: {
+        if (contactName != null) 'contact_name': contactName,
+        if (phoneNumber != null) 'phone_number': phoneNumber,
+        'sim_slot': simSlot,
+        if (simName != null) 'sim_name': simName,
+        ...args,
+      },
+    );
+  }
+
+  Future<Map<String, dynamic>> _handleOperateDevice(
+      Map<String, dynamic> args) async {
+    final appName = args['app_name'] as String? ?? 'Phone';
+    final goal = args['goal'] as String? ?? '';
+    final parameters = (args['parameters'] as Map<String, dynamic>?) ?? {};
+
+    if (goal.trim().isEmpty) {
+      return {'error': 'goal is required for operate_device'};
     }
 
-    return await androidBridge!.makeCall(phoneNumber);
+    return await _deviceAppOperator.operateApp(
+      appName: appName,
+      goal: goal,
+      parameters: parameters,
+    );
   }
 
   Future<Map<String, dynamic>> _handleGetNetworkInfo(

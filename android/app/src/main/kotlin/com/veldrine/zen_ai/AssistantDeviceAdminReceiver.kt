@@ -1,4 +1,4 @@
-package com.deviceassistant.device_assistant
+package com.veldrine.zen_ai
 
 import android.app.admin.DeviceAdminReceiver
 import android.content.Context

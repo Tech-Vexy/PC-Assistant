@@ -299,7 +299,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         projectId: projectId.isNotEmpty ? projectId : null,
         location: location.isNotEmpty ? location : 'us-central1',
         host: endpoint.isNotEmpty ? endpoint : null,
-        model: model.isNotEmpty ? model : 'gemini-3.8-flash',
+        model: model.isNotEmpty ? model : 'gemini-3.8-live',
       );
 
       final res = await client.testConnection();
@@ -409,7 +409,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (confirmed == true) {
       await widget.keyVault.clearAllKeys();
       _geminiCtrl.clear();
-      _geminiModelCtrl.text = 'gemini-3.8-flash';
+      _geminiModelCtrl.text = 'gemini-3.8-live';
       _geminiEndpointCtrl.text = 'generativelanguage.googleapis.com';
       _nebiusCtrl.clear();
       _nebiusSuperEndpointCtrl.text = 'https://api.tokenfactory.nebius.com/v1';
@@ -1082,7 +1082,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     controller: _geminiModelCtrl,
                     decoration: InputDecoration(
                       labelText: 'Model Identifier',
-                      hintText: 'gemini-3.8-flash',
+                      hintText: 'gemini-3.8-live',
                       prefixIcon: const Icon(Icons.psychology),
                       border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(10)),

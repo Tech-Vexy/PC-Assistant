@@ -6,7 +6,7 @@ import 'telephony_service.dart';
 /// Dart interface to the native Android Accessibility & Foreground services
 class AndroidBridge {
   static const MethodChannel _channel =
-      MethodChannel('com.deviceassistant/bridge');
+      MethodChannel('com.veldrine.zen_ai/bridge');
 
   static final _activePackageController = StreamController<String>.broadcast();
   static final _shieldAlertController = StreamController<String>.broadcast();
@@ -23,6 +23,7 @@ class AndroidBridge {
   TelephonyService? _telephonyService;
 
   final bool _isAndroid;
+  bool get isAndroid => _isAndroid;
 
   AndroidBridge({bool? isAndroid})
       : _isAndroid = isAndroid ?? Platform.isAndroid {
@@ -499,15 +500,84 @@ class AndroidBridge {
     return await _telephonyService!.getSmsMessages(kind: kind, limit: limit);
   }
 
-  /// Make a phone call
+  /// Dispatches a direct native Android Intent for system actions
+  /// (e.g. dial, sms, settings, alarm, camera, web_search, browse)
+  Future<bool> launchSystemIntent({
+    required String action,
+    String? uri,
+    Map<String, dynamic>? extras,
+  }) async {
+    if (!_isAndroid) return false;
+    try {
+      final bool? ok = await _channel.invokeMethod<bool>('launchSystemIntent', {
+        'action': action,
+        if (uri != null) 'uri': uri,
+        if (extras != null) 'extras': extras,
+      });
+      return ok ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Make a phone call via direct Android Intent
   Future<Map<String, dynamic>> makeCall(String phoneNumber) async {
-    if (!_isAndroid || _telephonyService == null) {
+    if (!_isAndroid) {
       return {
         'status': 'error',
         'error': 'Telephony not available on this platform'
       };
     }
-    return await _telephonyService!.makeCall(phoneNumber);
+    final ok = await launchSystemIntent(
+      action: 'dial',
+      uri: 'tel:${Uri.encodeComponent(phoneNumber)}',
+    );
+    return {
+      'status': ok ? 'calling' : 'error',
+      'phone_number': phoneNumber,
+      'method': 'direct_intent',
+    };
+  }
+
+  /// Operates the device default dialer app directly via Accessibility UI automation:
+  /// opens dialer, searches/fills contact, clicks Call button, and selects SIM card if prompted.
+  Future<Map<String, dynamic>> operateDialerCall({
+    String? contactName,
+    String? phoneNumber,
+    int simSlot = 1,
+    String? simName,
+  }) async {
+    if (!_isAndroid) {
+      return {
+        'status': 'error',
+        'error': 'Dialer UI automation is only supported on Android',
+      };
+    }
+
+    try {
+      final res = await _channel
+          .invokeMethod<Map<dynamic, dynamic>>('operateDialerCall', {
+        'contactName': contactName ?? '',
+        'phoneNumber': phoneNumber ?? '',
+        'simSlot': simSlot,
+        if (simName != null) 'simName': simName,
+      });
+
+      return res != null
+          ? Map<String, dynamic>.from(res)
+          : {
+              'status': 'calling',
+              'contact_name': contactName,
+              'phone_number': phoneNumber,
+              'sim_slot': simSlot,
+              'method': 'dialer_ui_automation',
+            };
+    } catch (e) {
+      return {
+        'status': 'error',
+        'error': e.toString(),
+      };
+    }
   }
 
   /// Get network information

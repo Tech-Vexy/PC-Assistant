@@ -17,11 +17,11 @@ class GeminiToolCallEvent {
   });
 }
 
-/// Client for Google's Gemini Multimodal Live API and Google Cloud Serverless
-/// inference powered by Gemini 3.8 Flash.
+/// Client for Google's Gemini Multimodal Live API (Bidirectional audio streaming)
+/// powered by Gemini 3.8 Live.
 class GeminiLiveClient {
   static const String liveHost = 'generativelanguage.googleapis.com';
-  static const String defaultModel = 'models/gemini-3.8-flash';
+  static const String defaultModel = 'models/gemini-3.8-live';
 
   final String? apiKey;
   final String? accessToken;
@@ -56,7 +56,9 @@ class GeminiLiveClient {
     String model = defaultModel,
     this.toolDeclarations = const [],
     this.systemInstruction =
-        'You are Device Assistant, a helpful cross-platform companion.',
+        'You are Zen, a calm, mindful, and intuitive on-device companion. '
+        'You speak with warmth, clarity, and conciseness. You proactively help the user '
+        'orchestrate their digital life across mobile and PC with high competence and effortless calm.',
     this.channelFactory,
   })  : host = host ?? liveHost,
         model = model.startsWith('models/') ? model : 'models/$model';
