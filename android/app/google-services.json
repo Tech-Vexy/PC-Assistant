@@ -9,6 +9,25 @@
       "client_info": {
         "mobilesdk_app_id": "1:451645278529:android:0c21462ce5d3265241b9c0",
         "android_client_info": {
+          "package_name": "com.deviceassistant.device_assistant"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAvWr8CSrR10BH7j9TLSl7cqdXhRPbM0v8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:451645278529:android:6577630cb745f0e341b9c0",
+        "android_client_info": {
           "package_name": "com.veldrine.zen_ai"
         }
       },

@@ -19,16 +19,26 @@ subprojects {
     project.evaluationDependsOn(":app")
 }
 subprojects {
-    afterEvaluate {
-        if (project.hasProperty("android")) {
-            val androidExt = project.extensions.findByName("android")
-            if (androidExt is com.android.build.gradle.BaseExtension) {
-                if (androidExt.namespace == null) {
-                    val fallbackNamespace = project.group.toString().ifEmpty {
-                        "com.veldrine.zen_ai.plugin.${project.name.replace('-', '_')}"
+    if (project.name != "app") {
+        val configureSubproject: () -> Unit = {
+            if (project.hasProperty("android")) {
+                val androidExt = project.extensions.findByName("android")
+                if (androidExt is com.android.build.gradle.BaseExtension) {
+                    if (androidExt.namespace == null) {
+                        val fallbackNamespace = project.group.toString().ifEmpty {
+                            "com.veldrine.zen_ai.plugin.${project.name.replace('-', '_')}"
+                        }
+                        androidExt.namespace = fallbackNamespace
                     }
-                    androidExt.namespace = fallbackNamespace
+                    androidExt.compileSdkVersion(36)
                 }
+            }
+        }
+        if (project.state.executed) {
+            configureSubproject()
+        } else {
+            project.afterEvaluate {
+                configureSubproject()
             }
         }
     }

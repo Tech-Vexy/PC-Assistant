@@ -51,7 +51,7 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyAvWr8CSrR10BH7j9TLSl7cqdXhRPbM0v8',
-    appId: '1:451645278529:android:0c21462ce5d3265241b9c0',
+    appId: '1:451645278529:android:6577630cb745f0e341b9c0',
     messagingSenderId: '451645278529',
     projectId: 'zen-device-assistant',
     storageBucket: 'zen-device-assistant.firebasestorage.app',
