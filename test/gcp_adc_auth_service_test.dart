@@ -106,5 +106,43 @@ void main() {
         expect(() => service.getAccessToken(), throwsA(isA<StateError>()));
       }
     });
+
+    test('Loads base64-encoded ADC credentials successfully', () async {
+      final mockHttp = MockClient((request) async {
+        if (request.url.toString() == 'https://oauth2.googleapis.com/token') {
+          return http.Response(
+            jsonEncode({
+              'access_token': 'ya29.base64_adc_token_456',
+              'expires_in': 3600,
+              'token_type': 'Bearer',
+            }),
+            200,
+          );
+        }
+        return http.Response('Not found', 404);
+      });
+
+      final rawJson = jsonEncode({
+        'type': 'authorized_user',
+        'client_id': 'b64_client_id.apps.googleusercontent.com',
+        'client_secret': 'b64_client_secret',
+        'refresh_token': 'b64_refresh',
+        'quota_project_id': 'tafiti-ai-base64',
+      });
+      final b64String = base64Encode(utf8.encode(rawJson));
+
+      final mockVault = _MockKeyVault();
+      await mockVault.setAdcCredentialsJson(b64String);
+
+      final service = GcpAdcAuthService(
+        keyVault: mockVault,
+        httpClient: mockHttp,
+      );
+
+      expect(await service.hasAdcCredentials(), isTrue);
+      final token = await service.getAccessToken();
+      expect(token, equals('ya29.base64_adc_token_456'));
+      expect(await service.getProjectId(), equals('tafiti-ai-base64'));
+    });
   });
 }

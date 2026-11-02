@@ -156,15 +156,32 @@ class GcpAdcAuthService {
     }
   }
 
+  /// Parses JSON Map from raw JSON string or base64-encoded string.
+  static Map<String, dynamic>? _parseJsonMap(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) return null;
+    if (trimmed.startsWith('{')) {
+      try {
+        return jsonDecode(trimmed) as Map<String, dynamic>;
+      } catch (_) {}
+    }
+    try {
+      final decoded = utf8.decode(base64Decode(trimmed));
+      if (decoded.trim().startsWith('{')) {
+        return jsonDecode(decoded.trim()) as Map<String, dynamic>;
+      }
+    } catch (_) {}
+    return null;
+  }
+
   /// Loads the ADC credentials Map from KeyVault, environment, or default file locations.
   Future<Map<String, dynamic>?> loadAdcCredentialsMap() async {
-    // 1. Check KeyVault (Android hardware storage / custom imported JSON)
+    // 1. Check KeyVault (Android hardware storage / custom imported JSON / --dart-define)
     if (keyVault != null) {
       final storedJson = await keyVault!.getAdcCredentialsJson();
       if (storedJson != null && storedJson.trim().isNotEmpty) {
-        try {
-          return jsonDecode(storedJson) as Map<String, dynamic>;
-        } catch (_) {}
+        final parsed = _parseJsonMap(storedJson);
+        if (parsed != null) return parsed;
       }
     }
 
@@ -172,8 +189,9 @@ class GcpAdcAuthService {
     try {
       final directJson = Platform.environment['GCP_ADC_JSON'] ??
           Platform.environment['GCP_ADC_CREDENTIALS'];
-      if (directJson != null && directJson.trim().startsWith('{')) {
-        return jsonDecode(directJson) as Map<String, dynamic>;
+      if (directJson != null && directJson.trim().isNotEmpty) {
+        final parsed = _parseJsonMap(directJson);
+        if (parsed != null) return parsed;
       }
     } catch (_) {}
 
@@ -181,13 +199,14 @@ class GcpAdcAuthService {
     try {
       final envPath = Platform.environment['GOOGLE_APPLICATION_CREDENTIALS'];
       if (envPath != null && envPath.isNotEmpty) {
-        if (envPath.trim().startsWith('{')) {
-          return jsonDecode(envPath) as Map<String, dynamic>;
-        }
+        final parsed = _parseJsonMap(envPath);
+        if (parsed != null) return parsed;
+
         final file = File(envPath);
         if (await file.exists()) {
           final content = await file.readAsString();
-          return jsonDecode(content) as Map<String, dynamic>;
+          final parsedFile = _parseJsonMap(content);
+          if (parsedFile != null) return parsedFile;
         }
       }
     } catch (_) {}

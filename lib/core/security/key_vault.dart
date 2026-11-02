@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:crypto/crypto.dart';
@@ -117,9 +118,14 @@ class KeyVault {
     }
     try {
       final env = Platform.environment['GOOGLE_CLOUD_PROJECT'] ??
-          Platform.environment['GCLOUD_PROJECT'];
+          Platform.environment['GCLOUD_PROJECT'] ??
+          Platform.environment['GCP_PROJECT_ID'];
       if (env != null && env.isNotEmpty) return env;
     } catch (_) {}
+    const defineVal = String.fromEnvironment('GCP_PROJECT_ID');
+    if (defineVal.isNotEmpty) return defineVal;
+    const defineValGcloud = String.fromEnvironment('GOOGLE_CLOUD_PROJECT');
+    if (defineValGcloud.isNotEmpty) return defineValGcloud;
     return 'tafiti-ai-508523';
   }
 
@@ -134,7 +140,28 @@ class KeyVault {
     if (custom != null && custom.isNotEmpty) {
       return custom;
     }
+    try {
+      final env = Platform.environment['GCP_LOCATION'];
+      if (env != null && env.isNotEmpty) return env;
+    } catch (_) {}
+    const defineVal = String.fromEnvironment('GCP_LOCATION');
+    if (defineVal.isNotEmpty) return defineVal;
     return 'us-central1';
+  }
+
+  /// Normalizes credentials JSON by trimming and decoding base64 if needed.
+  static String _normalizeJsonString(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.startsWith('{')) {
+      return trimmed;
+    }
+    try {
+      final decoded = utf8.decode(base64Decode(trimmed));
+      if (decoded.trim().startsWith('{')) {
+        return decoded.trim();
+      }
+    } catch (_) {}
+    return trimmed;
   }
 
   /// Saves imported ADC or Service Account JSON for Android hardware keystore
@@ -146,7 +173,7 @@ class KeyVault {
   Future<String?> getAdcCredentialsJson() async {
     final stored = await _storage.read(key: _adcJsonKey);
     if (stored != null && stored.isNotEmpty) {
-      return stored;
+      return _normalizeJsonString(stored);
     }
     if (!skipEnvFallback) {
       try {
@@ -154,12 +181,16 @@ class KeyVault {
             Platform.environment['GCP_ADC_CREDENTIALS'] ??
             Platform.environment['GOOGLE_APPLICATION_CREDENTIALS_JSON'];
         if (env != null && env.isNotEmpty) {
-          return env;
+          return _normalizeJsonString(env);
         }
       } catch (_) {}
       const defineVal = String.fromEnvironment('GCP_ADC_JSON');
       if (defineVal.isNotEmpty) {
-        return defineVal;
+        return _normalizeJsonString(defineVal);
+      }
+      const defineCreds = String.fromEnvironment('GCP_ADC_CREDENTIALS');
+      if (defineCreds.isNotEmpty) {
+        return _normalizeJsonString(defineCreds);
       }
     }
     return null;
@@ -194,6 +225,12 @@ class KeyVault {
   Future<String> getAuthMode() async {
     final val = await _storage.read(key: _authModeKey);
     if (val != null && val.isNotEmpty) return val;
+    try {
+      final env = Platform.environment['AUTH_MODE'];
+      if (env != null && env.isNotEmpty) return env;
+    } catch (_) {}
+    const defineVal = String.fromEnvironment('AUTH_MODE');
+    if (defineVal.isNotEmpty) return defineVal;
     return 'adc';
   }
 

@@ -79,11 +79,37 @@ jobs:
         run: flutter pub get
       - name: Build Android ARM Release APK
         run: |
-          flutter build apk --release --target-platform android-arm --dart-define=GEMINI_API_KEY="$GEMINI_API_KEY" --dart-define=NEBIUS_API_KEY="$NEBIUS_API_KEY"
+          ADC_VAL="${GCP_ADC_JSON:-$GCP_ADC_CREDENTIALS}"
+          if [ -n "$ADC_VAL" ]; then
+            if [[ "$ADC_VAL" =~ ^[[:space:]]*\{ ]]; then
+              ADC_DEF=$(echo -n "$ADC_VAL" | base64 -w 0)
+            else
+              ADC_DEF="$ADC_VAL"
+            fi
+          else
+            ADC_DEF=""
+          fi
+          flutter build apk --release --target-platform android-arm \
+            --dart-define=GCP_ADC_JSON="$ADC_DEF" \
+            --dart-define=AUTH_MODE="adc" \
+            --dart-define=NEBIUS_API_KEY="$NEBIUS_API_KEY"
           mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/app-release-arm.apk
       - name: Build Android ARM64 Release APK
         run: |
-          flutter build apk --release --target-platform android-arm64 --dart-define=GEMINI_API_KEY="$GEMINI_API_KEY" --dart-define=NEBIUS_API_KEY="$NEBIUS_API_KEY"
+          ADC_VAL="${GCP_ADC_JSON:-$GCP_ADC_CREDENTIALS}"
+          if [ -n "$ADC_VAL" ]; then
+            if [[ "$ADC_VAL" =~ ^[[:space:]]*\{ ]]; then
+              ADC_DEF=$(echo -n "$ADC_VAL" | base64 -w 0)
+            else
+              ADC_DEF="$ADC_VAL"
+            fi
+          else
+            ADC_DEF=""
+          fi
+          flutter build apk --release --target-platform android-arm64 \
+            --dart-define=GCP_ADC_JSON="$ADC_DEF" \
+            --dart-define=AUTH_MODE="adc" \
+            --dart-define=NEBIUS_API_KEY="$NEBIUS_API_KEY"
           mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/app-release-arm64.apk
       - name: Upload ARM Release APK
         uses: actions/upload-artifact@v7
@@ -137,7 +163,21 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
       - name: Build Linux Release Bundle
-        run: flutter build linux --release --dart-define=GEMINI_API_KEY="$GEMINI_API_KEY" --dart-define=NEBIUS_API_KEY="$NEBIUS_API_KEY"
+        run: |
+          ADC_VAL="${GCP_ADC_JSON:-$GCP_ADC_CREDENTIALS}"
+          if [ -n "$ADC_VAL" ]; then
+            if [[ "$ADC_VAL" =~ ^[[:space:]]*\{ ]]; then
+              ADC_DEF=$(echo -n "$ADC_VAL" | base64 -w 0)
+            else
+              ADC_DEF="$ADC_VAL"
+            fi
+          else
+            ADC_DEF=""
+          fi
+          flutter build linux --release \
+            --dart-define=GCP_ADC_JSON="$ADC_DEF" \
+            --dart-define=AUTH_MODE="adc" \
+            --dart-define=NEBIUS_API_KEY="$NEBIUS_API_KEY"
       - name: Compress Linux Bundle
         run: |
           tar -czvf device-assistant-linux-x64.tar.gz -C build/linux/x64/release/bundle .
@@ -171,7 +211,19 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
       - name: Build Windows Release Executable
-        run: flutter build windows --release --dart-define=GEMINI_API_KEY="$env:GEMINI_API_KEY" --dart-define=NEBIUS_API_KEY="$env:NEBIUS_API_KEY"
+        shell: pwsh
+        run: |
+          $adcVal = if ($env:GCP_ADC_JSON) { $env:GCP_ADC_JSON } else { $env:GCP_ADC_CREDENTIALS }
+          $adcPayload = ""
+          if ($adcVal) {
+            if ($adcVal.Trim().StartsWith("{")) {
+              $bytes = [System.Text.Encoding]::UTF8.GetBytes($adcVal)
+              $adcPayload = [System.Convert]::ToBase64String($bytes)
+            } else {
+              $adcPayload = $adcVal.Trim()
+            }
+          }
+          flutter build windows --release --dart-define=GCP_ADC_JSON="$adcPayload" --dart-define=AUTH_MODE="adc" --dart-define=NEBIUS_API_KEY="$env:NEBIUS_API_KEY"
       - name: Compress Windows Release Bundle
         shell: pwsh
         run: |
