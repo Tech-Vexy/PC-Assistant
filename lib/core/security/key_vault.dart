@@ -96,11 +96,27 @@ class KeyVault {
     await _storage.write(key: _geminiEndpointKey, value: endpoint.trim());
   }
 
-  /// Retrieves the Google Cloud Serverless inference endpoint / host (default: generativelanguage.googleapis.com)
+  /// Retrieves the Google Cloud Serverless inference endpoint / host
+  /// (defaults to Vertex AI if using ADC, otherwise generativelanguage.googleapis.com)
   Future<String> getGeminiEndpoint() async {
     final custom = await _storage.read(key: _geminiEndpointKey);
     if (custom != null && custom.isNotEmpty) {
       return custom;
+    }
+    try {
+      final env = Platform.environment['GEMINI_ENDPOINT'] ??
+          Platform.environment['GCP_ENDPOINT'];
+      if (env != null && env.isNotEmpty) return env;
+    } catch (_) {}
+    const defineVal = String.fromEnvironment('GEMINI_ENDPOINT');
+    if (defineVal.isNotEmpty) return defineVal;
+    const defineValGcp = String.fromEnvironment('GCP_ENDPOINT');
+    if (defineValGcp.isNotEmpty) return defineValGcp;
+
+    final isAdc = await isUsingAdc();
+    if (isAdc) {
+      final loc = await getGcpLocation();
+      return '$loc-aiplatform.googleapis.com';
     }
     return 'generativelanguage.googleapis.com';
   }

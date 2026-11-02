@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
+import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 /// Event representing a tool call request from Gemini Live
@@ -91,27 +92,42 @@ class GeminiLiveClient {
         ? await accessTokenProvider!()
         : accessToken;
 
+    final String effectiveHost;
+    if (token != null &&
+        token.isNotEmpty &&
+        host == liveHost &&
+        projectId != null &&
+        projectId!.isNotEmpty) {
+      effectiveHost = '$location-aiplatform.googleapis.com';
+    } else {
+      effectiveHost = host;
+    }
+
     final Uri uri;
+    final Map<String, dynamic> headers = {};
     if (token != null && token.isNotEmpty) {
-      if (host.contains('aiplatform.googleapis.com')) {
+      headers['Authorization'] = 'Bearer $token';
+      if (effectiveHost.contains('aiplatform.googleapis.com')) {
         uri = Uri.parse(
-          'wss://$host/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent',
+          'wss://$effectiveHost/ws/google.cloud.aiplatform.v1beta1.LlmBidiService/BidiGenerateContent?access_token=$token',
         );
       } else {
         uri = Uri.parse(
-          'wss://$host/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?access_token=$token',
+          'wss://$effectiveHost/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?access_token=$token',
         );
       }
     } else {
       uri = Uri.parse(
-        'wss://$host/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=$apiKey',
+        'wss://$effectiveHost/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=$apiKey',
       );
     }
 
     _setupCompleter = Completer<void>();
     _channel = channelFactory != null
         ? channelFactory!(uri)
-        : WebSocketChannel.connect(uri);
+        : (headers.isNotEmpty
+            ? IOWebSocketChannel.connect(uri, headers: headers)
+            : WebSocketChannel.connect(uri));
 
     _subscription = _channel!.stream.listen(
       _handleServerMessage,
@@ -530,6 +546,60 @@ class GeminiLiveClient {
         }
         return '';
       } else {
+        if (response.statusCode == 403 &&
+            response.body.contains('insufficient') &&
+            token != null &&
+            projectId != null &&
+            projectId!.isNotEmpty &&
+            !host.contains('aiplatform.googleapis.com')) {
+          // Automatic failover to Vertex AI endpoint using cloud-platform ADC scope
+          final vertexHost = '$location-aiplatform.googleapis.com';
+          final vertexUri = Uri.parse(
+            'https://$vertexHost/v1beta1/projects/$projectId/locations/$location/publishers/google/models/$cleanModel:generateContent',
+          );
+          final vertexResponse = await client.post(
+            vertexUri,
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: jsonEncode(payload),
+          );
+          if (vertexResponse.statusCode >= 200 &&
+              vertexResponse.statusCode < 300) {
+            final data =
+                jsonDecode(vertexResponse.body) as Map<String, dynamic>;
+            final candidates = data['candidates'] as List<dynamic>?;
+            if (candidates != null && candidates.isNotEmpty) {
+              final content = candidates[0]['content'] as Map<String, dynamic>?;
+              final parts = content?['parts'] as List<dynamic>?;
+              if (parts != null && parts.isNotEmpty) {
+                for (final part in parts) {
+                  if (part is Map<String, dynamic>) {
+                    if (part.containsKey('functionCall')) {
+                      final fn = part['functionCall'] as Map<String, dynamic>;
+                      return jsonEncode({
+                        'action': 'tool_call',
+                        'tool': fn['name'],
+                        'args': fn['args'] ?? {},
+                      });
+                    }
+                    if (part.containsKey('text')) {
+                      if (part['thought'] == true) continue;
+                      final text = (part['text'] as String).trim();
+                      if (text.toLowerCase().startsWith('thinking with') ||
+                          text.toLowerCase().startsWith('thinking process')) {
+                        continue;
+                      }
+                      return text;
+                    }
+                  }
+                }
+              }
+            }
+            return '';
+          }
+        }
         throw StateError(
           'Gemini 3.8 Flash inference failed (${response.statusCode}): ${response.body}',
         );
@@ -614,6 +684,40 @@ class GeminiLiveClient {
           if (projectId != null) 'projectId': projectId,
         };
       } else {
+        if (response.statusCode == 403 &&
+            response.body.contains('insufficient') &&
+            token != null &&
+            projectId != null &&
+            projectId!.isNotEmpty &&
+            !host.contains('aiplatform.googleapis.com')) {
+          // Automatic failover to Vertex AI endpoint using cloud-platform ADC scope
+          final vertexHost = '$location-aiplatform.googleapis.com';
+          final vertexUri = Uri.parse(
+            'https://$vertexHost/v1beta1/projects/$projectId/locations/$location/publishers/google/models/$cleanModel:generateContent',
+          );
+          final vertexResponse = await client
+              .post(
+                vertexUri,
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': 'Bearer $token',
+                },
+                body: jsonEncode(payload),
+              )
+              .timeout(const Duration(seconds: 10));
+
+          if (vertexResponse.statusCode == 200) {
+            stopwatch.stop();
+            return {
+              'success': true,
+              'latencyMs': stopwatch.elapsedMilliseconds,
+              'model': model,
+              'endpoint': vertexHost,
+              'auth': 'Vertex AI (ADC Bearer Token)',
+              'projectId': projectId,
+            };
+          }
+        }
         return {
           'success': false,
           'statusCode': response.statusCode,

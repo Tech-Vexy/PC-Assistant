@@ -9,6 +9,7 @@ import '../security/key_vault.dart';
 class GcpAdcAuthService {
   static const List<String> cloudPlatformScopes = [
     'https://www.googleapis.com/auth/cloud-platform',
+    'https://www.googleapis.com/auth/generative-language',
   ];
 
   static const String oauthTokenEndpoint =

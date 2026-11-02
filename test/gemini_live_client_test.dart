@@ -282,5 +282,62 @@ void main() {
       mockChannel.dispose();
       client.dispose();
     });
+
+    test(
+        'GeminiLiveClient testConnection fails over to Vertex AI on 403 insufficient scopes',
+        () async {
+      int requestCount = 0;
+      final mockHttpClient = MockClient((request) async {
+        requestCount++;
+        if (request.url.host == 'generativelanguage.googleapis.com') {
+          return http.Response(
+            jsonEncode({
+              'error': {
+                'code': 403,
+                'message': 'Request had insufficient authentication scopes.',
+                'status': 'PERMISSION_DENIED',
+              }
+            }),
+            403,
+            headers: {'content-type': 'application/json'},
+          );
+        } else if (request.url.host.contains('aiplatform.googleapis.com')) {
+          expect(
+              request.headers['Authorization'], equals('Bearer ya29.test_adc'));
+          expect(request.url.path,
+              contains('projects/test-project-123/locations/us-central1'));
+          return http.Response(
+            jsonEncode({
+              'candidates': [
+                {
+                  'content': {
+                    'role': 'model',
+                    'parts': [
+                      {'text': 'OK'}
+                    ]
+                  }
+                }
+              ]
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        return http.Response('Not Found', 404);
+      });
+
+      final client = GeminiLiveClient(
+        accessTokenProvider: () async => 'ya29.test_adc',
+        projectId: 'test-project-123',
+        location: 'us-central1',
+      );
+
+      final result = await client.testConnection(httpClient: mockHttpClient);
+      expect(result['success'], isTrue);
+      expect(result['endpoint'], contains('aiplatform.googleapis.com'));
+      expect(result['auth'], contains('Vertex AI'));
+      expect(requestCount, equals(2));
+      client.dispose();
+    });
   });
 }
