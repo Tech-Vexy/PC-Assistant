@@ -1596,7 +1596,7 @@ class ToolDispatcher {
         final scrollRes = await _handleScrollScreen({'direction': dir});
         return {
           ...scrollRes,
-          'engine': 'Google Cloud Serverless Computer Use (Gemini 3.8 Flash)',
+          'engine': 'Computer Use',
         };
       }
     }
@@ -1606,7 +1606,7 @@ class ToolDispatcher {
         final typeRes = await _handleInputText({'text': text});
         return {
           ...typeRes,
-          'engine': 'Google Cloud Serverless Computer Use (Gemini 3.8 Flash)',
+          'engine': 'Computer Use',
         };
       }
     }
@@ -1620,13 +1620,13 @@ class ToolDispatcher {
               await _handleTouchGesture({'type': 'tap', 'x': x, 'y': y});
           return {
             ...tapRes,
-            'engine': 'Google Cloud Serverless Computer Use (Gemini 3.8 Flash)',
+            'engine': 'Computer Use',
           };
         } else if (text != null && text.isNotEmpty) {
           final clickRes = await _handleClickElement({'text': text});
           return {
             ...clickRes,
-            'engine': 'Google Cloud Serverless Computer Use (Gemini 3.8 Flash)',
+            'engine': 'Computer Use',
           };
         }
       }
@@ -1642,7 +1642,7 @@ class ToolDispatcher {
 
     return {
       'status': 'done',
-      'engine': 'Google Cloud Serverless Computer Use (Gemini 3.8 Flash)',
+      'engine': 'Computer Use',
       'action': action,
       'args': args,
       'message': 'Computer use action processed under security shield.',

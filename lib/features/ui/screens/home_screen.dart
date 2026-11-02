@@ -10,6 +10,7 @@ import '../../../core/database/local_database.dart';
 import '../../../core/memory/memory_extractor.dart';
 import '../../../core/memory/memory_recall.dart';
 import '../../../core/memory/memory_vector.dart';
+import '../../../core/network/gcp_adc_auth_service.dart';
 import '../../../core/network/gemini_live_client.dart';
 import '../../../core/network/dartantic_firebase_agent.dart';
 import '../../../core/network/nebius_client.dart';
@@ -63,7 +64,10 @@ class _HomeScreenState extends State<HomeScreen>
   bool _isConnecting = false;
   bool _isConnected = false;
   bool _isLocalSttActive = false;
+  bool _isThinking = false;
   bool _isWaitingForMicPermission = false;
+  bool _isUserSpeaking = false;
+  Timer? _playbackEndTimer;
   String? _activePackage;
   bool _isAccessibilityEnabled = false;
   bool _isBatteryOptimizationIgnored = true;
@@ -305,18 +309,36 @@ class _HomeScreenState extends State<HomeScreen>
       DateTime.now().difference(_lastAudioChunkAt!) <
           const Duration(milliseconds: 900);
 
+  bool get _isSpeaking => _isTtsSpeaking || _isAssistantAudioAudible;
+
   Color get _statusColor {
-    if (_isConnected) return Colors.green;
+    if (_isConnecting) return const Color(0xFF4895EF);
+    if (_isThinking) return Colors.purpleAccent;
+    if (_isSpeaking) return Colors.amberAccent;
+    if (_isUserSpeaking) return Colors.tealAccent;
+    if (_isConnected) return Colors.cyanAccent;
     if (_isLocalSttActive) return Colors.teal;
-    if (_isTtsSpeaking) return Colors.amberAccent;
     return Colors.grey;
   }
 
   String get _statusLabel {
+    if (_isConnecting) return 'Connecting';
+    if (_isThinking) return 'Thinking';
+    if (_isSpeaking) return 'Speaking';
+    if (_isUserSpeaking) return 'Listening';
     if (_isConnected) return 'Live';
     if (_isLocalSttActive) return 'Listening';
-    if (_isTtsSpeaking) return 'Speaking';
     return 'Ready';
+  }
+
+  String get _heroStatusText {
+    if (_isConnecting) return 'Connecting...';
+    if (_isThinking) return 'Thinking...';
+    if (_isSpeaking) return 'Speaking...';
+    if (_isUserSpeaking) return 'Listening to you...';
+    if (_isConnected) return 'Live & listening';
+    if (_isLocalSttActive) return 'Listening on device';
+    return 'Tap the orb to speak';
   }
 
   void _handleHotwordDetected(Map<String, String?> data) {
@@ -358,6 +380,10 @@ class _HomeScreenState extends State<HomeScreen>
     try {
       final geminiKey = await widget.keyVault.getGeminiApiKey();
       final nebiusKey = await widget.keyVault.getNebiusApiKey();
+      final authMode = await widget.keyVault.getAuthMode();
+      final isAdc = (authMode == 'adc');
+      final adcService = GcpAdcAuthService(keyVault: widget.keyVault);
+      final hasAdc = isAdc && await adcService.hasAdcCredentials();
 
       if (_isConnected || _isLocalSttActive) {
         await _liveClient?.disconnect();
@@ -370,6 +396,8 @@ class _HomeScreenState extends State<HomeScreen>
           setState(() {
             _isConnected = false;
             _isLocalSttActive = false;
+            _isUserSpeaking = false;
+            _isThinking = false;
             _currentVoiceTranscript = '';
           });
         }
@@ -385,7 +413,7 @@ class _HomeScreenState extends State<HomeScreen>
         }
       }
 
-      final hasGemini = (geminiKey != null && geminiKey.isNotEmpty);
+      final hasGemini = (geminiKey != null && geminiKey.isNotEmpty) || hasAdc;
 
       if (hasGemini) {
         final projectId = await widget.keyVault.getGcpProjectId();
@@ -398,7 +426,8 @@ class _HomeScreenState extends State<HomeScreen>
         final liveInstruction = _buildLiveSystemInstruction(coreMemories);
 
         _liveClient = GeminiLiveClient(
-          apiKey: geminiKey,
+          apiKey: isAdc ? null : geminiKey,
+          accessTokenProvider: isAdc ? () => adcService.getAccessToken() : null,
           projectId: projectId,
           location: location,
           host: geminiEndpoint,
@@ -418,6 +447,24 @@ class _HomeScreenState extends State<HomeScreen>
           onBargeIn: () {
             _audioPlayback?.flush();
             _audioRecorder.notifyPlaybackEnded();
+            if (mounted) {
+              setState(() {
+                _isThinking = false;
+                _lastAudioChunkAt = null;
+              });
+            }
+          },
+          onSpeechStatusChanged: (isSpeech, rms) {
+            if (_isUserSpeaking != isSpeech && mounted) {
+              setState(() {
+                _isUserSpeaking = isSpeech;
+                if (isSpeech) {
+                  _isThinking = false;
+                } else if (_isConnected && !_isSpeaking) {
+                  _isThinking = true;
+                }
+              });
+            }
           },
         );
         if (!micReady && mounted) {
@@ -525,19 +572,21 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
     _transcriptSub?.cancel();
     _transcriptSub = client.transcriptStream.listen((text) {
       if (text.isEmpty) return;
-      if (_isAssistantAudioAudible) _selfEchoGuard.noteSpoken(text);
+      final cleanText = _sanitizeTranscript(text);
+      if (cleanText.isEmpty) return;
+      if (_isAssistantAudioAudible) _selfEchoGuard.noteSpoken(cleanText);
       if (!mounted) return;
       setState(() {
         if (_chatMessages.isNotEmpty &&
             !_chatMessages.last.isUser &&
             !_chatMessages.last.isError &&
             _chatMessages.last.toolData == null) {
-          _chatMessages.last.text += text;
+          _chatMessages.last.text += cleanText;
         } else {
           _chatMessages.add(ChatMessage(
             id: 'assistant_${DateTime.now().millisecondsSinceEpoch}',
             isUser: false,
-            text: text,
+            text: cleanText,
             timestamp: DateTime.now(),
           ));
         }
@@ -549,12 +598,28 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
       _lastAudioChunkAt = DateTime.now();
       _audioRecorder.notifyPlaybackStarted();
       _audioPlayback?.playChunk(chunk);
+      if ((!_isSpeaking || _isThinking) && mounted) {
+        setState(() {
+          _isThinking = false;
+        });
+      }
+      _playbackEndTimer?.cancel();
+      _playbackEndTimer = Timer(const Duration(milliseconds: 950), () {
+        if (mounted) setState(() {});
+      });
     });
 
     _interruptionSub?.cancel();
     _interruptionSub = client.interruptionStream.listen((_) {
       _audioPlayback?.flush();
       _audioRecorder.notifyPlaybackEnded();
+      _playbackEndTimer?.cancel();
+      if (mounted) {
+        setState(() {
+          _isThinking = false;
+          _lastAudioChunkAt = null;
+        });
+      }
     });
 
     _toolCallSub?.cancel();
@@ -586,6 +651,20 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
         ));
       });
     });
+  }
+
+  String _sanitizeTranscript(String text) {
+    var cleaned = text;
+    // Strip any thinking prefixes or model meta-announcements
+    cleaned = cleaned.replaceAll(
+      RegExp(r'Thinking with\s+[^\n.]+[.]?', caseSensitive: false),
+      '',
+    );
+    cleaned = cleaned.replaceAll(
+      RegExp(r'Thinking Process:?[^\n]*\n?', caseSensitive: false),
+      '',
+    );
+    return cleaned.trim();
   }
 
   String _toolStatus(Map<String, dynamic> result) {
@@ -628,6 +707,10 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
 
     final geminiKey = await widget.keyVault.getGeminiApiKey();
     final nebiusKey = await widget.keyVault.getNebiusApiKey();
+    final authMode = await widget.keyVault.getAuthMode();
+    final isAdc = (authMode == 'adc');
+    final adcService = GcpAdcAuthService(keyVault: widget.keyVault);
+    final hasAdc = isAdc && await adcService.hasAdcCredentials();
 
     // While the Live session is running, keep text turns inside that session so
     // memory/plan/workflow tool calls flow through the same agent loop.
@@ -640,20 +723,10 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
     final isComputerUse = ToolDispatcher.isComputerUseRequest(clean);
     final useNebius = nebiusKey != null &&
         nebiusKey.isNotEmpty &&
-        (isScreenVision || geminiKey == null || geminiKey.isEmpty);
+        (isScreenVision || (geminiKey == null || geminiKey.isEmpty) && !hasAdc);
 
-    // Add thinking message
-    final modelLabel = useNebius ? 'Nemotron' : 'Gemini 3.8 Flash';
-    final pendingMsgId = 'pending_${DateTime.now().millisecondsSinceEpoch}';
     setState(() {
-      _chatMessages.add(
-        ChatMessage(
-          id: pendingMsgId,
-          isUser: false,
-          text: 'Thinking with $modelLabel...',
-          timestamp: DateTime.now(),
-        ),
-      );
+      _isThinking = true;
     });
 
     try {
@@ -727,14 +800,7 @@ If the user query is a general knowledge question, conversational request, or ex
       }
 
       String response;
-      final toolIntentResult = await _dartanticAgent?.sendPrompt(
-        prompt: clean,
-        systemPrompt: systemPrompt,
-      );
-
-      if (toolIntentResult != null && toolIntentResult.isNotEmpty) {
-        response = toolIntentResult;
-      } else if (useNebius) {
+      if (useNebius) {
         final baseEndpoint = await widget.keyVault.getNebiusBaseEndpoint();
         final superVlEndpoint =
             await widget.keyVault.getNebiusSuperVlEndpoint();
@@ -759,14 +825,15 @@ If the user query is a general knowledge question, conversational request, or ex
           ],
           complexity: complexity,
         );
-      } else if (geminiKey != null && geminiKey.isNotEmpty) {
+      } else if ((geminiKey != null && geminiKey.isNotEmpty) || hasAdc) {
         final geminiModel = await widget.keyVault.getGeminiModel();
         final geminiEndpoint = await widget.keyVault.getGeminiEndpoint();
         final projectId = await widget.keyVault.getGcpProjectId();
         final location = await widget.keyVault.getGcpLocation();
 
         _liveClient ??= GeminiLiveClient(
-          apiKey: geminiKey,
+          apiKey: isAdc ? null : geminiKey,
+          accessTokenProvider: isAdc ? () => adcService.getAccessToken() : null,
           projectId: projectId,
           location: location,
           host: geminiEndpoint,
@@ -778,14 +845,10 @@ If the user query is a general knowledge question, conversational request, or ex
           systemInstruction: systemPrompt,
         );
       } else {
-        response =
-            'Please configure a Gemini API key or Nebius API key in Settings.';
+        response = isAdc
+            ? 'Google Cloud ADC credentials not found. Run `gcloud auth application-default login` on desktop or import credentials in Settings.'
+            : 'Please configure a Gemini API key or Nebius API key in Settings.';
       }
-
-      // Remove thinking message
-      setState(() {
-        _chatMessages.removeWhere((msg) => msg.id == pendingMsgId);
-      });
 
       // Check if response is a tool call
       if (response.trim().startsWith('{') && response.trim().endsWith('}')) {
@@ -840,15 +903,22 @@ If the user query is a general knowledge question, conversational request, or ex
       // Background auto-extraction of long-term user memories from this turn
       unawaited(_triggerBackgroundMemoryExtraction(clean, response));
     } catch (e) {
-      setState(() {
-        _chatMessages.removeWhere((msg) => msg.id == pendingMsgId);
-        _chatMessages.add(ChatMessage(
-          id: DateTime.now().millisecondsSinceEpoch.toString(),
-          isUser: false,
-          text: 'Error: $e',
-          timestamp: DateTime.now(),
-        ));
-      });
+      if (mounted) {
+        setState(() {
+          _chatMessages.add(ChatMessage(
+            id: DateTime.now().millisecondsSinceEpoch.toString(),
+            isUser: false,
+            text: 'Error: $e',
+            timestamp: DateTime.now(),
+          ));
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isThinking = false;
+        });
+      }
     }
   }
 
@@ -973,6 +1043,7 @@ If the user query is a general knowledge question, conversational request, or ex
     _hotwordSub?.cancel();
     _approvalPollTimer?.cancel();
     _pcEventsSub?.cancel();
+    _playbackEndTimer?.cancel();
     _cameraStreamSub?.cancel();
     _cameraStreaming.dispose();
     _workflowScheduler?.dispose();
@@ -1128,7 +1199,7 @@ If the user query is a general knowledge question, conversational request, or ex
               _buildGeminiLiveView(theme),
               FloatingAssistantOverlay(
                 isListening: _isLocalSttActive || _isConnected,
-                isSpeaking: _isTtsSpeaking,
+                isSpeaking: _isSpeaking,
                 transcript: _currentVoiceTranscript,
                 onDismiss: () => setState(() => _currentVoiceTranscript = ''),
               ),
@@ -1140,6 +1211,7 @@ If the user query is a general knowledge question, conversational request, or ex
   }
 
   Widget _buildGeminiLiveView(ThemeData theme) {
+    final hasMessages = _chatMessages.isNotEmpty;
     return Column(
       children: [
         // Status Banners
@@ -1184,16 +1256,102 @@ If the user query is a general knowledge question, conversational request, or ex
 
         if (_pendingPcApprovals.isNotEmpty) _buildPcApprovalCard(),
 
+        // Animated Voice Orb Hero Section — always visible in Gemini Live UI
+        Padding(
+          padding: EdgeInsets.symmetric(
+            vertical: hasMessages ? 2 : 10,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AnimatedGlassOrb(
+                size: hasMessages ? 105 : 140,
+                isConnected: _isConnected,
+                isListening: _isLocalSttActive || _isUserSpeaking,
+                isSpeaking: _isSpeaking,
+                isConnecting: _isConnecting,
+                isThinking: _isThinking,
+                onTap: _toggleConnection,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                _heroStatusText,
+                style: TextStyle(
+                  fontSize: hasMessages ? 14 : 17,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white,
+                  letterSpacing: 0.3,
+                ),
+              ),
+            ],
+          ),
+        ),
+
         // Main Content Area
         Expanded(
-          child: _chatMessages.isEmpty
-              ? _buildEmptyState()
-              : _buildConversationList(),
+          child: hasMessages
+              ? Column(
+                  children: [
+                    if (_currentVoiceTranscript.isNotEmpty)
+                      _buildLiveTranscriptBox(),
+                    Expanded(child: _buildConversationList()),
+                  ],
+                )
+              : _buildEmptyStateContent(),
         ),
 
         // Bottom Input Area
         _buildBottomInputArea(),
       ],
+    );
+  }
+
+  Widget _buildEmptyStateContent() {
+    return Center(
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 40),
+              child: Text(
+                'Ask me to remember something, plan a task, or run a workflow routine.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12, color: Colors.white54),
+              ),
+            ),
+            if (_currentVoiceTranscript.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              _buildLiveTranscriptBox(),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLiveTranscriptBox() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
+      child: GlassContainer(
+        blur: 16,
+        opacity: 0.12,
+        borderRadius: BorderRadius.circular(16),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        border: Border.all(
+          color: Colors.tealAccent.withValues(alpha: 0.4),
+          width: 1.2,
+        ),
+        child: Text(
+          _currentVoiceTranscript,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 14.5,
+            fontWeight: FontWeight.w500,
+          ),
+          textAlign: TextAlign.center,
+        ),
+      ),
     );
   }
 
@@ -1319,75 +1477,6 @@ If the user query is a general knowledge question, conversational request, or ex
     );
   }
 
-  Widget _buildEmptyState() {
-    return Center(
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            AnimatedGlassOrb(
-              isConnected: _isConnected,
-              isListening: _isLocalSttActive,
-              isSpeaking: _isTtsSpeaking,
-              isConnecting: _isConnecting,
-              onTap: _toggleConnection,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              _isConnected
-                  ? 'Listening to your voice...'
-                  : _isLocalSttActive
-                      ? 'Listening on device'
-                      : _isTtsSpeaking
-                          ? 'Speaking...'
-                          : 'Tap the orb to speak',
-              style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-                color: Colors.white,
-                letterSpacing: 0.3,
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 40),
-              child: Text(
-                'Ask me to remember something, plan a task, or run a workflow routine.',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12, color: Colors.white54),
-              ),
-            ),
-            if (_currentVoiceTranscript.isNotEmpty) ...[
-              const SizedBox(height: 18),
-              Container(
-                margin: const EdgeInsets.symmetric(horizontal: 28),
-                child: GlassContainer(
-                  blur: 16,
-                  opacity: 0.12,
-                  borderRadius: BorderRadius.circular(16),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                  border: Border.all(
-                    color: Colors.tealAccent.withValues(alpha: 0.4),
-                    width: 1.2,
-                  ),
-                  child: Text(
-                    _currentVoiceTranscript,
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w500),
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _buildConversationList() {
     return ListView.builder(
       reverse: true,
@@ -1465,7 +1554,10 @@ If the user query is a general knowledge question, conversational request, or ex
       return '${result['security_alert'] ?? result['reason'] ?? 'Blocked by Privacy Shield.'}';
     }
 
-    final memories = result['memories'];
+    final filtered = Map<String, dynamic>.from(result)..remove('engine');
+    if (filtered.isEmpty) return 'Completed.';
+
+    final memories = filtered['memories'];
     if (memories is List) {
       if (memories.isEmpty) return 'No memories stored.';
       return memories.take(6).map((m) {
@@ -1474,7 +1566,7 @@ If the user query is a general knowledge question, conversational request, or ex
       }).join('\n');
     }
 
-    final plans = result['plans'];
+    final plans = filtered['plans'];
     if (plans is List) {
       if (plans.isEmpty) return 'No task plans yet.';
       return plans.take(6).map((p) {
@@ -1483,7 +1575,7 @@ If the user query is a general knowledge question, conversational request, or ex
       }).join('\n');
     }
 
-    final workflows = result['workflows'];
+    final workflows = filtered['workflows'];
     if (workflows is List) {
       if (workflows.isEmpty) return 'No saved workflows.';
       return workflows.take(6).map((w) {
@@ -1492,7 +1584,7 @@ If the user query is a general knowledge question, conversational request, or ex
       }).join('\n');
     }
 
-    final scheduled = result['scheduled_workflows'];
+    final scheduled = filtered['scheduled_workflows'];
     if (scheduled is List) {
       if (scheduled.isEmpty) return 'No scheduled routines.';
       return scheduled.take(6).map((s) {
@@ -1501,19 +1593,19 @@ If the user query is a general knowledge question, conversational request, or ex
       }).join('\n');
     }
 
-    final steps = result['steps'];
+    final steps = filtered['steps'];
     if (steps is List) {
       return 'Plan created with ${steps.length} steps.';
     }
 
-    final answer = result['answer'];
+    final answer = filtered['answer'];
     if (answer != null) return '$answer';
 
-    if (result['status'] != null && result.length <= 3) {
-      return 'Status: ${result['status']}';
+    if (filtered['status'] != null && filtered.length <= 3) {
+      return 'Status: ${filtered['status']}';
     }
 
-    final text = result.toString();
+    final text = filtered.toString();
     return text.length > 220 ? '${text.substring(0, 220)}…' : text;
   }
 

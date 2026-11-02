@@ -344,8 +344,19 @@ class GeminiLiveClient {
                 }
                 // Text transcript
                 if (part.containsKey('text')) {
+                  if (part['thought'] == true) {
+                    continue;
+                  }
+                  final text = part['text'] as String;
+                  if (text.trim().toLowerCase().startsWith('thinking with') ||
+                      text
+                          .trim()
+                          .toLowerCase()
+                          .startsWith('thinking process')) {
+                    continue;
+                  }
                   if (!_transcriptController.isClosed) {
-                    _transcriptController.add(part['text'] as String);
+                    _transcriptController.add(text);
                   }
                 }
               }
@@ -505,7 +516,13 @@ class GeminiLiveClient {
                   });
                 }
                 if (part.containsKey('text')) {
-                  return part['text'] as String;
+                  if (part['thought'] == true) continue;
+                  final text = (part['text'] as String).trim();
+                  if (text.toLowerCase().startsWith('thinking with') ||
+                      text.toLowerCase().startsWith('thinking process')) {
+                    continue;
+                  }
+                  return text;
                 }
               }
             }

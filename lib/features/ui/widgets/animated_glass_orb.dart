@@ -10,6 +10,8 @@ class AnimatedGlassOrb extends StatefulWidget {
   final bool isListening;
   final bool isSpeaking;
   final bool isConnecting;
+  final bool isThinking;
+  final double size;
   final VoidCallback onTap;
 
   const AnimatedGlassOrb({
@@ -18,6 +20,8 @@ class AnimatedGlassOrb extends StatefulWidget {
     required this.isListening,
     required this.isSpeaking,
     required this.isConnecting,
+    this.isThinking = false,
+    this.size = 140.0,
     required this.onTap,
   });
 
@@ -53,7 +57,11 @@ class _AnimatedGlassOrbState extends State<AnimatedGlassOrb>
   }
 
   bool get _isVoiceActive =>
-      widget.isConnected || widget.isListening || widget.isSpeaking;
+      widget.isConnected ||
+      widget.isListening ||
+      widget.isSpeaking ||
+      widget.isThinking ||
+      widget.isConnecting;
 
   @override
   void didUpdateWidget(covariant AnimatedGlassOrb oldWidget) {
@@ -78,53 +86,76 @@ class _AnimatedGlassOrbState extends State<AnimatedGlassOrb>
   Widget build(BuildContext context) {
     final active = _isVoiceActive;
 
-    // Dynamic color theme based on assistant mode
-    final orbColors = widget.isSpeaking
+    // Dynamic color theme based on assistant mode:
+    // Connecting -> Electric Cyan / Indigo pulsing
+    // Speaking -> Amber Gold / Sunset Orange
+    // Thinking -> Violet / Neon Purple
+    // Listening (user speech) -> Vibrant Teal / Bright Emerald
+    // Connected (live standby) -> Azure Ocean / Cyan
+    // Idle -> Composed Slate Glass
+    final orbColors = widget.isConnecting
         ? [
-            const Color(0xFFFFB703),
-            const Color(0xFFFB8500),
-            const Color(0xFFD90429)
+            const Color(0xFF4CC9F0),
+            const Color(0xFF4361EE),
+            const Color(0xFF3F37C9),
           ]
-        : widget.isConnected
+        : widget.isSpeaking
             ? [
-                const Color(0xFF00F5D4),
-                const Color(0xFF00B4D8),
-                const Color(0xFF4361EE)
+                const Color(0xFFFFB703),
+                const Color(0xFFFB8500),
+                const Color(0xFFD90429),
               ]
-            : widget.isListening
+            : widget.isThinking
                 ? [
-                    const Color(0xFF06D6A0),
-                    const Color(0xFF118AB2),
-                    const Color(0xFF073B4C)
+                    const Color(0xFFC77DFF),
+                    const Color(0xFF9D4EDD),
+                    const Color(0xFF5A189A),
                   ]
-                : [
-                    const Color(0xFF6C757D),
-                    const Color(0xFF495057),
-                    const Color(0xFF212529)
-                  ];
+                : widget.isListening
+                    ? [
+                        const Color(0xFF00F5D4),
+                        const Color(0xFF06D6A0),
+                        const Color(0xFF118AB2),
+                      ]
+                    : widget.isConnected
+                        ? [
+                            const Color(0xFF00B4D8),
+                            const Color(0xFF0077B6),
+                            const Color(0xFF4361EE),
+                          ]
+                        : [
+                            const Color(0xFF6C757D),
+                            const Color(0xFF495057),
+                            const Color(0xFF212529),
+                          ];
 
-    final glowColor = widget.isSpeaking
-        ? const Color(0xFFFFB703)
-        : widget.isConnected
-            ? const Color(0xFF00F5D4)
-            : widget.isListening
-                ? const Color(0xFF06D6A0)
-                : Colors.white24;
+    final glowColor = widget.isConnecting
+        ? const Color(0xFF4895EF)
+        : widget.isSpeaking
+            ? const Color(0xFFFFB703)
+            : widget.isThinking
+                ? const Color(0xFFC77DFF)
+                : widget.isListening
+                    ? const Color(0xFF00F5D4)
+                    : widget.isConnected
+                        ? const Color(0xFF00B4D8)
+                        : Colors.white24;
 
-    const orbSize = 150.0;
+    final orbSize = widget.size;
+    final containerSize = orbSize + 90.0;
 
     return Center(
       child: SizedBox(
-        width: 250,
-        height: 250,
+        width: containerSize,
+        height: containerSize,
         child: Stack(
           alignment: Alignment.center,
           children: [
             // Outward expanding ripple waves when active
             if (active) ...[
-              _buildRippleRing(0.0, glowColor),
-              _buildRippleRing(0.33, glowColor),
-              _buildRippleRing(0.66, glowColor),
+              _buildRippleRing(0.0, glowColor, orbSize),
+              _buildRippleRing(0.33, glowColor, orbSize),
+              _buildRippleRing(0.66, glowColor, orbSize),
             ],
 
             // Ambient background glow halo
@@ -164,7 +195,9 @@ class _AnimatedGlassOrbState extends State<AnimatedGlassOrb>
                       borderRadius: BorderRadius.circular(orbSize / 2),
                       child: BackdropFilter(
                         filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-                        child: Container(
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 350),
+                          curve: Curves.easeInOut,
                           width: orbSize,
                           height: orbSize,
                           decoration: BoxDecoration(
@@ -179,7 +212,7 @@ class _AnimatedGlassOrbState extends State<AnimatedGlassOrb>
                                     .map((c) => c.withValues(alpha: 0.7)),
                                 const Color(0xFF0A0C12).withValues(alpha: 0.85),
                               ],
-                              stops: const [0.0, 0.25, 0.65, 1.0],
+                              stops: const [0.0, 0.2, 0.5, 0.8, 1.0],
                             ),
                             border: Border.all(
                               color: Colors.white.withValues(alpha: 0.35),
@@ -206,9 +239,9 @@ class _AnimatedGlassOrbState extends State<AnimatedGlassOrb>
                                     child: Align(
                                       alignment: Alignment.topRight,
                                       child: Container(
-                                        width: 44,
-                                        height: 44,
-                                        margin: const EdgeInsets.all(16),
+                                        width: orbSize * 0.3,
+                                        height: orbSize * 0.3,
+                                        margin: EdgeInsets.all(orbSize * 0.1),
                                         decoration: BoxDecoration(
                                           shape: BoxShape.circle,
                                           gradient: RadialGradient(
@@ -228,13 +261,59 @@ class _AnimatedGlassOrbState extends State<AnimatedGlassOrb>
 
                               // Central status icon or spinner
                               if (widget.isConnecting)
-                                const SizedBox(
-                                  width: 44,
-                                  height: 44,
-                                  child: CircularProgressIndicator(
+                                SizedBox(
+                                  width: orbSize * 0.28,
+                                  height: orbSize * 0.28,
+                                  child: const CircularProgressIndicator(
                                     color: Colors.white,
-                                    strokeWidth: 3.2,
+                                    strokeWidth: 3.0,
                                   ),
+                                )
+                              else if (widget.isThinking)
+                                Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.auto_awesome,
+                                      size: orbSize * 0.26,
+                                      color: Colors.white,
+                                      shadows: [
+                                        Shadow(
+                                          color: glowColor,
+                                          blurRadius: 16,
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 4),
+                                    AnimatedVoiceVisualizer(
+                                      isActive: true,
+                                      color: glowColor,
+                                      height: 12,
+                                    ),
+                                  ],
+                                )
+                              else if (widget.isSpeaking)
+                                Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.volume_up_rounded,
+                                      size: orbSize * 0.28,
+                                      color: Colors.white,
+                                      shadows: [
+                                        Shadow(
+                                          color: glowColor,
+                                          blurRadius: 16,
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 4),
+                                    AnimatedVoiceVisualizer(
+                                      isActive: true,
+                                      color: glowColor,
+                                      height: 14,
+                                    ),
+                                  ],
                                 )
                               else
                                 Column(
@@ -244,7 +323,7 @@ class _AnimatedGlassOrbState extends State<AnimatedGlassOrb>
                                       active
                                           ? Icons.graphic_eq
                                           : Icons.mic_none,
-                                      size: 42,
+                                      size: orbSize * 0.28,
                                       color: Colors.white,
                                       shadows: [
                                         Shadow(
@@ -254,11 +333,11 @@ class _AnimatedGlassOrbState extends State<AnimatedGlassOrb>
                                       ],
                                     ),
                                     if (active) ...[
-                                      const SizedBox(height: 6),
+                                      const SizedBox(height: 4),
                                       AnimatedVoiceVisualizer(
                                         isActive: active,
                                         color: glowColor,
-                                        height: 14,
+                                        height: 12,
                                       ),
                                     ],
                                   ],
@@ -278,12 +357,12 @@ class _AnimatedGlassOrbState extends State<AnimatedGlassOrb>
     );
   }
 
-  Widget _buildRippleRing(double delay, Color color) {
+  Widget _buildRippleRing(double delay, Color color, double baseSize) {
     return AnimatedBuilder(
       animation: _rippleController,
       builder: (context, _) {
         final progress = (_rippleController.value + delay) % 1.0;
-        final size = 150.0 + (progress * 90.0);
+        final size = baseSize + (progress * 70.0);
         final opacity = (1.0 - progress).clamp(0.0, 1.0) * 0.45;
 
         return Container(

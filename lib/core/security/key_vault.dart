@@ -190,16 +190,17 @@ class KeyVault {
     await _storage.write(key: _authModeKey, value: mode.trim());
   }
 
-  /// Retrieves authentication mode (defaults to 'api_key')
+  /// Retrieves authentication mode (defaults to 'adc')
   Future<String> getAuthMode() async {
     final val = await _storage.read(key: _authModeKey);
-    if (val != null && val.isNotEmpty && val != 'adc') return val;
-    return 'api_key';
+    if (val != null && val.isNotEmpty) return val;
+    return 'adc';
   }
 
   /// Checks if assistant is configured to use Google Cloud Application Default Credentials (ADC)
   Future<bool> isUsingAdc() async {
-    return false;
+    final mode = await getAuthMode();
+    return mode == 'adc';
   }
 
   /// Saves the Nebius Token Factory API Key
@@ -328,6 +329,8 @@ class KeyVault {
     final provider = await getActiveProvider();
     final nebius = await getNebiusApiKey();
     final gemini = await getGeminiApiKey();
+    final adc = await getAdcCredentialsJson();
+    final isAdc = await isUsingAdc();
 
     if (provider == 'role_based') {
       // Role-based: Nebius Token Factory powers everything else, so Nebius is required
@@ -335,11 +338,12 @@ class KeyVault {
     } else if (provider == 'nebius') {
       return nebius != null && nebius.isNotEmpty;
     } else if (provider == 'google') {
-      return gemini != null && gemini.isNotEmpty;
+      return (gemini != null && gemini.isNotEmpty) || (isAdc && adc != null);
     } else {
       // 'auto' mode: valid if either provider has keys configured
       return (nebius != null && nebius.isNotEmpty) ||
-          (gemini != null && gemini.isNotEmpty);
+          (gemini != null && gemini.isNotEmpty) ||
+          (isAdc && adc != null);
     }
   }
 

@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import '../../../core/database/local_database.dart';
 import '../../../core/network/discovery_service.dart';
+import '../../../core/network/gcp_adc_auth_service.dart';
 import '../../../core/network/gemini_live_client.dart';
 import '../../../core/network/nebius_client.dart';
 import '../../../core/network/pc_bridge_client.dart';
@@ -29,7 +30,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _gcpProjectIdCtrl = TextEditingController();
   final _gcpLocationCtrl = TextEditingController();
   final _adcJsonCtrl = TextEditingController();
-  String _authMode = 'api_key';
+  String _authMode = 'adc';
+  bool _hasDetectedAdc = false;
+  String _detectedAdcProject = '';
   final _nebiusCtrl = TextEditingController();
   final _nebiusSuperEndpointCtrl = TextEditingController();
   final _nebiusSuperModelCtrl = TextEditingController();
@@ -77,6 +80,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _adcJsonCtrl.text = (await widget.keyVault.getAdcCredentialsJson()) ?? '';
     _authMode = await widget.keyVault.getAuthMode();
     _activeProvider = await widget.keyVault.getActiveProvider();
+
+    final adcService = GcpAdcAuthService(keyVault: widget.keyVault);
+    _hasDetectedAdc = await adcService.hasAdcCredentials();
+    _detectedAdcProject = (await adcService.getProjectId()) ?? '';
+    if (_gcpProjectIdCtrl.text.isEmpty && _detectedAdcProject.isNotEmpty) {
+      _gcpProjectIdCtrl.text = _detectedAdcProject;
+    }
 
     _nebiusCtrl.text = (await widget.keyVault.getNebiusApiKey()) ?? '';
     _nebiusSuperEndpointCtrl.text =
@@ -251,24 +261,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
 
     try {
+      final adcService = GcpAdcAuthService(keyVault: widget.keyVault);
+      final hasAdc = await adcService.hasAdcCredentials();
+
+      if (_authMode == 'adc' && !hasAdc) {
+        setState(() {
+          _geminiTestResult = {
+            'success': false,
+            'error':
+                'No Google Cloud ADC credentials found. On desktop, run `gcloud auth application-default login`. On Android, import your ADC/Service Account JSON below.',
+          };
+        });
+        return;
+      }
+
       final key = _geminiCtrl.text.trim();
       final endpoint = _geminiEndpointCtrl.text.trim();
       final model = _geminiModelCtrl.text.trim();
       final projectId = _gcpProjectIdCtrl.text.trim();
       final location = _gcpLocationCtrl.text.trim();
 
-      if (key.isEmpty) {
+      if (_authMode == 'api_key' && key.isEmpty) {
         setState(() {
           _geminiTestResult = {
             'success': false,
-            'error': 'Gemini API Key required. Please enter an API key.',
+            'error':
+                'Gemini API Key required when in API Key authentication mode.',
           };
         });
         return;
       }
 
       final client = GeminiLiveClient(
-        apiKey: key,
+        apiKey: _authMode == 'api_key' ? key : null,
+        accessTokenProvider:
+            _authMode == 'adc' ? () => adcService.getAccessToken() : null,
         projectId: projectId.isNotEmpty ? projectId : null,
         location: location.isNotEmpty ? location : 'us-central1',
         host: endpoint.isNotEmpty ? endpoint : null,
@@ -596,7 +623,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                       ChoiceChip(
                         avatar: const Icon(Icons.auto_awesome, size: 16),
-                        label: const Text('Google Gemini (Gemini 3.8 Flash)',
+                        label: const Text('Google Cloud ADC (Gemini 3.8 Flash)',
                             style: TextStyle(fontSize: 12)),
                         selected: _activeProvider == 'google',
                         onSelected: (val) {
@@ -617,11 +644,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const SizedBox(height: 8),
                   Text(
                     _activeProvider == 'role_based'
-                        ? 'Google Gemini (Gemini 3.8 Flash) is used exclusively for Computer Use (screen clicks, GUI automation, and OS actions). Everything else (conversations, "what is on my screen" visual inspection via Nemotron-3.5-Super-VL, task planning, sub-agents, and memories) is powered by Nebius Token Factory.'
+                        ? 'Google Cloud ADC / Gemini (Gemini 3.8 Flash) is used exclusively for Computer Use (screen clicks, GUI automation, and OS actions). Everything else (conversations, "what is on my screen" visual inspection via Nemotron-3.5-Super-VL, task planning, sub-agents, and memories) is powered by Nebius Token Factory.'
                         : (_activeProvider == 'nebius'
                             ? 'Nebius Token Factory operates 100% independently for all tasks using NVIDIA Nemotron models (Nemotron-3.5-Super-VL for vision/planning & Nano 30B for chat/memory).'
                             : (_activeProvider == 'google'
-                                ? 'Google Cloud inference powered by Gemini 3.8 Flash using API Key.'
+                                ? 'Google Cloud inference powered by Gemini 3.8 Flash using Application Default Credentials (ADC) or API Key.'
                                 : 'Auto-routes tasks between configured providers based on availability and task complexity.')),
                     style: TextStyle(fontSize: 11, color: Colors.grey.shade400),
                   ),
@@ -944,12 +971,153 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  _buildSecureField(
-                    controller: _geminiCtrl,
-                    label: 'Google Cloud / Gemini API Key',
-                    hint: 'AIzaSy...',
-                    icon: Icons.key,
+                  Row(
+                    children: [
+                      const Text(
+                        'Auth Mode:',
+                        style: TextStyle(
+                            fontSize: 12, fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(width: 8),
+                      ChoiceChip(
+                        avatar: const Icon(Icons.security, size: 14),
+                        label: const Text('Google Cloud ADC',
+                            style: TextStyle(fontSize: 12)),
+                        selected: _authMode == 'adc',
+                        onSelected: (val) {
+                          if (val) setState(() => _authMode = 'adc');
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                      ChoiceChip(
+                        avatar: const Icon(Icons.key, size: 14),
+                        label: const Text('API Key',
+                            style: TextStyle(fontSize: 12)),
+                        selected: _authMode == 'api_key',
+                        onSelected: (val) {
+                          if (val) setState(() => _authMode = 'api_key');
+                        },
+                      ),
+                    ],
                   ),
+                  const SizedBox(height: 12),
+                  if (_authMode == 'adc') ...[
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: _hasDetectedAdc
+                            ? Colors.green.withValues(alpha: 0.15)
+                            : Colors.amber.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: _hasDetectedAdc
+                              ? Colors.green.withValues(alpha: 0.4)
+                              : Colors.amber.withValues(alpha: 0.4),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            _hasDetectedAdc
+                                ? Icons.check_circle
+                                : Icons.warning_amber,
+                            color: _hasDetectedAdc
+                                ? Colors.greenAccent
+                                : Colors.amberAccent,
+                            size: 16,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _hasDetectedAdc
+                                  ? 'Application Default Credentials detected on system${_detectedAdcProject.isNotEmpty ? ' (Project: $_detectedAdcProject)' : ''}.'
+                                  : 'No local ADC detected. Run `gcloud auth application-default login` on desktop, or paste credentials JSON below.',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: _hasDetectedAdc
+                                    ? Colors.greenAccent
+                                    : Colors.amberAccent,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _gcpProjectIdCtrl,
+                      decoration: InputDecoration(
+                        labelText: 'Google Cloud Project ID',
+                        hintText: 'e.g. my-project-12345',
+                        prefixIcon: const Icon(Icons.business),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                        isDense: true,
+                        helperText:
+                            'Auto-detected from Application Default Credentials',
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _gcpLocationCtrl,
+                      decoration: InputDecoration(
+                        labelText: 'GCP Region / Location',
+                        hintText: 'us-central1',
+                        prefixIcon: const Icon(Icons.place),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                        isDense: true,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _adcJsonCtrl,
+                      maxLines: 2,
+                      decoration: InputDecoration(
+                        labelText: 'ADC / Service Account JSON (Optional)',
+                        hintText:
+                            'Paste credentials JSON for Android / custom service account...',
+                        prefixIcon: const Icon(Icons.code),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                        isDense: true,
+                        helperText:
+                            'On desktop, standard gcloud ADC (~/.config/gcloud/...) is used automatically.',
+                      ),
+                    ),
+                  ] else ...[
+                    _buildSecureField(
+                      controller: _geminiCtrl,
+                      label: 'Google Cloud / Gemini API Key',
+                      hint: 'AIzaSy...',
+                      icon: Icons.key,
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _gcpProjectIdCtrl,
+                      decoration: InputDecoration(
+                        labelText: 'Google Cloud Project ID (Optional)',
+                        hintText: 'tafiti-ai-508523',
+                        prefixIcon: const Icon(Icons.business),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                        isDense: true,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: _gcpLocationCtrl,
+                      decoration: InputDecoration(
+                        labelText: 'GCP Region / Location (Optional)',
+                        hintText: 'us-central1',
+                        prefixIcon: const Icon(Icons.place),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                        isDense: true,
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 10),
                   TextField(
                     controller: _geminiModelCtrl,
@@ -969,30 +1137,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       labelText: 'Serverless Endpoint / Host',
                       hintText: 'generativelanguage.googleapis.com',
                       prefixIcon: const Icon(Icons.cloud),
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10)),
-                      isDense: true,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _gcpProjectIdCtrl,
-                    decoration: InputDecoration(
-                      labelText: 'Google Cloud Project ID (Optional)',
-                      hintText: 'tafiti-ai-508523',
-                      prefixIcon: const Icon(Icons.business),
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10)),
-                      isDense: true,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: _gcpLocationCtrl,
-                    decoration: InputDecoration(
-                      labelText: 'GCP Region / Location (Optional)',
-                      hintText: 'us-central1',
-                      prefixIcon: const Icon(Icons.place),
                       border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(10)),
                       isDense: true,
@@ -1023,7 +1167,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         label: Text(
                           _isTestingGemini
                               ? 'Testing Gemini...'
-                              : 'Test Gemini 3.8 Flash',
+                              : _authMode == 'adc'
+                                  ? 'Test Gemini 3.8 Flash (ADC)'
+                                  : 'Test Gemini 3.8 Flash (API Key)',
                           style: const TextStyle(fontSize: 12),
                         ),
                       ),
