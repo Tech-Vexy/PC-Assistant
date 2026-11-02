@@ -10,7 +10,6 @@ import '../../../core/database/local_database.dart';
 import '../../../core/memory/memory_extractor.dart';
 import '../../../core/memory/memory_recall.dart';
 import '../../../core/memory/memory_vector.dart';
-import '../../../core/network/gcp_adc_auth_service.dart';
 import '../../../core/network/gemini_live_client.dart';
 import '../../../core/network/dartantic_firebase_agent.dart';
 import '../../../core/network/nebius_client.dart';
@@ -64,6 +63,7 @@ class _HomeScreenState extends State<HomeScreen>
   bool _isConnecting = false;
   bool _isConnected = false;
   bool _isLocalSttActive = false;
+  bool _isWaitingForMicPermission = false;
   String? _activePackage;
   bool _isAccessibilityEnabled = false;
   bool _isBatteryOptimizationIgnored = true;
@@ -218,30 +218,7 @@ class _HomeScreenState extends State<HomeScreen>
         }
       });
 
-      // On-Device Hotword Detection — configured and auto-armed in background
-      // so the wake word or background triggers work without moving app to foreground.
-      final hotwordEnabled = await widget.keyVault.isHotwordEnabled();
-      if (hotwordEnabled) {
-        final hasMic = await _androidBridge!.isMicrophonePermissionGranted();
-        if (!hasMic) {
-          await _androidBridge!.requestMicrophonePermission();
-        } else {
-          final customPhrase = await widget.keyVault.getCustomHotword();
-          await _androidBridge!.startHotwordListening(
-            hotwords: [
-              customPhrase,
-              'hey zen',
-              'zen',
-              'ok zen',
-              'hey assistant',
-              'ok assistant',
-              'device assistant',
-              'jarvis'
-            ],
-          );
-        }
-      }
-
+      // Microphone stays dormant on app launch. Voice only activates on explicit user touch (orb tap).
       // Initialize telephony service
       await _androidBridge!.initializeTelephony();
       _hotwordSub?.cancel();
@@ -252,10 +229,11 @@ class _HomeScreenState extends State<HomeScreen>
       _micPermSub =
           _androidBridge!.microphonePermissionStream.listen((granted) {
         if (granted && mounted) {
-          // Only resume if user is already in an active STT session
-          // (e.g. they started listening before permission was granted).
-          // Do NOT auto-arm on init — mic only activates on explicit touch.
-          if (_isLocalSttActive) {
+          // If the user tapped the orb and was waiting for mic permission, proceed to connect now.
+          if (_isWaitingForMicPermission) {
+            _isWaitingForMicPermission = false;
+            _toggleConnection();
+          } else if (_isLocalSttActive) {
             _androidBridge!.startHotwordListening(hotwords: ['*']);
           }
         }
@@ -357,13 +335,18 @@ class _HomeScreenState extends State<HomeScreen>
     }
 
     if (command.isNotEmpty) {
+      if (Platform.isAndroid && _androidBridge != null) {
+        _androidBridge!.stopHotwordListening();
+      }
+      if (mounted) {
+        setState(() => _isLocalSttActive = false);
+      }
       _processAssistantQuery(command);
       return;
     }
 
-    if (Platform.isAndroid && _androidBridge != null) {
+    if (Platform.isAndroid && _androidBridge != null && _isLocalSttActive) {
       _androidBridge!.startHotwordListening(hotwords: ['*']);
-      if (mounted) setState(() => _isLocalSttActive = true);
     }
   }
 
@@ -375,7 +358,6 @@ class _HomeScreenState extends State<HomeScreen>
     try {
       final geminiKey = await widget.keyVault.getGeminiApiKey();
       final nebiusKey = await widget.keyVault.getNebiusApiKey();
-      final authMode = await widget.keyVault.getAuthMode();
 
       if (_isConnected || _isLocalSttActive) {
         await _liveClient?.disconnect();
@@ -394,11 +376,16 @@ class _HomeScreenState extends State<HomeScreen>
         return;
       }
 
-      final hasGemini = (geminiKey != null && geminiKey.isNotEmpty) ||
-          authMode == 'api_key' ||
-          (authMode == 'adc' &&
-              await GcpAdcAuthService(keyVault: widget.keyVault)
-                  .hasAdcCredentials());
+      if (Platform.isAndroid && _androidBridge != null) {
+        final hasMic = await _androidBridge!.isMicrophonePermissionGranted();
+        if (!hasMic) {
+          _isWaitingForMicPermission = true;
+          await _androidBridge!.requestMicrophonePermission();
+          return;
+        }
+      }
+
+      final hasGemini = (geminiKey != null && geminiKey.isNotEmpty);
 
       if (hasGemini) {
         final projectId = await widget.keyVault.getGcpProjectId();
@@ -412,10 +399,6 @@ class _HomeScreenState extends State<HomeScreen>
 
         _liveClient = GeminiLiveClient(
           apiKey: geminiKey,
-          accessTokenProvider: authMode == 'adc'
-              ? () =>
-                  GcpAdcAuthService(keyVault: widget.keyVault).getAccessToken()
-              : null,
           projectId: projectId,
           location: location,
           host: geminiEndpoint,
@@ -645,7 +628,6 @@ Sensitive apps (banking, SIM toolkit, 2FA) are strictly guarded.
 
     final geminiKey = await widget.keyVault.getGeminiApiKey();
     final nebiusKey = await widget.keyVault.getNebiusApiKey();
-    final authMode = await widget.keyVault.getAuthMode();
 
     // While the Live session is running, keep text turns inside that session so
     // memory/plan/workflow tool calls flow through the same agent loop.
@@ -745,7 +727,14 @@ If the user query is a general knowledge question, conversational request, or ex
       }
 
       String response;
-      if (useNebius) {
+      final toolIntentResult = await _dartanticAgent?.sendPrompt(
+        prompt: clean,
+        systemPrompt: systemPrompt,
+      );
+
+      if (toolIntentResult != null && toolIntentResult.isNotEmpty) {
+        response = toolIntentResult;
+      } else if (useNebius) {
         final baseEndpoint = await widget.keyVault.getNebiusBaseEndpoint();
         final superVlEndpoint =
             await widget.keyVault.getNebiusSuperVlEndpoint();
@@ -770,23 +759,14 @@ If the user query is a general knowledge question, conversational request, or ex
           ],
           complexity: complexity,
         );
-      } else if (_dartanticAgent != null && _dartanticAgent!.isReady) {
-        // Use Dartantic + Firebase AI Logic Agent
-        response = await _dartanticAgent!.sendPrompt(
-          prompt: clean,
-          systemPrompt: systemPrompt,
-        );
-      } else {
+      } else if (geminiKey != null && geminiKey.isNotEmpty) {
         final geminiModel = await widget.keyVault.getGeminiModel();
         final geminiEndpoint = await widget.keyVault.getGeminiEndpoint();
         final projectId = await widget.keyVault.getGcpProjectId();
         final location = await widget.keyVault.getGcpLocation();
-        final adcService = GcpAdcAuthService(keyVault: widget.keyVault);
 
         _liveClient ??= GeminiLiveClient(
-          apiKey: authMode == 'api_key' ? geminiKey : null,
-          accessTokenProvider:
-              authMode == 'adc' ? () => adcService.getAccessToken() : null,
+          apiKey: geminiKey,
           projectId: projectId,
           location: location,
           host: geminiEndpoint,
@@ -797,6 +777,9 @@ If the user query is a general knowledge question, conversational request, or ex
           prompt: clean,
           systemInstruction: systemPrompt,
         );
+      } else {
+        response =
+            'Please configure a Gemini API key or Nebius API key in Settings.';
       }
 
       // Remove thinking message

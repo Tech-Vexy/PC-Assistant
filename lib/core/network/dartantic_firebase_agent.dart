@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import '../database/local_database.dart';
+import 'gemini_live_client.dart';
 import '../../features/tools/tool_dispatcher.dart';
 
 /// Adapter interface that abstracts either the Dartantic + Firebase AI Logic Agent
@@ -26,11 +27,13 @@ class DartanticFirebaseAgent implements GeminiAgentEngine {
   final LocalDatabase database;
   final String modelName;
   final bool useVertex;
+  final GeminiLiveClient? geminiClient;
   bool _isReady = false;
 
   DartanticFirebaseAgent({
     required this.dispatcher,
     required this.database,
+    this.geminiClient,
     this.modelName = 'gemini-2.5-flash',
     this.useVertex = false,
   });
@@ -64,12 +67,19 @@ class DartanticFirebaseAgent implements GeminiAgentEngine {
     // final agent = Agent(useVertex ? 'firebase-vertex:$modelName' : 'firebase-google:$modelName', tools: _buildTools());
     // return await agent.prompt(prompt);
 
-    // For now we delegate tool-aware execution cleanly:
+    // Delegate tool-aware execution cleanly:
     final toolResult = await _dispatchIfToolIntent(prompt);
     if (toolResult != null) {
       return toolResult;
     }
-    return 'Dartantic agent processed turn: "$prompt"';
+    if (geminiClient != null) {
+      return await geminiClient!.generateContent(
+        prompt: prompt,
+        systemInstruction: systemPrompt,
+        toolDeclarations: toolDeclarations,
+      );
+    }
+    return '';
   }
 
   Future<String?> _dispatchIfToolIntent(String prompt) async {

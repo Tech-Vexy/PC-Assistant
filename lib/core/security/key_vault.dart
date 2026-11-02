@@ -190,17 +190,16 @@ class KeyVault {
     await _storage.write(key: _authModeKey, value: mode.trim());
   }
 
-  /// Retrieves authentication mode (defaults to 'adc')
+  /// Retrieves authentication mode (defaults to 'api_key')
   Future<String> getAuthMode() async {
     final val = await _storage.read(key: _authModeKey);
-    if (val != null && val.isNotEmpty) return val;
-    return 'adc';
+    if (val != null && val.isNotEmpty && val != 'adc') return val;
+    return 'api_key';
   }
 
   /// Checks if assistant is configured to use Google Cloud Application Default Credentials (ADC)
   Future<bool> isUsingAdc() async {
-    final mode = await getAuthMode();
-    return mode == 'adc';
+    return false;
   }
 
   /// Saves the Nebius Token Factory API Key
@@ -329,8 +328,6 @@ class KeyVault {
     final provider = await getActiveProvider();
     final nebius = await getNebiusApiKey();
     final gemini = await getGeminiApiKey();
-    final adc = await getAdcCredentialsJson();
-    final isAdc = await isUsingAdc();
 
     if (provider == 'role_based') {
       // Role-based: Nebius Token Factory powers everything else, so Nebius is required
@@ -338,12 +335,11 @@ class KeyVault {
     } else if (provider == 'nebius') {
       return nebius != null && nebius.isNotEmpty;
     } else if (provider == 'google') {
-      return (gemini != null && gemini.isNotEmpty) || (isAdc && adc != null);
+      return gemini != null && gemini.isNotEmpty;
     } else {
       // 'auto' mode: valid if either provider has keys configured
       return (nebius != null && nebius.isNotEmpty) ||
-          (gemini != null && gemini.isNotEmpty) ||
-          (isAdc && adc != null);
+          (gemini != null && gemini.isNotEmpty);
     }
   }
 
@@ -353,10 +349,10 @@ class KeyVault {
         key: _hotwordEnabledKey, value: enabled ? 'true' : 'false');
   }
 
-  /// Retrieves whether continuous background hotword detection is enabled (default true)
+  /// Retrieves whether continuous background hotword detection is enabled (default false)
   Future<bool> isHotwordEnabled() async {
     final val = await _storage.read(key: _hotwordEnabledKey);
-    return val != 'false';
+    return val == 'true';
   }
 
   /// Saves the custom primary hotword wake phrase (e.g. "hey assistant")

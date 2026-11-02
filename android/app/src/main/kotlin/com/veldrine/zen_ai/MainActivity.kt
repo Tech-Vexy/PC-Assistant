@@ -1092,7 +1092,6 @@ class MainActivity : FlutterActivity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == 102 && grantResults.isNotEmpty() && grantResults[0] == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            hotwordDetector?.startListening()
             runOnUiThread {
                 methodChannel?.invokeMethod("onMicrophonePermissionGranted", null)
             }
